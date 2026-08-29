@@ -17,10 +17,20 @@ struct NotifableApp: App {
         }
     }()
 
+    @Environment(\.scenePhase) private var scenePhase
+
     var body: some Scene {
         WindowGroup {
             ContentView()
         }
         .modelContainer(sharedModelContainer) // Inyecta la BD a todas las vistas
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            if newPhase == .active {
+                if GmailAuthService.shared.isAuthenticated {
+                    GmailSyncService.shared.modelContext = sharedModelContainer.mainContext
+                    GmailSyncService.shared.syncEmails()
+                }
+            }
+        }
     }
 }

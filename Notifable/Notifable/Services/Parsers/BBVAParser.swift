@@ -1,0 +1,118 @@
+import Foundation
+
+struct BBVAParser: BankEmailParser {
+    
+    var senderEmails: [String] {
+        return ["procesos@bbva.com.pe"]
+    }
+    
+    func parse(cleanText: String) -> Expense? {
+        if let expense = parsePlinSent(cleanText) { return expense }
+        if let expense = parseBBVAStandard(cleanText) { return expense }
+        return nil
+    }
+    
+    private func parsePlinSent(_ cleanText: String) -> Expense? {
+        let plinPattern = "Plineaste\\s+(S/|\\$|PEN|USD)\\s*([0-9.,]+)\\s+a\\s+(.*?)\\s+(?:Detalles|Celular|Destino)"
+        guard let plinRegex = try? NSRegularExpression(pattern: plinPattern, options: []),
+              let match = plinRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)) else {
+            return nil
+        }
+        
+        var currency = "PEN"
+        var amount: Double = 0
+        var merchant = "Desconocido"
+        var expenseDate = Date()
+        
+        if let curRange = Range(match.range(at: 1), in: cleanText) {
+            let curStr = String(cleanText[curRange])
+            currency = (curStr == "$" || curStr == "USD") ? "USD" : "PEN"
+        }
+        if let amtRange = Range(match.range(at: 2), in: cleanText) {
+            let amtStr = String(cleanText[amtRange]).replacingOccurrences(of: ",", with: ".")
+            amount = Double(amtStr) ?? 0
+        }
+        if let merRange = Range(match.range(at: 3), in: cleanText) {
+            let extracted = String(cleanText[merRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+            merchant = "PLIN - \(extracted)"
+        }
+        
+        let plinDatePattern = "Fecha y hora:\\s*([0-9]{1,2}\\s+de\\s+[a-zA-Z]+,\\s*[0-9]{4}\\s+[0-9]{2}:[0-9]{2})"
+        if let dateRegex = try? NSRegularExpression(pattern: plinDatePattern, options: []),
+           let dateMatch = dateRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)) {
+            if let dateRange = Range(dateMatch.range(at: 1), in: cleanText) {
+                let dateStr = String(cleanText[dateRange])
+                let formatter = DateFormatter()
+                formatter.dateFormat = "dd 'de' MMMM, yyyy HH:mm"
+                formatter.locale = Locale(identifier: "es_PE")
+                if let parsed = formatter.date(from: dateStr.lowercased()) {
+                    expenseDate = parsed
+                }
+            }
+        }
+        
+        return Expense(amount: amount, merchant: merchant, date: expenseDate, category: "Sin Clasificar", currency: currency)
+    }
+    
+    private func parseBBVAStandard(_ cleanText: String) -> Expense? {
+        let merchantPattern = "Comercio:\\s*(.*?)(?=\\s+Monto:)"
+        guard let merchantRegex = try? NSRegularExpression(pattern: merchantPattern, options: []),
+              let match = merchantRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)) else {
+            return nil
+        }
+        
+        var merchant = "Desconocido"
+        if let range = Range(match.range(at: 1), in: cleanText) {
+            merchant = String(cleanText[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
+        var amount: Double = 0
+        let amountPattern = "Monto:\\s*([0-9.,]+)"
+        if let amountRegex = try? NSRegularExpression(pattern: amountPattern, options: []),
+           let amtMatch = amountRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)) {
+            if let range = Range(amtMatch.range(at: 1), in: cleanText) {
+                let amountStr = String(cleanText[range]).replacingOccurrences(of: ",", with: ".")
+                amount = Double(amountStr) ?? 0
+            }
+        }
+        
+        var currency = "PEN"
+        let currencyPattern = "Moneda:\\s*([A-Za-z]+)"
+        if let currencyRegex = try? NSRegularExpression(pattern: currencyPattern, options: []),
+           let curMatch = currencyRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)) {
+            if let range = Range(curMatch.range(at: 1), in: cleanText) {
+                currency = String(cleanText[range]).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            }
+        }
+        
+        var expenseDate = Date()
+        let datePattern = "Fecha:\\s*([0-9]{2}/[0-9]{2}/[0-9]{4})"
+        let timePattern = "Hora:\\s*([0-9]{2}:[0-9]{2}:[0-9]{2})"
+        var dateString = ""
+        var timeString = ""
+        
+        if let dateRegex = try? NSRegularExpression(pattern: datePattern, options: []),
+           let dMatch = dateRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)) {
+            if let range = Range(dMatch.range(at: 1), in: cleanText) {
+                dateString = String(cleanText[range])
+            }
+        }
+        if let timeRegex = try? NSRegularExpression(pattern: timePattern, options: []),
+           let tMatch = timeRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)) {
+            if let range = Range(tMatch.range(at: 1), in: cleanText) {
+                timeString = String(cleanText[range])
+            }
+        }
+        
+        if !dateString.isEmpty && !timeString.isEmpty {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "dd/MM/yyyy HH:mm:ss"
+            formatter.timeZone = TimeZone.current
+            if let parsedDate = formatter.date(from: "\(dateString) \(timeString)") {
+                expenseDate = parsedDate
+            }
+        }
+        
+        return Expense(amount: amount, merchant: merchant, date: expenseDate, category: "Sin Clasificar", currency: currency)
+    }
+}
