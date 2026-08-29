@@ -29,6 +29,7 @@ struct ContentView: View {
     @State private var selectedTab: AppTab = .home
     @State private var scrollOffset: CGFloat = 0
     @State private var showSettings = false
+    @AppStorage("isDarkMode") private var isDarkMode = true
     @State private var showAddExpense = false
     @State private var showSplash = true
     @State private var isPulsing = false
@@ -60,7 +61,7 @@ struct ContentView: View {
                     githubFloatingTabBar
                 }
             }
-            .background(Color.black.ignoresSafeArea()) // Fondo global negro
+            .background(Color(.systemBackground).ignoresSafeArea()) // Fondo global dinámico
             .ignoresSafeArea(.keyboard)
             .onReceive(syncTimer) { _ in
                 Task {
@@ -77,7 +78,7 @@ struct ContentView: View {
             // Splash Screen Overlay
             if showSplash {
                 ZStack {
-                    Color.black.ignoresSafeArea()
+                    Color(.systemBackground).ignoresSafeArea()
                     
                     VStack(spacing: 24) {
                         Image(systemName: "bell.badge.fill")
@@ -86,10 +87,10 @@ struct ContentView: View {
                             .scaleEffect(isPulsing ? 1.1 : 0.9)
                             .opacity(isPulsing ? 1.0 : 0.5)
                         
-                        Text("Notifable")
+                        Text("AgruPay")
                             .font(.largeTitle)
                             .fontWeight(.bold)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(isDarkMode ? .white : .black)
                             .opacity(isPulsing ? 1.0 : 0.5)
                     }
                 }
@@ -108,7 +109,7 @@ struct ContentView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark) // Forzar modo oscuro en toda la app
+        .preferredColorScheme(isDarkMode ? .dark : .light)
     }
     
     private var topHeader: some View {
@@ -118,12 +119,23 @@ struct ContentView: View {
                 .foregroundStyle(.purple)
             
             // Texto siempre visible
-            Text("Notifable")
+            Text("AgruPay")
                 .font(.title)
                 .fontWeight(.bold)
-                .foregroundStyle(.white)
+                .foregroundStyle(isDarkMode ? .white : .black)
             
             Spacer()
+            
+            Button {
+                withAnimation {
+                    isDarkMode.toggle()
+                }
+            } label: {
+                Image(systemName: isDarkMode ? "moon.fill" : "sun.max.fill")
+                    .font(.title2)
+                    .foregroundStyle(isDarkMode ? .yellow : .orange)
+            }
+            .padding(.trailing, 8)
             
             Button {
                 showSettings = true
@@ -136,7 +148,7 @@ struct ContentView: View {
         .padding(.horizontal, 24)
         .padding(.top, 16)
         .padding(.bottom, 24) // Más grueso
-        .background(Color.black) // Mismo color que el fondo, sólido
+        .background(Color(.systemBackground)) // Mismo color que el fondo, sólido
     }
     
     private var githubFloatingTabBar: some View {
@@ -156,7 +168,7 @@ struct ContentView: View {
                         Text(tab.title)
                             .font(.system(size: 11, weight: selectedTab == tab ? .semibold : .regular))
                     }
-                    .foregroundStyle(selectedTab == tab ? Color.white : Color.gray)
+                    .foregroundStyle(selectedTab == tab ? Color.primary : Color.gray)
                     .frame(maxWidth: .infinity)
                     .contentShape(Rectangle()) // Área clickeable completa
                 }
@@ -164,8 +176,7 @@ struct ContentView: View {
             .padding(.vertical, 8)
             .padding(.horizontal, 8)
             .background(.regularMaterial, in: Capsule()) // Correct way to apply material to a shape
-            .environment(\.colorScheme, .dark) // Force dark material
-            .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1))
+            .overlay(Capsule().stroke(Color.primary.opacity(0.15), lineWidth: 1))
             .background(
                 GeometryReader { geo in
                     Color.clear.onAppear { tabWidth = geo.size.width / 3 }
@@ -192,22 +203,21 @@ struct ContentView: View {
             Button(action: { showAddExpense = true }) {
                 Image(systemName: "plus")
                     .font(.title2.bold())
-                    .foregroundStyle(.white)
+                    .foregroundStyle(isDarkMode ? .white : .black)
                     .frame(height: 56)
                     .frame(maxWidth: .infinity)
             }
             .frame(width: 70) 
             .background(
                 Capsule()
-                    .fill(Color.purple.opacity(0.3)) // Tinte sutil morado
+                    .fill(Color.purple.opacity(isDarkMode ? 0.3 : 0.8)) // Morado más intenso en claro
             )
             .background(.regularMaterial, in: Capsule())
-            .environment(\.colorScheme, .dark)
-            .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1))
+            .overlay(Capsule().stroke(Color.primary.opacity(0.15), lineWidth: 1))
         }
         .padding(.horizontal, 24)
         .padding(.bottom, -15) // Empujarlo más abajo del límite del SafeArea
-        .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 5)
+        .shadow(color: Color.primary.opacity(0.2), radius: 10, x: 0, y: 5)
     }
 }
 

@@ -6,8 +6,8 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Query private var expenses: [Expense]
     
-    @State private var showDeleteConfirmation = false
-    @State private var showFinalWarning = false
+    @State private var showDeleteClassificationsConfirmation = false
+    @State private var showDeleteExpensesConfirmation = false
     
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("syncBBVA") private var syncBBVA = true
@@ -47,11 +47,17 @@ struct SettingsView: View {
                     }
                 }
                 
-                Section(header: Text("Gestión de Datos"), footer: Text("Esta acción es irreversible y borrará todos los gastos registrados localmente.")) {
+                Section(header: Text("Gestión de Datos"), footer: Text("Estas acciones son irreversibles y afectarán tu base de datos local.")) {
                     Button(role: .destructive, action: {
-                        showDeleteConfirmation = true
+                        showDeleteClassificationsConfirmation = true
                     }) {
-                        Label("Borrar todos los datos", systemImage: "trash.fill")
+                        Label("Borrar configuraciones", systemImage: "tag.slash.fill")
+                    }
+                    
+                    Button(role: .destructive, action: {
+                        showDeleteExpensesConfirmation = true
+                    }) {
+                        Label("Borrar datos de gastos", systemImage: "trash.fill")
                     }
                 }
                 
@@ -77,28 +83,17 @@ struct SettingsView: View {
                 }
             }
             .preferredColorScheme(.dark)
-            .confirmationDialog(
-                "¿Estás seguro?",
-                isPresented: $showDeleteConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Sí, quiero borrarlos", role: .destructive) {
-                    // Muestra el disclaimer adicional
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        showFinalWarning = true
-                    }
-                }
+            .alert("Borrar Reglas", isPresented: $showDeleteClassificationsConfirmation) {
+                Button("Borrar Categorías", role: .destructive) { deleteClassifications() }
                 Button("Cancelar", role: .cancel) {}
             } message: {
-                Text("Esta acción eliminará todos tus gastos de prueba de SwiftData.")
+                Text("Se eliminarán tus configuraciones de comercios, pero los gastos se mantendrán como 'Sin Clasificar'.")
             }
-            .alert("⚠️ ADVERTENCIA FINAL", isPresented: $showFinalWarning) {
-                Button("Eliminar Todo", role: .destructive) {
-                    deleteAllData()
-                }
+            .alert("Borrar Gastos", isPresented: $showDeleteExpensesConfirmation) {
+                Button("Borrar Gastos", role: .destructive) { deleteExpenses() }
                 Button("Cancelar", role: .cancel) {}
             } message: {
-                Text("Estás a punto de borrar absolutamente toda la base de datos local y el historial de correos de la caché. No hay vuelta atrás. ¿Continuar?")
+                Text("Se eliminarán los gastos importados y la caché, pudiendo volver a descargarlos. Tus reglas de categorías se mantendrán.")
             }
         }
     }
@@ -109,13 +104,46 @@ struct SettingsView: View {
         Form {
             Section(header: Text("Conexión con el Banco")) {
                 if gmailAuth.isAuthenticated {
-                    Button(action: {
-                        gmailSync.modelContext = modelContext
-                        gmailSync.syncEmails()
-                    }) {
-                        Label(gmailSync.isSyncing ? "Buscando nuevos gastos..." : "Sincronizar Correos", systemImage: "envelope.arrow.triangle.branch")
+                    if gmailSync.isSyncing {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Buscando nuevos gastos...")
+                                .font(.headline)
+                            
+                            ProgressView(value: Double(gmailSync.emailsProcessed), total: Double(max(1, gmailSync.totalEmailsToProcess)))
+                                .progressViewStyle(LinearProgressViewStyle())
+                                .animation(.easeInOut, value: gmailSync.emailsProcessed)
+                            
+                            Text("\(gmailSync.emailsProcessed) de \(gmailSync.totalEmailsToProcess) correos procesados")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            
+                            if !gmailSync.expensesFoundByBank.isEmpty {
+                                Divider()
+                                Text("Gastos identificados:")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                
+                                ForEach(Array(gmailSync.expensesFoundByBank.keys.sorted()), id: \.self) { bank in
+                                    HStack {
+                                        Text(bank)
+                                        Spacer()
+                                        Text("\(gmailSync.expensesFoundByBank[bank] ?? 0)")
+                                            .fontWeight(.bold)
+                                    }
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 8)
+                    } else {
+                        Button(action: {
+                            gmailSync.modelContext = modelContext
+                            gmailSync.syncEmails(force: true)
+                        }) {
+                            Label("Sincronizar Correos", systemImage: "envelope.arrow.triangle.branch")
+                        }
                     }
-                    .disabled(gmailSync.isSyncing)
                     
                     Button(role: .destructive, action: {
                         gmailAuth.signOut()
@@ -160,23 +188,65 @@ struct SettingsView: View {
                 Toggle("Feed en vivo de amigos", isOn: $cloudSocialFeed)
                     .tint(.blue)
             }
+            Section(header: Text("Debug")) {
+                Button(action: {
+                    gmailSync.diagnosticYape()
+                }) {
+                    Label("Diagnóstico Yape", systemImage: "ladybug.fill")
+                        .foregroundColor(.orange)
+                }
+            }
         }
         .navigationTitle("Configuración Online")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $gmailSync.showDiagnostic) {
+            NavigationStack {
+                ScrollView {
+                    Text(gmailSync.diagnosticResult)
+                        .padding()
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                }
+                .navigationTitle("Diagnóstico")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Cerrar") {
+                            gmailSync.showDiagnostic = false
+                        }
+                    }
+                }
+            }
+        }
     }
     
     // MARK: - Lógica
     
-    private func deleteAllData() {
+    private func deleteClassifications() {
+        UserDefaults.standard.removeObject(forKey: "merchantCategories")
+        do {
+            let descriptor = FetchDescriptor<Expense>()
+            let expenses = try modelContext.fetch(descriptor)
+            for expense in expenses {
+                expense.category = "Sin Clasificar"
+            }
+            try modelContext.save()
+        } catch {
+            print("Error resetting classifications: \(error)")
+        }
+    }
+    
+    private func deleteExpenses() {
+        gmailSync.resetSyncState()
         do {
             try modelContext.delete(model: Expense.self)
             try modelContext.save()
-            // Reset the sync state so the user can re-sync emails
-            gmailSync.resetSyncState()
         } catch {
             print("Error al borrar los datos: \(error)")
         }
     }
+    
+
 }
 
 #Preview {

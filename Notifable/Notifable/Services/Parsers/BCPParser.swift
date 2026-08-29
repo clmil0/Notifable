@@ -2,6 +2,10 @@ import Foundation
 
 struct BCPParser: BankEmailParser {
     
+    var bankName: String {
+        return "BCP"
+    }
+    
     var senderEmails: [String] {
         return [] // Add sender emails for BCP here when known
     }

@@ -2,6 +2,10 @@ import Foundation
 
 struct BBVAParser: BankEmailParser {
     
+    var bankName: String {
+        return "BBVA"
+    }
+    
     var senderEmails: [String] {
         return ["procesos@bbva.com.pe"]
     }

@@ -13,7 +13,9 @@ struct MerchantWrapper: Identifiable {
 
 struct CategoriesView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var expenses: [Expense]
+    @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
+    @Environment(\.colorScheme) var colorScheme
+    
     @Binding var scrollOffset: CGFloat
     
     @StateObject private var exchangeRateService = ExchangeRateService.shared
@@ -112,9 +114,10 @@ struct CategoriesView: View {
     
     var body: some View {
         ZStack {
-            TrackableScrollView(scrollOffset: $scrollOffset) {
-                VStack(spacing: 24) {
-                    // 1. Filtros de Tiempo
+            ScrollViewReader { proxy in
+                TrackableScrollView(scrollOffset: $scrollOffset) {
+                    VStack(spacing: 24) {
+                        // 1. Filtros de Tiempo
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(DashboardFilter.allCases, id: \.self) { filter in
@@ -129,18 +132,19 @@ struct CategoriesView: View {
                                     Text(filter.rawValue)
                                         .font(.subheadline)
                                         .fontWeight(selectedFilter == filter ? .semibold : .regular)
-                                        .foregroundStyle(selectedFilter == filter ? .white : .gray)
+                                        .foregroundStyle(selectedFilter == filter ? .white : (colorScheme == .dark ? .white : .black))
                                         .padding(.horizontal, 20)
                                         .padding(.vertical, 10)
                                         .background(
                                             Capsule()
-                                                .fill(selectedFilter == filter ? Color.purple.opacity(0.8) : Color.white.opacity(0.05))
+                                                .fill(selectedFilter == filter ? Color.purple.opacity(0.8) : Color.primary.opacity(0.05))
                                         )
                                 }
                             }
                         }
                         .padding(.horizontal)
                     }
+                    .id("TOP")
                     
                     // 2. Gráfico de Dona (sólo si estamos en Mis Categorías y hay datos)
                     if selectedTab == .misCategorias && !categoryTotals.isEmpty {
@@ -153,12 +157,19 @@ struct CategoriesView: View {
                             Button {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                     selectedTab = tab
+                                    
+                                    // Scroll up smoothly if changing tabs to avoid broken layouts
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                        withAnimation(.easeInOut(duration: 0.3)) {
+                                            proxy.scrollTo("TOP", anchor: .top)
+                                        }
+                                    }
                                 }
                             } label: {
                                 Text(tab.rawValue)
                                     .font(.subheadline)
                                     .fontWeight(selectedTab == tab ? .semibold : .regular)
-                                    .foregroundStyle(selectedTab == tab ? .white : .gray)
+                                    .foregroundStyle(selectedTab == tab ? .white : (colorScheme == .dark ? .white : .black))
                                     .frame(maxWidth: .infinity)
                                     .padding(.vertical, 12)
                                     .background(
@@ -174,7 +185,7 @@ struct CategoriesView: View {
                             }
                         }
                     }
-                    .background(Color.white.opacity(0.05))
+                    .background(Color.primary.opacity(0.05))
                     .clipShape(Capsule())
                     .padding(.horizontal)
                     .padding(.bottom, -12) // Reduce the 24 spacing to 12
@@ -185,6 +196,7 @@ struct CategoriesView: View {
                     } else {
                         inboxView
                     }
+                }
                 }
                 .padding(.bottom, 100)
             }
@@ -242,13 +254,14 @@ struct CategoriesView: View {
                 Text("S/\(item.combinedTotal, specifier: "%.0f")")
                     .font(.caption)
                     .fontWeight(.bold)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(colorScheme == .light ? .black : .white)
             }
         }
         .chartLegend(position: .bottom, alignment: .center, spacing: 32)
+        .foregroundStyle(.primary)
         .frame(height: 250)
         .padding()
-        .background(Color.white.opacity(0.05))
+        .background(Color.primary.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .padding(.horizontal)
     }
@@ -263,11 +276,12 @@ struct CategoriesView: View {
                         VStack(spacing: 0) {
                             HStack {
                                 ZStack {
+                                    let baseColor = iconColor(for: item.category)
                                     Circle()
-                                        .fill(iconColor(for: item.category).opacity(0.2))
+                                        .fill(colorScheme == .light ? baseColor : baseColor.opacity(0.2))
                                         .frame(width: 40, height: 40)
                                     Image(systemName: iconName(for: item.category))
-                                        .foregroundStyle(iconColor(for: item.category))
+                                        .foregroundStyle(colorScheme == .light ? .white : baseColor)
                                 }
                                 
                                 Text(item.category)
@@ -323,7 +337,7 @@ struct CategoriesView: View {
                             
                             if expandedCategories.contains(item.category) {
                                 VStack(spacing: 8) {
-                                    Divider().background(Color.white.opacity(0.1))
+                                    Divider().background(Color.primary.opacity(0.1))
                                     
                                     ForEach(item.merchants, id: \.merchant) { merchantItem in
                                         HStack {
@@ -356,7 +370,7 @@ struct CategoriesView: View {
                                 .padding(.bottom)
                             }
                         }
-                        .background(Color.white.opacity(0.05))
+                        .background(Color.primary.opacity(0.05))
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .padding(.horizontal)
                     }
@@ -377,12 +391,18 @@ struct CategoriesView: View {
                             HStack {
                                 ZStack {
                                     Circle()
-                                        .fill(group.merchant.hasPrefix("PLIN - ") ? Color.white : Color.gray.opacity(0.15))
+                                        .fill(group.merchant.hasPrefix("PLIN - ") || group.merchant.hasPrefix("YAPE - ") ? Color.primary.opacity(0.1) : Color.gray.opacity(0.15))
                                         .frame(width: 40, height: 40)
-                                        .shadow(color: group.merchant.hasPrefix("PLIN - ") ? Color.black.opacity(0.05) : .clear, radius: 2)
+                                        .shadow(color: group.merchant.hasPrefix("PLIN - ") || group.merchant.hasPrefix("YAPE - ") ? Color.primary.opacity(0.05) : .clear, radius: 2)
                                     
                                     if group.merchant.hasPrefix("PLIN - ") {
                                         Image("plin_icon")
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 26, height: 26)
+                                            .clipShape(Circle())
+                                    } else if group.merchant.hasPrefix("YAPE - ") {
+                                        Image("yape_icon")
                                             .resizable()
                                             .scaledToFill()
                                             .frame(width: 26, height: 26)
@@ -394,37 +414,41 @@ struct CategoriesView: View {
                                 }
                                 
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(group.merchant.replacingOccurrences(of: "PLIN - ", with: ""))
+                                    Text(group.merchant.replacingOccurrences(of: "PLIN - ", with: "").replacingOccurrences(of: "YAPE - ", with: ""))
                                         .font(.headline)
-                                    Text("\(group.expenses.count) transacciones")
+                                    Text("\(group.expenses.count) transac.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                                 
                                 Spacer()
                                 
-                                Text("S/ \(group.combinedTotal, specifier: "%.2f")")
-                                    .font(.subheadline).bold()
-                                    .padding(.trailing, 8)
-                                
-                                Button {
-                                    selectedMerchantToCategorize = MerchantWrapper(id: group.merchant)
-                                } label: {
-                                    Text("Asignar")
-                                        .font(.caption).bold()
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 6)
-                                        .background(Color.blue)
-                                        .foregroundStyle(.white)
-                                        .clipShape(Capsule())
+                                // Right Side Grouping
+                                VStack(alignment: .trailing, spacing: 8) {
+                                    HStack(spacing: 6) {
+                                        Text("S/ \(group.combinedTotal, specifier: "%.2f")")
+                                            .font(.subheadline).bold()
+                                        
+                                        Image(systemName: "chevron.down")
+                                            .rotationEffect(.degrees(expandedMerchants.contains(group.merchant) ? 180 : 0))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    
+                                    Button {
+                                        selectedMerchantToCategorize = MerchantWrapper(id: group.merchant)
+                                    } label: {
+                                        Text("Asignar")
+                                            .font(.caption).bold()
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                            .background(Color.blue)
+                                            .foregroundStyle(.white)
+                                            .clipShape(Capsule())
+                                    }
                                 }
-                                
-                                Image(systemName: "chevron.down")
-                                    .rotationEffect(.degrees(expandedMerchants.contains(group.merchant) ? 180 : 0))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.leading, 8)
                             }
-                            .padding()
+                            .padding(.vertical, 16)
+                            .padding(.horizontal, 10)
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 withAnimation(.spring) {
@@ -438,7 +462,7 @@ struct CategoriesView: View {
                             
                             if expandedMerchants.contains(group.merchant) {
                                 VStack(spacing: 8) {
-                                    Divider().background(Color.white.opacity(0.1))
+                                    Divider().background(Color.primary.opacity(0.1))
                                     
                                     ForEach(group.expenses) { expense in
                                         HStack {
@@ -463,7 +487,7 @@ struct CategoriesView: View {
                             }
                         }
                         .padding()
-                        .background(Color.white.opacity(0.05))
+                        .background(Color.primary.opacity(0.05))
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .padding(.horizontal)
                     }
@@ -483,6 +507,9 @@ struct CategoriesView: View {
         }
     }
     private func iconColor(for category: String) -> Color {
+        if category == "Sin Clasificar" {
+            return .purple
+        }
         switch category {
         case "Comida": return .orange
         case "Transporte": return .blue

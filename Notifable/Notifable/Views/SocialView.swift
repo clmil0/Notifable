@@ -130,7 +130,7 @@ struct SocialView: View {
                                     .fontWeight(.bold)
                             }
                             .padding()
-                            .background(Color.white.opacity(0.05))
+                            .background(Color.primary.opacity(0.05))
                             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                             .padding(.horizontal)
                         }

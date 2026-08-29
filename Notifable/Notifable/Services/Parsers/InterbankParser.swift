@@ -2,6 +2,10 @@ import Foundation
 
 struct InterbankParser: BankEmailParser {
     
+    var bankName: String {
+        return "Interbank"
+    }
+    
     var senderEmails: [String] {
         return [] // Add sender emails for Interbank here when known
     }
