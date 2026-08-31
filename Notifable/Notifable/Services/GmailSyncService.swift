@@ -107,7 +107,6 @@ class GmailSyncService: ObservableObject {
             let safeEpoch = Int(lastSync.timeIntervalSince1970) - 3600 // 1 hr margen
             query = "(\(query)) AND after:\(safeEpoch)"
         }
-        
         guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return }
         
         let urlString = "\(baseURL)/messages?q=\(encodedQuery)&maxResults=500"
@@ -183,6 +182,7 @@ class GmailSyncService: ObservableObject {
                             foundBankName = expenseData.bankName
                             DispatchQueue.main.sync {
                                 if let context = self?.modelContext {
+                                    expenseData.expense.emailID = id
                                     context.insert(expenseData.expense)
                                     try? context.save()
                                     newExpensesFound += 1
@@ -214,6 +214,76 @@ class GmailSyncService: ObservableObject {
                 self?.lastSyncDate = Date()
                 self?.isSyncing = false
                 print("Sync complete. Found \(newExpensesFound) new expenses.")
+            }
+        }
+    }
+    
+    func recoverExpenses(ids: [String]) {
+        guard let token = GmailAuthService.shared.getAccessToken() else { return }
+        
+        DispatchQueue.main.async {
+            self.isSyncing = true
+            self.lastSyncError = nil
+            self.totalEmailsToProcess = ids.count
+            self.emailsProcessed = 0
+            self.expensesFoundByBank = [:]
+        }
+        
+        var processedIDs = UserDefaults.standard.stringArray(forKey: "processedEmailIDs") ?? []
+        let queue = DispatchQueue(label: "com.notifable.syncQueue")
+        let group = DispatchGroup()
+        let semaphore = DispatchSemaphore(value: 5)
+        var newExpensesFound = 0
+        
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            for id in ids {
+                semaphore.wait()
+                group.enter()
+                self?.fetchMessageDetails(id: id, token: token) { body in
+                    defer {
+                        semaphore.signal()
+                        group.leave()
+                    }
+                    
+                    var foundBankName: String? = nil
+                    if let body = body {
+                        if let expenseData = self?.parseEmailBody(body) {
+                            foundBankName = expenseData.bankName
+                            DispatchQueue.main.sync {
+                                if let context = self?.modelContext {
+                                    expenseData.expense.emailID = id
+                                    context.insert(expenseData.expense)
+                                    try? context.save()
+                                    newExpensesFound += 1
+                                }
+                            }
+                        }
+                        
+                        queue.async {
+                            if !processedIDs.contains(id) {
+                                processedIDs.append(id)
+                            }
+                        }
+                    }
+                    
+                    DispatchQueue.main.async {
+                        self?.emailsProcessed += 1
+                        if let bankName = foundBankName {
+                            self?.expensesFoundByBank[bankName, default: 0] += 1
+                        }
+                    }
+                }
+            }
+            
+            group.wait()
+            DispatchQueue.main.async {
+                queue.sync {
+                    UserDefaults.standard.set(processedIDs, forKey: "processedEmailIDs")
+                    // Limpiamos la papelera
+                    UserDefaults.standard.removeObject(forKey: "pendingRecoveryIDs")
+                }
+                self?.isSyncing = false
+                print("Recovery complete. Restored \(newExpensesFound) expenses.")
             }
         }
     }

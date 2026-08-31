@@ -7,6 +7,7 @@ struct NotifableApp: App {
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Expense.self,
+            Income.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

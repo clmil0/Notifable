@@ -8,8 +8,10 @@ struct SettingsView: View {
     
     @State private var showDeleteClassificationsConfirmation = false
     @State private var showDeleteExpensesConfirmation = false
+    @State private var showRecoveryAlert = false
     
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
+    @AppStorage("syncFilters") private var syncFilters = true
     @AppStorage("syncBBVA") private var syncBBVA = true
     @AppStorage("syncBCP") private var syncBCP = true
     @AppStorage("syncYape") private var syncYape = true
@@ -27,6 +29,9 @@ struct SettingsView: View {
             Form {
                 Section(header: Text("Preferencias")) {
                     Toggle("Notificaciones de Presupuesto", isOn: $notificationsEnabled)
+                        .tint(.purple)
+                    
+                    Toggle("Sincronizar filtros entre pestañas", isOn: $syncFilters)
                         .tint(.purple)
                     
                     Button(action: {
@@ -59,6 +64,13 @@ struct SettingsView: View {
                     }) {
                         Label("Borrar datos de gastos", systemImage: "trash.fill")
                     }
+                    
+                    Button(action: {
+                        gmailSync.resetSyncState()
+                    }) {
+                        Label("Restaurar caché de sincronización", systemImage: "arrow.triangle.2.circlepath.doc.on.clipboard")
+                    }
+                    .foregroundStyle(.orange)
                 }
                 
                 Section(header: Text("Acerca de")) {
@@ -94,6 +106,19 @@ struct SettingsView: View {
                 Button("Cancelar", role: .cancel) {}
             } message: {
                 Text("Se eliminarán los gastos importados y la caché, pudiendo volver a descargarlos. Tus reglas de categorías se mantendrán.")
+            }
+            .alert("Recuperación de Gastos", isPresented: $showRecoveryAlert) {
+                Button("Sí, recuperar") {
+                    let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
+                    gmailSync.recoverExpenses(ids: recoveryIDs)
+                }
+                Button("No (Descartar)") {
+                    UserDefaults.standard.removeObject(forKey: "pendingRecoveryIDs")
+                    gmailSync.syncEmails(force: true)
+                }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Has borrado elementos anteriores. ¿Quieres recuperarlos antes de continuar con la sincronización normal?")
             }
         }
     }
@@ -139,7 +164,12 @@ struct SettingsView: View {
                     } else {
                         Button(action: {
                             gmailSync.modelContext = modelContext
-                            gmailSync.syncEmails(force: true)
+                            let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
+                            if !recoveryIDs.isEmpty {
+                                showRecoveryAlert = true
+                            } else {
+                                gmailSync.syncEmails(force: true)
+                            }
                         }) {
                             Label("Sincronizar Correos", systemImage: "envelope.arrow.triangle.branch")
                         }

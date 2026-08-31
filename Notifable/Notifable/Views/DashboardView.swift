@@ -7,18 +7,42 @@ enum DashboardFilter: String, CaseIterable {
     case semana = "Semana"
     case mes = "Mes"
     case rango = "Rango"
+    case todo = "Todo"
+}
+
+enum TransactionItem: Identifiable {
+    case expense(Expense)
+    case income(Income)
+    
+    var id: UUID {
+        switch self {
+        case .expense(let e): return e.id
+        case .income(let i): return i.id
+        }
+    }
+    
+    var date: Date {
+        switch self {
+        case .expense(let e): return e.date
+        case .income(let i): return i.date
+        }
+    }
 }
 
 struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
+    @Query(sort: \Income.date, order: .reverse) private var incomes: [Income]
     @Environment(\.colorScheme) var colorScheme
     
     @Binding var scrollOffset: CGFloat
+    @Binding var scrollToTopTrigger: Bool
     
     @StateObject private var exchangeRateService = ExchangeRateService.shared
     
-    @State private var selectedFilter: DashboardFilter = .mes
+    @AppStorage("dashboardFilter") private var selectedFilter: DashboardFilter = .mes
+    @AppStorage("categoriesFilter") private var categoriesFilter: DashboardFilter = .mes
+    @AppStorage("syncFilters") private var syncFilters = true
     
     @State private var showRangePicker = false
     @State private var startDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
@@ -54,6 +78,38 @@ struct DashboardView: View {
                 let start = calendar.startOfDay(for: startDate)
                 let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
                 return expense.date >= start && expense.date <= end
+            case .todo:
+                return true
+            }
+        }
+    }
+    
+    var filteredIncomes: [Income] {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        return incomes.filter { income in
+            switch selectedFilter {
+            case .hoy:
+                return calendar.isDateInToday(income.date)
+            case .semana:
+                var calendar = Calendar.current
+                calendar.firstWeekday = 2 // Lunes
+                if let interval = calendar.dateInterval(of: .weekOfYear, for: now) {
+                    return income.date >= interval.start && income.date <= interval.end
+                }
+                return true
+            case .mes:
+                if let interval = calendar.dateInterval(of: .month, for: now) {
+                    return income.date >= interval.start && income.date <= interval.end
+                }
+                return true
+            case .rango:
+                let start = calendar.startOfDay(for: startDate)
+                let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
+                return income.date >= start && income.date <= end
+            case .todo:
+                return true
             }
         }
     }
@@ -68,6 +124,18 @@ struct DashboardView: View {
     
     var totalCombinedPEN: Double {
         totalSpentPEN + (totalSpentUSD * exchangeRateService.usdToPenRate)
+    }
+    
+    var totalIncomePEN: Double {
+        filteredIncomes.filter { $0.currency == "PEN" }.reduce(0) { $0 + $1.amount }
+    }
+    
+    var totalIncomeUSD: Double {
+        filteredIncomes.filter { $0.currency == "USD" }.reduce(0) { $0 + $1.amount }
+    }
+    
+    var totalCombinedIncomePEN: Double {
+        totalIncomePEN + (totalIncomeUSD * exchangeRateService.usdToPenRate)
     }
     
     var expensesByMerchant: [(merchant: String, total: Double)] {
@@ -91,54 +159,78 @@ struct DashboardView: View {
         }.prefix(5).map { $0 }
     }
 
+    var searchedTransactions: [TransactionItem] {
+        let exps = filteredExpenses.map { TransactionItem.expense($0) }
+        let incs = filteredIncomes.map { TransactionItem.income($0) }
+        let allTransactions = (exps + incs).sorted { $0.date > $1.date }
+        
+        if searchText.isEmpty { return allTransactions }
+        
+        return allTransactions.filter { item in
+            switch item {
+            case .expense(let e):
+                return e.merchant.localizedCaseInsensitiveContains(searchText) || e.category.localizedCaseInsensitiveContains(searchText)
+            case .income(let i):
+                let hasSourceMatch = i.source.localizedCaseInsensitiveContains(searchText)
+                let hasNotesMatch = i.notes?.localizedCaseInsensitiveContains(searchText) ?? false
+                let hasCategoryMatch = "Ingreso".localizedCaseInsensitiveContains(searchText)
+                return hasSourceMatch || hasNotesMatch || hasCategoryMatch
+            }
+        }
+    }
+
     var body: some View {
         ZStack {
-            TrackableScrollView(scrollOffset: $scrollOffset) {
+            TrackableScrollView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger) {
                 VStack(spacing: 24) {
                     
                     // Contenedor principal para no tapar el top header
                     VStack(spacing: 20) {
                         
                         // Filtros
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(DashboardFilter.allCases, id: \.self) { filter in
-                                    Button {
-                                        withAnimation(.spring) {
-                                            selectedFilter = filter
-                                            if filter == .rango {
-                                                showRangePicker = true
-                                            }
+                        HStack(spacing: 8) {
+                            ForEach(DashboardFilter.allCases, id: \.self) { filter in
+                                Button {
+                                    withAnimation(.spring) {
+                                        selectedFilter = filter
+                                        if syncFilters {
+                                            categoriesFilter = filter
                                         }
-                                    } label: {
-                                        Text(filter.rawValue)
-                                            .font(.subheadline)
-                                            .fontWeight(selectedFilter == filter ? .semibold : .regular)
-                                            .foregroundStyle(selectedFilter == filter ? .white : (colorScheme == .dark ? .white : .black))
-                                            .padding(.horizontal, 20)
-                                            .padding(.vertical, 10)
-                                            .background(
-                                                Capsule()
-                                                    .fill(selectedFilter == filter ? Color.purple.opacity(0.8) : Color.primary.opacity(0.05))
-                                            )
+                                        if filter == .rango {
+                                            showRangePicker = true
+                                        }
                                     }
+                                } label: {
+                                    Text(filter.rawValue)
+                                        .font(.subheadline)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
+                                        .fontWeight(selectedFilter == filter ? .semibold : .regular)
+                                        .foregroundStyle(selectedFilter == filter ? .white : (colorScheme == .dark ? .white : .black))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 10)
+                                        .background(
+                                            Capsule()
+                                                .fill(selectedFilter == filter ? Color.purple.opacity(0.8) : Color.primary.opacity(0.05))
+                                        )
                                 }
                             }
-                            .padding(.horizontal)
                         }
+                        .padding(.horizontal)
                         
                         // Tarjeta Principal (3 Divs)
                         VStack(spacing: 12) {
-                            // 1. Div de Arriba (Total)
+                            // 1. Div de Arriba (Restante)
                             VStack(spacing: 8) {
-                                Text("Total Gastado (Pasado a Soles)")
+                                Text("Restante")
                                     .font(.subheadline)
                                     .foregroundStyle(.primary.opacity(0.7))
                                     .textCase(.uppercase)
                                 
-                                Text("S/ \(totalCombinedPEN, specifier: "%.2f")")
+                                let restante = totalCombinedIncomePEN - totalCombinedPEN
+                                Text("S/ \(restante, specifier: "%.2f")")
                                     .font(.system(size: 48, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.primary)
+                                    .foregroundStyle(restante < 0 ? .red : .primary)
                                     .lineLimit(isPressingTotalCombined ? nil : 1)
                                     .minimumScaleFactor(0.6)
                                     .truncationMode(.tail)
@@ -154,15 +246,15 @@ struct DashboardView: View {
                             .background(Color.primary.opacity(0.05))
                             .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
                             
-                            // 2. Fila con 2 Divs de Abajo (Soles y Dólares)
+                            // 2. Fila con 2 Divs de Abajo (Ingresos y Gastos)
                             HStack(spacing: 12) {
-                                // Div Soles
+                                // Div Ingresos
                                 VStack(spacing: 8) {
-                                    Text("En Soles")
-                                        .font(.caption)
+                                    Text("Ingresos")
+                                        .font(.subheadline)
                                         .foregroundStyle(.primary.opacity(0.7))
-                                    Text("S/ \(totalSpentPEN, specifier: "%.2f")")
-                                        .font(.title3.bold())
+                                    Text("S/ \(totalCombinedIncomePEN, specifier: "%.2f")")
+                                        .font(.title2.bold())
                                         .lineLimit(isPressingTotalPEN ? nil : 1)
                                         .minimumScaleFactor(0.6)
                                         .truncationMode(.tail)
@@ -178,18 +270,14 @@ struct DashboardView: View {
                                 .background(Color.primary.opacity(0.05))
                                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                                 
-                                // Div Dólares
+                                // Div Gastos
                                 VStack(spacing: 8) {
-                                    HStack(spacing: 4) {
-                                        Text("En Dólares")
-                                            .font(.caption)
-                                            .foregroundStyle(.primary.opacity(0.7))
-                                        Text("T.C. \(exchangeRateService.usdToPenRate, specifier: "%.2f")")
-                                            .font(.caption2)
-                                            .foregroundStyle(.purple)
-                                    }
-                                    Text("$ \(totalSpentUSD, specifier: "%.2f")")
-                                        .font(.title3.bold())
+                                    Text("Gastos")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary.opacity(0.7))
+                                    Text("S/ \(totalCombinedPEN, specifier: "%.2f")")
+                                        .font(.title2.bold())
+                                        .foregroundStyle(.primary)
                                         .lineLimit(isPressingTotalUSD ? nil : 1)
                                         .minimumScaleFactor(0.6)
                                         .truncationMode(.tail)
@@ -241,26 +329,21 @@ struct DashboardView: View {
                             .cornerRadius(10)
                             .padding(.horizontal)
                             
-                            let searchedExpenses = searchText.isEmpty ? filteredExpenses : filteredExpenses.filter {
-                                $0.merchant.localizedCaseInsensitiveContains(searchText) ||
-                                $0.category.localizedCaseInsensitiveContains(searchText)
-                            }
-                            
-                            if searchedExpenses.isEmpty {
-                                Text(searchText.isEmpty ? "No hay gastos en este período" : "No se encontraron resultados")
+                            if searchedTransactions.isEmpty {
+                                Text(searchText.isEmpty ? "No hay transacciones en este período" : "No se encontraron resultados")
                                     .foregroundStyle(.secondary)
                                     .padding(.top, 10)
                                     .frame(maxWidth: .infinity, alignment: .center)
                             } else {
-                                ForEach(searchedExpenses) { expense in
-                                    expenseCard(for: expense)
+                                ForEach(searchedTransactions) { item in
+                                    transactionCard(for: item)
                                 }
                             }
                             
                             // Forzar espacio extra si hay pocos elementos (o 0) para que el teclado no los tape
-                            if searchedExpenses.count < 6 {
+                            if searchedTransactions.count < 6 {
                                 Color.clear
-                                    .frame(height: CGFloat(6 - searchedExpenses.count) * 85)
+                                    .frame(height: CGFloat(6 - searchedTransactions.count) * 85)
                             }
                         }
                         .padding(.top, 10)
@@ -273,10 +356,10 @@ struct DashboardView: View {
             NavigationStack {
                 Form {
                     Section(header: Text("Selecciona el rango de fechas")) {
-                        DatePicker("Desde", selection: $startDate, displayedComponents: .date)
+                        DatePicker("Desde", selection: $startDate, in: ...endDate, displayedComponents: .date)
                             .datePickerStyle(.compact)
                         
-                        DatePicker("Hasta", selection: $endDate, displayedComponents: .date)
+                        DatePicker("Hasta", selection: $endDate, in: startDate..., displayedComponents: .date)
                             .datePickerStyle(.compact)
                     }
                 }
@@ -352,6 +435,15 @@ struct DashboardView: View {
         .padding(.horizontal)
     }
     
+    private func transactionCard(for item: TransactionItem) -> some View {
+        switch item {
+        case .expense(let expense):
+            return AnyView(expenseCard(for: expense))
+        case .income(let income):
+            return AnyView(incomeCard(for: income))
+        }
+    }
+    
     private func expenseCard(for expense: Expense) -> some View {
         HStack(spacing: 16) {
             ZStack {
@@ -386,7 +478,7 @@ struct DashboardView: View {
                         Text(displayName)
                             .font(.headline)
                             .lineLimit(1)
-                            .foregroundColor(.accentColor)
+                            .foregroundColor(.primary)
                     }
                     .buttonStyle(.plain)
                     
@@ -420,7 +512,7 @@ struct DashboardView: View {
             Spacer()
             
             let currencySymbol = expense.currency == "USD" ? "$" : "S/"
-            Text("\(currencySymbol) \(expense.amount, specifier: "%.2f")")
+            Text("- \(currencySymbol) \(expense.amount, specifier: "%.2f")")
                 .font(.title3)
                 .fontWeight(.bold)
                 .foregroundStyle(.primary)
@@ -432,7 +524,95 @@ struct DashboardView: View {
         .contextMenu {
             Button(role: .destructive) {
                 withAnimation {
+                    if let emailID = expense.emailID {
+                        var recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
+                        if !recoveryIDs.contains(emailID) {
+                            recoveryIDs.append(emailID)
+                            UserDefaults.standard.set(recoveryIDs, forKey: "pendingRecoveryIDs")
+                        }
+                    }
                     modelContext.delete(expense)
+                }
+            } label: {
+                Label("Eliminar", systemImage: "trash")
+            }
+        }
+    }
+    
+    private func incomeCard(for income: Income) -> some View {
+        HStack(spacing: 16) {
+            ZStack {
+                let (baseColor, icon) = incomeIconAndColor(for: income)
+                
+                Circle()
+                    .fill(colorScheme == .light ? baseColor : baseColor.opacity(0.15))
+                    .frame(width: 48, height: 48)
+                
+                if icon == "plin_icon" || icon == "yape_icon" {
+                    Image(icon)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 28, height: 28)
+                        .clipShape(Circle())
+                } else {
+                    Image(systemName: icon)
+                        .foregroundStyle(colorScheme == .light ? .white : baseColor)
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    let displayTitle = income.title ?? income.source
+                    Button {
+                        withAnimation {
+                            searchText = income.source
+                        }
+                    } label: {
+                        Text(displayTitle)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .foregroundColor(.primary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                
+                HStack(spacing: 6) {
+                    let (baseColor, _) = incomeIconAndColor(for: income)
+                    Text(income.source)
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(colorScheme == .light ? baseColor : baseColor.opacity(0.2))
+                        .foregroundStyle(colorScheme == .light ? .white : baseColor)
+                        .clipShape(Capsule())
+                    
+                    Text(income.date.formatted(.dateTime.day().month().hour().minute()))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
+            }
+            
+            Spacer()
+            
+            let currencySymbol = income.currency == "USD" ? "$" : "S/"
+            Text("\(currencySymbol) \(income.amount, specifier: "%.2f")")
+                .font(.title3)
+                .fontWeight(.bold)
+                .foregroundStyle(.green)
+        }
+        .padding()
+        .background(Color.primary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal)
+        .contextMenu {
+            Button(role: .destructive) {
+                withAnimation {
+                    modelContext.delete(income)
                 }
             } label: {
                 Label("Eliminar", systemImage: "trash")
@@ -467,9 +647,21 @@ struct DashboardView: View {
         }
     }
     
+    private func incomeIconAndColor(for income: Income) -> (Color, String) {
+        switch income.source {
+        case "Plin":
+            return (Color(red: 0, green: 0.7, blue: 0.9), "plin_icon")
+        case "Yape":
+            return (Color(red: 0.5, green: 0, blue: 0.5), "yape_icon")
+        case "Efectivo":
+            return (.yellow, "banknote.fill")
+        default:
+            return (.green, "arrow.down.left.circle.fill")
+        }
+    }
 }
 
 #Preview {
-    DashboardView(scrollOffset: .constant(100))
+    DashboardView(scrollOffset: .constant(100), scrollToTopTrigger: .constant(false))
         .modelContainer(for: Expense.self, inMemory: true)
 }

@@ -4,13 +4,13 @@ import SwiftData
 enum AppTab: Int, CaseIterable {
     case home = 0
     case categories = 1
-    case social = 2
+    case trends = 2
     
     var icon: String {
         switch self {
         case .home: return "house.fill"
         case .categories: return "tray.full.fill"
-        case .social: return "person.3.fill"
+        case .trends: return "chart.line.uptrend.xyaxis"
         }
     }
     
@@ -18,7 +18,7 @@ enum AppTab: Int, CaseIterable {
         switch self {
         case .home: return "Resumen"
         case .categories: return "Categorías"
-        case .social: return "Social"
+        case .trends: return "Tendencias"
         }
     }
 }
@@ -30,10 +30,12 @@ struct ContentView: View {
     @State private var scrollOffset: CGFloat = 0
     @State private var showSettings = false
     @AppStorage("isDarkMode") private var isDarkMode = true
-    @State private var showAddExpense = false
+    @State private var selectedTransactionType: TransactionType? = nil
     @State private var showSplash = true
     @State private var isPulsing = false
     @State private var tabWidth: CGFloat = 0
+    @State private var showAddPicker = false
+    @State private var scrollToTopTrigger: Bool = false
     
     let syncTimer = Timer.publish(every: 1800, on: .main, in: .common).autoconnect()
     
@@ -48,11 +50,11 @@ struct ContentView: View {
                     Group {
                         switch selectedTab {
                         case .home:
-                            DashboardView(scrollOffset: $scrollOffset)
+                            DashboardView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
                         case .categories:
-                            CategoriesView(scrollOffset: $scrollOffset)
-                        case .social:
-                            SocialView(scrollOffset: $scrollOffset)
+                            CategoriesView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
+                        case .trends:
+                            TrendsView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -61,7 +63,7 @@ struct ContentView: View {
                     githubFloatingTabBar
                 }
             }
-            .background(Color(.systemBackground).ignoresSafeArea()) // Fondo global dinámico
+            .background(Color(.systemBackground).ignoresSafeArea())
             .ignoresSafeArea(.keyboard)
             .onReceive(syncTimer) { _ in
                 Task {
@@ -71,8 +73,68 @@ struct ContentView: View {
             .fullScreenCover(isPresented: $showSettings) {
                 SettingsView()
             }
-            .sheet(isPresented: $showAddExpense) {
-                AddExpenseView()
+            .sheet(item: $selectedTransactionType) { type in
+                AddExpenseView(transactionType: type)
+            }
+            
+            // Add Picker Overlay
+            if showAddPicker {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showAddPicker = false
+                        }
+                    }
+                
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        
+                        HStack(spacing: 0) {
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    showAddPicker = false
+                                }
+                                selectedTransactionType = .gasto
+                            } label: {
+                                VStack(spacing: 4) {
+                                    Image(systemName: "arrow.up.right.circle.fill")
+                                        .font(.title2)
+                                    Text("Gasto")
+                                        .font(.caption.bold())
+                                }
+                                .foregroundStyle(Color.purple)
+                                .frame(width: 70, height: 60)
+                            }
+                            
+                            Divider().frame(height: 40)
+                            
+                            Button {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    showAddPicker = false
+                                }
+                                selectedTransactionType = .ingreso
+                            } label: {
+                                VStack(spacing: 4) {
+                                    Image(systemName: "arrow.down.left.circle.fill")
+                                        .font(.title2)
+                                    Text("Ingreso")
+                                        .font(.caption.bold())
+                                }
+                                .foregroundStyle(Color.green)
+                                .frame(width: 70, height: 60)
+                            }
+                        }
+                        .background(.regularMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 5)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 90)
+                    .transition(.scale(scale: 0.8, anchor: .bottomTrailing).combined(with: .opacity))
+                }
             }
             
             // Splash Screen Overlay
@@ -194,18 +256,25 @@ struct ContentView: View {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                     selectedTab = newTab
                                 }
+                            } else {
+                                scrollToTopTrigger.toggle()
                             }
                         }
                     }
             )
             
             // Barra Derecha (Botón +)
-            Button(action: { showAddExpense = true }) {
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    showAddPicker = true
+                }
+            } label: {
                 Image(systemName: "plus")
                     .font(.title2.bold())
                     .foregroundStyle(isDarkMode ? .white : .black)
                     .frame(height: 56)
                     .frame(maxWidth: .infinity)
+                    .rotationEffect(.degrees(showAddPicker ? 45 : 0))
             }
             .frame(width: 70) 
             .background(
