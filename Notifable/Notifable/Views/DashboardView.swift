@@ -7,7 +7,6 @@ enum DashboardFilter: String, CaseIterable {
     case semana = "Semana"
     case mes = "Mes"
     case rango = "Rango"
-    case todo = "Todo"
 }
 
 enum TransactionItem: Identifiable {
@@ -34,6 +33,7 @@ struct DashboardView: View {
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
     @Query(sort: \Income.date, order: .reverse) private var incomes: [Income]
     @Environment(\.colorScheme) var colorScheme
+    @AppStorage("isDarkMode") private var isDarkMode = true
     
     @Binding var scrollOffset: CGFloat
     @Binding var scrollToTopTrigger: Bool
@@ -54,23 +54,25 @@ struct DashboardView: View {
     @State private var isPressingTotalPEN = false
     @State private var isPressingTotalUSD = false
     
+    @State private var referenceDate: Date = Date()
+    @State private var selectedExpenseForDetails: Expense? = nil
+    
     var filteredExpenses: [Expense] {
         let calendar = Calendar.current
-        let now = Date()
         
         return expenses.filter { expense in
             switch selectedFilter {
             case .hoy:
-                return calendar.isDateInToday(expense.date)
+                return calendar.isDate(expense.date, inSameDayAs: referenceDate)
             case .semana:
-                var calendar = Calendar.current
-                calendar.firstWeekday = 2 // Lunes
-                if let interval = calendar.dateInterval(of: .weekOfYear, for: now) {
+                var cal = Calendar.current
+                cal.firstWeekday = 2 // Lunes
+                if let interval = cal.dateInterval(of: .weekOfYear, for: referenceDate) {
                     return expense.date >= interval.start && expense.date <= interval.end
                 }
                 return true
             case .mes:
-                if let interval = calendar.dateInterval(of: .month, for: now) {
+                if let interval = calendar.dateInterval(of: .month, for: referenceDate) {
                     return expense.date >= interval.start && expense.date <= interval.end
                 }
                 return true
@@ -78,29 +80,26 @@ struct DashboardView: View {
                 let start = calendar.startOfDay(for: startDate)
                 let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
                 return expense.date >= start && expense.date <= end
-            case .todo:
-                return true
             }
         }
     }
     
     var filteredIncomes: [Income] {
         let calendar = Calendar.current
-        let now = Date()
         
         return incomes.filter { income in
             switch selectedFilter {
             case .hoy:
-                return calendar.isDateInToday(income.date)
+                return calendar.isDate(income.date, inSameDayAs: referenceDate)
             case .semana:
-                var calendar = Calendar.current
-                calendar.firstWeekday = 2 // Lunes
-                if let interval = calendar.dateInterval(of: .weekOfYear, for: now) {
+                var cal = Calendar.current
+                cal.firstWeekday = 2 // Lunes
+                if let interval = cal.dateInterval(of: .weekOfYear, for: referenceDate) {
                     return income.date >= interval.start && income.date <= interval.end
                 }
                 return true
             case .mes:
-                if let interval = calendar.dateInterval(of: .month, for: now) {
+                if let interval = calendar.dateInterval(of: .month, for: referenceDate) {
                     return income.date >= interval.start && income.date <= interval.end
                 }
                 return true
@@ -108,8 +107,6 @@ struct DashboardView: View {
                 let start = calendar.startOfDay(for: startDate)
                 let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
                 return income.date >= start && income.date <= end
-            case .todo:
-                return true
             }
         }
     }
@@ -198,6 +195,8 @@ struct DashboardView: View {
                                         }
                                         if filter == .rango {
                                             showRangePicker = true
+                                        } else {
+                                            referenceDate = Date()
                                         }
                                     }
                                 } label: {
@@ -218,19 +217,34 @@ struct DashboardView: View {
                         }
                         .padding(.horizontal)
                         
+                        subFiltersView
+                        
                         // Tarjeta Principal (3 Divs)
                         VStack(spacing: 12) {
-                            // 1. Div de Arriba (Restante)
+                            // 1. Div de Arriba (Gastos)
                             VStack(spacing: 8) {
-                                Text("Restante")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.primary.opacity(0.7))
-                                    .textCase(.uppercase)
+                                HStack {
+                                    Text("Gastos")
+                                        .font(.subheadline)
+                                        .foregroundStyle(.primary.opacity(0.7))
+                                        .textCase(.uppercase)
+                                    
+                                    Spacer()
+                                    
+                                    if selectedFilter != .rango {
+                                        Text(formattedReferenceDate)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.primary.opacity(0.1))
+                                            .clipShape(Capsule())
+                                    }
+                                }
                                 
-                                let restante = totalCombinedIncomePEN - totalCombinedPEN
-                                Text("S/ \(restante, specifier: "%.2f")")
+                                Text("S/ \(totalCombinedPEN, specifier: "%.2f")")
                                     .font(.system(size: 48, weight: .bold, design: .rounded))
-                                    .foregroundStyle(restante < 0 ? .red : .primary)
+                                    .foregroundStyle(.primary)
                                     .lineLimit(isPressingTotalCombined ? nil : 1)
                                     .minimumScaleFactor(0.6)
                                     .truncationMode(.tail)
@@ -270,14 +284,15 @@ struct DashboardView: View {
                                 .background(Color.primary.opacity(0.05))
                                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                                 
-                                // Div Gastos
+                                // Div Restante
                                 VStack(spacing: 8) {
-                                    Text("Gastos")
+                                    Text("Restante")
                                         .font(.subheadline)
                                         .foregroundStyle(.primary.opacity(0.7))
-                                    Text("S/ \(totalCombinedPEN, specifier: "%.2f")")
+                                    let restante = totalCombinedIncomePEN - totalCombinedPEN
+                                    Text("S/ \(restante, specifier: "%.2f")")
                                         .font(.title2.bold())
-                                        .foregroundStyle(.primary)
+                                        .foregroundStyle(restante < 0 ? .red : .primary)
                                         .lineLimit(isPressingTotalUSD ? nil : 1)
                                         .minimumScaleFactor(0.6)
                                         .truncationMode(.tail)
@@ -372,10 +387,13 @@ struct DashboardView: View {
                         }
                     }
                 }
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(isDarkMode ? .dark : .light)
             }
             .presentationDetents([.fraction(0.4)])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $selectedExpenseForDetails) { expense in
+            ExpenseDetailsView(expense: expense)
         }
     }
     
@@ -487,6 +505,12 @@ struct DashboardView: View {
                             .font(.caption2)
                             .foregroundStyle(.purple)
                     }
+                    
+                    if expense.isDebt {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    }
                 }
                 
                 HStack(spacing: 6) {
@@ -522,6 +546,27 @@ struct DashboardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .padding(.horizontal)
         .contextMenu {
+            Button {
+                withAnimation {
+                    expense.isDebt.toggle()
+                    try? modelContext.save()
+                    
+                    // Actualizar las notificaciones de deudas
+                    let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.isDebt == true })
+                    let hasDebts = (try? modelContext.fetchCount(descriptor)) ?? 0 > 0
+                    NotificationManager.shared.updateDebtNotification(hasDebts: hasDebts)
+                    NotificationManager.shared.requestPermission()
+                }
+            } label: {
+                Label(expense.isDebt ? "Desmarcar deuda" : "Marcar como deuda", systemImage: expense.isDebt ? "xmark.circle" : "exclamationmark.circle")
+            }
+            
+            Button {
+                selectedExpenseForDetails = expense
+            } label: {
+                Label("Detalles", systemImage: "info.circle")
+            }
+            
             Button(role: .destructive) {
                 withAnimation {
                     if let emailID = expense.emailID {
@@ -657,6 +702,249 @@ struct DashboardView: View {
             return (.yellow, "banknote.fill")
         default:
             return (.green, "arrow.down.left.circle.fill")
+        }
+    }
+}
+
+// MARK: - DashboardView Navigation and SubFilters
+extension DashboardView {
+    private var formattedReferenceDate: String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "es_ES")
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter.string(from: referenceDate).capitalized
+    }
+    
+    @ViewBuilder
+    var subFiltersView: some View {
+        if selectedFilter != .rango {
+            HStack(spacing: 8) {
+                // Left Arrow
+                Button {
+                    navigateReferenceDate(forward: false)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .padding(8)
+                        .background(Color.primary.opacity(0.05))
+                        .clipShape(Circle())
+                }
+                
+                if selectedFilter == .mes {
+                    ScrollViewReader { proxy in
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                mesSubFilters
+                            }
+                            .onAppear {
+                                let monthIndex = Calendar.current.component(.month, from: referenceDate) - 1
+                                proxy.scrollTo(monthIndex, anchor: .center)
+                            }
+                            .onChange(of: referenceDate) { _, newValue in
+                                withAnimation {
+                                    let monthIndex = Calendar.current.component(.month, from: newValue) - 1
+                                    proxy.scrollTo(monthIndex, anchor: .center)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        if selectedFilter == .hoy {
+                            hoySubFilters
+                        } else if selectedFilter == .semana {
+                            semanaSubFilters
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                
+                // Right Arrow
+                Button {
+                    navigateReferenceDate(forward: true)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .padding(8)
+                        .background(Color.primary.opacity(0.05))
+                        .clipShape(Circle())
+                }
+                .disabled(!canNavigateForward)
+                .opacity(canNavigateForward ? 1.0 : 0.3)
+            }
+            .padding(.horizontal)
+        }
+    }
+    
+    private var canNavigateForward: Bool {
+        let calendar = Calendar.current
+        let now = Date()
+        switch selectedFilter {
+        case .hoy:
+            return !calendar.isDate(referenceDate, equalTo: now, toGranularity: .weekOfYear)
+        case .semana:
+            return !calendar.isDate(referenceDate, equalTo: now, toGranularity: .month)
+        case .mes:
+            return !calendar.isDate(referenceDate, equalTo: now, toGranularity: .year)
+        default: return false
+        }
+    }
+    
+    private func navigateReferenceDate(forward: Bool) {
+        let calendar = Calendar.current
+        let value = forward ? 1 : -1
+        
+        withAnimation(.spring) {
+            switch selectedFilter {
+            case .hoy:
+                if let newDate = calendar.date(byAdding: .weekOfYear, value: value, to: referenceDate) {
+                    referenceDate = newDate
+                }
+            case .semana:
+                if let newDate = calendar.date(byAdding: .month, value: value, to: referenceDate) {
+                    referenceDate = newDate
+                }
+            case .mes:
+                if let newDate = calendar.date(byAdding: .year, value: value, to: referenceDate) {
+                    referenceDate = newDate
+                }
+            default:
+                break
+            }
+        }
+    }
+    
+    private var customCalendar: Calendar {
+        var cal = Calendar.current
+        cal.firstWeekday = 2 // Monday
+        return cal
+    }
+    
+    @ViewBuilder
+    private var hoySubFilters: some View {
+        let cal = customCalendar
+        let now = Date()
+        if let weekInterval = cal.dateInterval(of: .weekOfYear, for: referenceDate) {
+            let dayNames = ["L", "M", "X", "J", "V", "S", "D"]
+            
+            ForEach(0..<7, id: \.self) { i in
+                if let dayDate = cal.date(byAdding: .day, value: i, to: weekInterval.start) {
+                    let isFuture = cal.startOfDay(for: dayDate) > cal.startOfDay(for: now)
+                    let isSelected = cal.isDate(dayDate, inSameDayAs: referenceDate)
+                    
+                    Button {
+                        withAnimation(.spring) {
+                            referenceDate = dayDate
+                        }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Text(dayNames[i])
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                            Text("\(cal.component(.day, from: dayDate))")
+                                .font(.subheadline)
+                                .fontWeight(.bold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundStyle(isSelected ? .white : (colorScheme == .dark ? .white : .black))
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(isSelected ? Color.purple.opacity(0.8) : Color.primary.opacity(0.05))
+                        )
+                    }
+                    .disabled(isFuture)
+                    .opacity(isFuture ? 0.3 : 1.0)
+                }
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var semanaSubFilters: some View {
+        let cal = customCalendar
+        let now = Date()
+        
+        if let monthInterval = cal.dateInterval(of: .month, for: referenceDate) {
+            let weeks = weeksInMonth(monthInterval: monthInterval, calendar: cal)
+            
+            ForEach(weeks, id: \.start) { weekInt in
+                let isFuture = cal.startOfDay(for: weekInt.start) > cal.startOfDay(for: now)
+                let isSelected = cal.isDate(referenceDate, equalTo: weekInt.start, toGranularity: .weekOfYear)
+                
+                Button {
+                    withAnimation(.spring) {
+                        referenceDate = weekInt.start
+                    }
+                } label: {
+                    VStack(spacing: 4) {
+                        Text("L \(cal.component(.day, from: weekInt.start))")
+                            .font(.caption)
+                        Text("D \(cal.component(.day, from: weekInt.end.addingTimeInterval(-1)))")
+                            .font(.caption)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .foregroundStyle(isSelected ? .white : (colorScheme == .dark ? .white : .black))
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(isSelected ? Color.purple.opacity(0.8) : Color.primary.opacity(0.05))
+                    )
+                }
+                .disabled(isFuture)
+                .opacity(isFuture ? 0.3 : 1.0)
+            }
+        }
+    }
+    
+    private func weeksInMonth(monthInterval: DateInterval, calendar: Calendar) -> [DateInterval] {
+        var weeks: [DateInterval] = []
+        var current = monthInterval.start
+        while current < monthInterval.end {
+            if let weekInt = calendar.dateInterval(of: .weekOfYear, for: current) {
+                if !weeks.contains(where: { $0.start == weekInt.start }) {
+                    weeks.append(weekInt)
+                }
+            }
+            if let nextWeek = calendar.date(byAdding: .day, value: 7, to: current) {
+                current = nextWeek
+            } else {
+                break
+            }
+        }
+        return weeks
+    }
+    
+    @ViewBuilder
+    private var mesSubFilters: some View {
+        let calendar = Calendar.current
+        let now = Date()
+        if let yearInterval = calendar.dateInterval(of: .year, for: referenceDate) {
+            let monthNames = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+            
+            ForEach(0..<12, id: \.self) { i in
+                if let monthDate = calendar.date(byAdding: .month, value: i, to: yearInterval.start) {
+                    let isFuture = calendar.component(.year, from: monthDate) > calendar.component(.year, from: now) || (calendar.component(.year, from: monthDate) == calendar.component(.year, from: now) && calendar.component(.month, from: monthDate) > calendar.component(.month, from: now))
+                    let isSelected = calendar.isDate(monthDate, equalTo: referenceDate, toGranularity: .month)
+                    
+                    Button {
+                        withAnimation(.spring) {
+                            referenceDate = monthDate
+                        }
+                    } label: {
+                        Text(monthNames[i])
+                            .font(.subheadline)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 16)
+                            .foregroundStyle(isSelected ? .white : (colorScheme == .dark ? .white : .black))
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(isSelected ? Color.purple.opacity(0.8) : Color.primary.opacity(0.05))
+                            )
+                    }
+                    .id(i)
+                    .disabled(isFuture)
+                    .opacity(isFuture ? 0.3 : 1.0)
+                }
+            }
         }
     }
 }

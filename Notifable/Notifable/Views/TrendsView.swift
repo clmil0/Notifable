@@ -15,6 +15,7 @@ struct TrendsView: View {
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
     @Query(sort: \Income.date, order: .reverse) private var incomes: [Income]
     @Environment(\.colorScheme) var colorScheme
+    @AppStorage("isDarkMode") private var isDarkMode = true
     
     @Binding var scrollOffset: CGFloat
     @Binding var scrollToTopTrigger: Bool
@@ -160,6 +161,7 @@ struct TrendsView: View {
         var points: [TrendDataPoint] = []
         let startOfDay = calendar.startOfDay(for: now)
         let currentHour = calendar.component(.hour, from: now)
+        var cumulativeBalance: Double = 0
         
         for hour in 0...currentHour {
             guard let hourDate = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: startOfDay) else { continue }
@@ -172,9 +174,9 @@ struct TrendsView: View {
                 .filter { calendar.component(.hour, from: $0.date) == hour }
                 .reduce(0) { $0 + incomeInPEN($1) }
             
+            cumulativeBalance += (incomeTotal - expenseTotal)
             let label = "\(hour)h"
-            points.append(TrendDataPoint(label: label, date: hourDate, amount: expenseTotal, type: "Gastos"))
-            points.append(TrendDataPoint(label: label, date: hourDate, amount: incomeTotal, type: "Ingresos"))
+            points.append(TrendDataPoint(label: label, date: hourDate, amount: cumulativeBalance, type: "Balance"))
         }
         return points
     }
@@ -183,6 +185,7 @@ struct TrendsView: View {
         var points: [TrendDataPoint] = []
         var cal = Calendar.current
         cal.firstWeekday = 2
+        var cumulativeBalance: Double = 0
         
         guard let weekInterval = cal.dateInterval(of: .weekOfYear, for: now) else { return [] }
         let dayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
@@ -192,6 +195,8 @@ struct TrendsView: View {
             let startOfDay = cal.startOfDay(for: dayDate)
             let endOfDay = cal.date(bySettingHour: 23, minute: 59, second: 59, of: dayDate) ?? dayDate
             
+            if startOfDay > now { break }
+            
             let expenseTotal = filteredExpenses
                 .filter { $0.date >= startOfDay && $0.date <= endOfDay }
                 .reduce(0) { $0 + amountInPEN($1) }
@@ -200,9 +205,9 @@ struct TrendsView: View {
                 .filter { $0.date >= startOfDay && $0.date <= endOfDay }
                 .reduce(0) { $0 + incomeInPEN($1) }
             
+            cumulativeBalance += (incomeTotal - expenseTotal)
             let label = dayNames[dayIndex]
-            points.append(TrendDataPoint(label: label, date: dayDate, amount: expenseTotal, type: "Gastos"))
-            points.append(TrendDataPoint(label: label, date: dayDate, amount: incomeTotal, type: "Ingresos"))
+            points.append(TrendDataPoint(label: label, date: dayDate, amount: cumulativeBalance, type: "Balance"))
         }
         return points
     }
@@ -213,31 +218,26 @@ struct TrendsView: View {
         guard let monthInterval = calendar.dateInterval(of: .month, for: now) else { return [] }
         let daysInMonth = calendar.range(of: .day, in: .month, for: now)?.count ?? 30
         let currentDay = calendar.component(.day, from: now)
+        var cumulativeBalance: Double = 0
         
         for day in 1...daysInMonth {
             guard let dayDate = calendar.date(bySetting: .day, value: day, of: monthInterval.start) else { continue }
             let startOfDay = calendar.startOfDay(for: dayDate)
             guard let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: dayDate) else { continue }
             
-            let expenseTotal: Double
-            let incomeTotal: Double
+            if day > currentDay { break }
             
-            if day <= currentDay {
-                expenseTotal = filteredExpenses
-                    .filter { $0.date >= startOfDay && $0.date <= endOfDay }
-                    .reduce(0) { $0 + amountInPEN($1) }
+            let expenseTotal = filteredExpenses
+                .filter { $0.date >= startOfDay && $0.date <= endOfDay }
+                .reduce(0) { $0 + amountInPEN($1) }
                 
-                incomeTotal = filteredIncomes
-                    .filter { $0.date >= startOfDay && $0.date <= endOfDay }
-                    .reduce(0) { $0 + incomeInPEN($1) }
-            } else {
-                expenseTotal = 0
-                incomeTotal = 0
-            }
+            let incomeTotal = filteredIncomes
+                .filter { $0.date >= startOfDay && $0.date <= endOfDay }
+                .reduce(0) { $0 + incomeInPEN($1) }
             
+            cumulativeBalance += (incomeTotal - expenseTotal)
             let label = "\(day)"
-            points.append(TrendDataPoint(label: label, date: dayDate, amount: expenseTotal, type: "Gastos"))
-            points.append(TrendDataPoint(label: label, date: dayDate, amount: incomeTotal, type: "Ingresos"))
+            points.append(TrendDataPoint(label: label, date: dayDate, amount: cumulativeBalance, type: "Balance"))
         }
         return points
     }
@@ -246,6 +246,7 @@ struct TrendsView: View {
         var points: [TrendDataPoint] = []
         let start = calendar.startOfDay(for: startDate)
         let end = calendar.startOfDay(for: endDate)
+        var cumulativeBalance: Double = 0
         
         var current = start
         while current <= end {
@@ -260,12 +261,12 @@ struct TrendsView: View {
                 .filter { $0.date >= startOfDay && $0.date <= endOfDay }
                 .reduce(0) { $0 + incomeInPEN($1) }
             
+            cumulativeBalance += (incomeTotal - expenseTotal)
             let day = calendar.component(.day, from: current)
             let label = "\(day)"
-            points.append(TrendDataPoint(label: label, date: current, amount: expenseTotal, type: "Gastos"))
-            points.append(TrendDataPoint(label: label, date: current, amount: incomeTotal, type: "Ingresos"))
+            points.append(TrendDataPoint(label: label, date: current, amount: cumulativeBalance, type: "Balance"))
             
-            current = calendar.date(byAdding: .day, value: 1, to: current) ?? current.addingTimeInterval(86400)
+            current = calendar.date(byAdding: .day, value: 1, to: current) ?? current
         }
         return points
     }
@@ -380,7 +381,7 @@ struct TrendsView: View {
                         Button("Aplicar") { showRangePicker = false }
                     }
                 }
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(isDarkMode ? .dark : .light)
             }
             .presentationDetents([.fraction(0.4)])
             .presentationDragIndicator(.visible)
@@ -399,12 +400,8 @@ struct TrendsView: View {
                 // Legend
                 HStack(spacing: 16) {
                     HStack(spacing: 4) {
-                        Circle().fill(Color.purple).frame(width: 8, height: 8)
-                        Text("Gastos").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    HStack(spacing: 4) {
-                        Circle().fill(Color.green).frame(width: 8, height: 8)
-                        Text("Ingresos").font(.caption2).foregroundStyle(.secondary)
+                        Circle().fill(Color.blue).frame(width: 8, height: 8)
+                        Text("Balance Acumulado").font(.caption2).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -414,7 +411,7 @@ struct TrendsView: View {
                     x: .value("Período", point.date),
                     y: .value("Monto", point.amount)
                 )
-                .foregroundStyle(by: .value("Tipo", point.type))
+                .foregroundStyle(Color.blue)
                 .interpolationMethod(.catmullRom)
                 .lineStyle(StrokeStyle(lineWidth: 2.5))
                 
@@ -422,14 +419,9 @@ struct TrendsView: View {
                     x: .value("Período", point.date),
                     y: .value("Monto", point.amount)
                 )
-                .foregroundStyle(by: .value("Tipo", point.type))
+                .foregroundStyle(LinearGradient(gradient: Gradient(colors: [Color.blue.opacity(0.3), Color.clear]), startPoint: .top, endPoint: .bottom))
                 .interpolationMethod(.catmullRom)
-                .opacity(0.1)
             }
-            .chartForegroundStyleScale([
-                "Gastos": Color.purple,
-                "Ingresos": Color.green
-            ])
             .chartLegend(.hidden)
             .chartXAxis {
                 AxisMarks(values: .automatic(desiredCount: xAxisDesiredCount)) { value in

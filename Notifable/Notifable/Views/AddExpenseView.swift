@@ -11,6 +11,7 @@ enum TransactionType: String, CaseIterable, Identifiable {
 struct AddExpenseView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("isDarkMode") private var isDarkMode = true
     
     let transactionType: TransactionType
     
@@ -127,7 +128,7 @@ struct AddExpenseView: View {
                     }
                 }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(isDarkMode ? .dark : .light)
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)

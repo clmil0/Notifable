@@ -24,6 +24,7 @@ struct CategoriesView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
     @Environment(\.colorScheme) var colorScheme
+    @AppStorage("isDarkMode") private var isDarkMode = true
     
     @Binding var scrollOffset: CGFloat
     @Binding var scrollToTopTrigger: Bool
@@ -338,7 +339,7 @@ struct CategoriesView: View {
                         }
                     }
                 }
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(isDarkMode ? .dark : .light)
             }
             .presentationDetents([.fraction(0.4)])
             .presentationDragIndicator(.visible)
@@ -839,6 +840,7 @@ struct AssignCategoryView: View {
     var onAssign: (String) -> Void
     
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("isDarkMode") private var isDarkMode = true
     @State private var searchText = ""
     @State private var isCreatingNew = false
     @State private var newCategoryName = ""
@@ -920,7 +922,7 @@ struct AssignCategoryView: View {
                     }
                 }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(isDarkMode ? .dark : .light)
         }
     }
 }

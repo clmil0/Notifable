@@ -36,6 +36,7 @@ struct ContentView: View {
     @State private var tabWidth: CGFloat = 0
     @State private var showAddPicker = false
     @State private var scrollToTopTrigger: Bool = false
+    @State private var themeButtonCenter: CGPoint = CGPoint(x: UIScreen.main.bounds.width - 80, y: 60)
     
     let syncTimer = Timer.publish(every: 1800, on: .main, in: .common).autoconnect()
     
@@ -59,8 +60,8 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     
-                    // Tab Bar Flotante
-                    githubFloatingTabBar
+                    // Floating Glass Tab Bar (WhatsApp/Telegram style)
+                    floatingGlassTabBar
                 }
             }
             .background(Color(.systemBackground).ignoresSafeArea())
@@ -174,13 +175,13 @@ struct ContentView: View {
         .preferredColorScheme(isDarkMode ? .dark : .light)
     }
     
+    // MARK: - Top Header
     private var topHeader: some View {
         HStack {
             Image(systemName: "bell.badge.fill")
                 .font(.title)
                 .foregroundStyle(.purple)
             
-            // Texto siempre visible
             Text("AgruPay")
                 .font(.title)
                 .fontWeight(.bold)
@@ -189,7 +190,7 @@ struct ContentView: View {
             Spacer()
             
             Button {
-                withAnimation {
+                ThemeAnimator.animateThemeChange(from: themeButtonCenter) {
                     isDarkMode.toggle()
                 }
             } label: {
@@ -197,6 +198,15 @@ struct ContentView: View {
                     .font(.title2)
                     .foregroundStyle(isDarkMode ? .yellow : .orange)
             }
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .onAppear {
+                            let frame = geo.frame(in: .global)
+                            themeButtonCenter = CGPoint(x: frame.midX, y: frame.midY)
+                        }
+                }
+            )
             .padding(.trailing, 8)
             
             Button {
@@ -209,61 +219,53 @@ struct ContentView: View {
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)
-        .padding(.bottom, 24) // Más grueso
-        .background(Color(.systemBackground)) // Mismo color que el fondo, sólido
+        .padding(.bottom, 24)
+        .background(Color(.systemBackground))
     }
     
-    private var githubFloatingTabBar: some View {
+    // MARK: - Floating Glass Tab Bar (WhatsApp / Telegram style)
+    private var floatingGlassTabBar: some View {
         HStack(spacing: 12) {
-            // Barra Izquierda
+            // Tab bar principal con glass material
             HStack(spacing: 0) {
                 ForEach(AppTab.allCases, id: \.self) { tab in
-                    VStack(spacing: 4) {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 20, weight: selectedTab == tab ? .semibold : .regular))
-                            .frame(width: 48, height: 32)
-                            .background(
-                                Capsule()
-                                    .fill(selectedTab == tab ? Color.blue.opacity(0.3) : Color.clear)
-                            )
-                        
-                        Text(tab.title)
-                            .font(.system(size: 11, weight: selectedTab == tab ? .semibold : .regular))
-                    }
-                    .foregroundStyle(selectedTab == tab ? Color.primary : Color.gray)
-                    .frame(maxWidth: .infinity)
-                    .contentShape(Rectangle()) // Área clickeable completa
-                }
-            }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 8)
-            .background(.regularMaterial, in: Capsule()) // Correct way to apply material to a shape
-            .overlay(Capsule().stroke(Color.primary.opacity(0.15), lineWidth: 1))
-            .background(
-                GeometryReader { geo in
-                    Color.clear.onAppear { tabWidth = geo.size.width / 3 }
-                        .onChange(of: geo.size.width) { _, newWidth in tabWidth = newWidth / 3 }
-                }
-            )
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        guard tabWidth > 0 else { return }
-                        let index = Int(value.location.x / tabWidth)
-                        if index >= 0 && index < 3 {
-                            let newTab = AppTab(rawValue: index) ?? .home
-                            if selectedTab != newTab {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                    selectedTab = newTab
-                                }
-                            } else {
-                                scrollToTopTrigger.toggle()
+                    Button {
+                        if selectedTab == tab {
+                            scrollToTopTrigger.toggle()
+                        } else {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                selectedTab = tab
                             }
                         }
+                    } label: {
+                        VStack(spacing: 4) {
+                            Image(systemName: tab.icon)
+                                .font(.system(size: 22, weight: selectedTab == tab ? .semibold : .regular))
+                                .frame(width: 52, height: 32)
+                                .background(
+                                    Capsule()
+                                        .fill(selectedTab == tab ? Color.purple.opacity(0.25) : Color.clear)
+                                )
+                            
+                            Text(tab.title)
+                                .font(.system(size: 11, weight: selectedTab == tab ? .bold : .regular))
+                        }
+                        .foregroundStyle(selectedTab == tab ? Color.purple : Color.gray)
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                     }
+                }
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 8)
+            .background(.ultraThinMaterial, in: Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
             )
+            .shadow(color: Color.black.opacity(0.12), radius: 20, x: 0, y: 8)
             
-            // Barra Derecha (Botón +)
+            // Botón + separado (como el de búsqueda en WhatsApp)
             Button {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                     showAddPicker = true
@@ -272,21 +274,18 @@ struct ContentView: View {
                 Image(systemName: "plus")
                     .font(.title2.bold())
                     .foregroundStyle(isDarkMode ? .white : .black)
-                    .frame(height: 56)
-                    .frame(maxWidth: .infinity)
+                    .frame(width: 56, height: 56)
                     .rotationEffect(.degrees(showAddPicker ? 45 : 0))
             }
-            .frame(width: 70) 
-            .background(
-                Capsule()
-                    .fill(Color.purple.opacity(isDarkMode ? 0.3 : 0.8)) // Morado más intenso en claro
+            .background(.ultraThinMaterial, in: Circle())
+            .overlay(
+                Circle()
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
             )
-            .background(.regularMaterial, in: Capsule())
-            .overlay(Capsule().stroke(Color.primary.opacity(0.15), lineWidth: 1))
+            .shadow(color: Color.black.opacity(0.12), radius: 20, x: 0, y: 8)
         }
-        .padding(.horizontal, 24)
-        .padding(.bottom, -15) // Empujarlo más abajo del límite del SafeArea
-        .shadow(color: Color.primary.opacity(0.2), radius: 10, x: 0, y: 5)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 2)
     }
 }
 

@@ -42,7 +42,7 @@ class GmailSyncService: ObservableObject {
         self.lastSyncDate = UserDefaults.standard.object(forKey: "lastSyncDate") as? Date
     }
     
-    func syncEmails(force: Bool = false) {
+    func syncEmails(force: Bool = false, startDate: Date? = nil, endDate: Date? = nil) {
         // Throttling: Solo sincronizar si ha pasado más de 1 min o si es forzado
         if !force, let lastSync = lastSyncDate, Date().timeIntervalSince(lastSync) < 1 * 60 {
             print("Sync throttled. Last sync was \(Int(Date().timeIntervalSince(lastSync)/60)) minutes ago.")
@@ -65,7 +65,7 @@ class GmailSyncService: ObservableObject {
             return
         }
         
-        fetchMessageList(token: token) { [weak self] result in
+        fetchMessageList(token: token, startDate: startDate, endDate: endDate) { [weak self] result in
             switch result {
             case .success(let messages):
                 self?.processMessages(messages, token: token)
@@ -74,7 +74,7 @@ class GmailSyncService: ObservableObject {
                 print("Failed to fetch messages: \(error). Trying to refresh token...")
                 GmailAuthService.shared.refreshAccessToken { newToken in
                     if let newToken = newToken {
-                        self?.fetchMessageList(token: newToken) { result in
+                        self?.fetchMessageList(token: newToken, startDate: startDate, endDate: endDate) { result in
                             switch result {
                             case .success(let msgs):
                                 self?.processMessages(msgs, token: newToken)
@@ -96,17 +96,31 @@ class GmailSyncService: ObservableObject {
         }
     }
     
-    private func fetchMessageList(token: String, completion: @escaping (Result<[[String: Any]], Error>) -> Void) {
+    private func fetchMessageList(token: String, startDate: Date? = nil, endDate: Date? = nil, completion: @escaping (Result<[[String: Any]], Error>) -> Void) {
         // Buscar correos dinámicamente según los bancos soportados
         let allEmails = parsers.flatMap { $0.senderEmails }
         var query = allEmails.isEmpty ? "" : allEmails.map { "from:\($0)" }.joined(separator: " OR ")
         
-        // Optimización: Usar el equivalente a historyId filtrando por fecha en el query
-        // Si tenemos un lastSyncDate (menos 1 hora por margen de seguridad), pedimos solo lo nuevo.
-        if let lastSync = lastSyncDate {
+        if let start = startDate {
+            let startEpoch = Int(start.timeIntervalSince1970)
+            query = "(\(query)) AND after:\(startEpoch)"
+        } else if let lastSync = lastSyncDate {
             let safeEpoch = Int(lastSync.timeIntervalSince1970) - 3600 // 1 hr margen
             query = "(\(query)) AND after:\(safeEpoch)"
+        } else {
+            if let oneMonthAgo = Calendar.current.date(byAdding: .month, value: -1, to: Date()) {
+                let startEpoch = Int(oneMonthAgo.timeIntervalSince1970)
+                query = "(\(query)) AND after:\(startEpoch)"
+            }
         }
+        
+        if let end = endDate {
+            // Set end to the end of the day to include the selected date fully
+            let endOfDay = Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: end) ?? end
+            let endEpoch = Int(endOfDay.timeIntervalSince1970)
+            query = "\(query) AND before:\(endEpoch)"
+        }
+        
         guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return }
         
         let urlString = "\(baseURL)/messages?q=\(encodedQuery)&maxResults=500"
@@ -296,14 +310,14 @@ class GmailSyncService: ObservableObject {
         }
     }
     
-    func diagnosticYape() {
+    func diagnosticBBVA() {
         guard let token = GmailAuthService.shared.getAccessToken() else {
             DispatchQueue.main.async { self.diagnosticResult = "No token"; self.showDiagnostic = true }
             return
         }
         DispatchQueue.main.async { self.diagnosticResult = "Buscando..."; self.showDiagnostic = true }
         
-        let query = "from:notificaciones@yape.pe"
+        let query = "from:procesos@bbva.com.pe pago"
         guard let url = URL(string: "\(baseURL)/messages?q=\(query)&maxResults=1") else { return }
         
         var request = URLRequest(url: url)
@@ -320,7 +334,7 @@ class GmailSyncService: ObservableObject {
                     self.fetchDiagnosticDetails(id: id, token: token)
                 } else {
                     let raw = String(data: data, encoding: .utf8) ?? ""
-                    DispatchQueue.main.async { self.diagnosticResult = "No se encontraron correos de Yape. \n\n\(raw)" }
+                    DispatchQueue.main.async { self.diagnosticResult = "No se encontraron correos de BBVA Pago. \n\n\(raw)" }
                 }
             } catch {}
         }.resume()
@@ -374,9 +388,9 @@ class GmailSyncService: ObservableObject {
                 if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
                     let bodyText = self.extractFullText(from: json)
                     
-                    // DEBUG: Guardar el texto si es de Yape
-                    if bodyText.lowercased().contains("yape") {
-                        try? bodyText.write(to: URL(fileURLWithPath: "/tmp/yape_body.txt"), atomically: true, encoding: .utf8)
+                    // DEBUG: Guardar el texto si es de BBVA
+                    if bodyText.lowercased().contains("pago autom") {
+                        try? bodyText.write(to: URL(fileURLWithPath: "/Users/josephmt/Downloads/bbva_body.txt"), atomically: true, encoding: .utf8)
                     }
                     
                     completion(bodyText)

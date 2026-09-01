@@ -12,6 +12,7 @@ struct SettingsView: View {
     
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("syncFilters") private var syncFilters = true
+    @AppStorage("isDarkMode") private var isDarkMode = true
     @AppStorage("syncBBVA") private var syncBBVA = true
     @AppStorage("syncBCP") private var syncBCP = true
     @AppStorage("syncYape") private var syncYape = true
@@ -24,6 +25,11 @@ struct SettingsView: View {
     @StateObject private var gmailAuth = GmailAuthService.shared
     @StateObject private var gmailSync = GmailSyncService.shared
     
+    @State private var syncStartDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+    @State private var syncEndDate: Date = Date()
+    @State private var showBankInfo: Bool = false
+    @State private var bankInfoMessage: String = ""
+    
     var body: some View {
         NavigationStack {
             Form {
@@ -32,6 +38,9 @@ struct SettingsView: View {
                         .tint(.purple)
                     
                     Toggle("Sincronizar filtros entre pestañas", isOn: $syncFilters)
+                        .tint(.purple)
+                    
+                    Toggle("Modo Oscuro", isOn: $isDarkMode)
                         .tint(.purple)
                     
                     Button(action: {
@@ -94,7 +103,7 @@ struct SettingsView: View {
                     }
                 }
             }
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(isDarkMode ? .dark : .light)
             .alert("Borrar Reglas", isPresented: $showDeleteClassificationsConfirmation) {
                 Button("Borrar Categorías", role: .destructive) { deleteClassifications() }
                 Button("Cancelar", role: .cancel) {}
@@ -162,16 +171,28 @@ struct SettingsView: View {
                         }
                         .padding(.vertical, 8)
                     } else {
-                        Button(action: {
-                            gmailSync.modelContext = modelContext
-                            let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
-                            if !recoveryIDs.isEmpty {
-                                showRecoveryAlert = true
-                            } else {
-                                gmailSync.syncEmails(force: true)
+                        if gmailSync.isSyncing {
+                            HStack {
+                                ProgressView()
+                                    .padding(.trailing, 8)
+                                Text("Sincronizando... (\(gmailSync.emailsProcessed)/\(gmailSync.totalEmailsToProcess))")
+                                    .foregroundStyle(.secondary)
                             }
-                        }) {
-                            Label("Sincronizar Correos", systemImage: "envelope.arrow.triangle.branch")
+                        } else {
+                            DatePicker("Desde", selection: $syncStartDate, displayedComponents: .date)
+                            DatePicker("Hasta", selection: $syncEndDate, displayedComponents: .date)
+                            
+                            Button(action: {
+                                gmailSync.modelContext = modelContext
+                                let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
+                                if !recoveryIDs.isEmpty {
+                                    showRecoveryAlert = true
+                                } else {
+                                    gmailSync.syncEmails(force: true, startDate: syncStartDate, endDate: syncEndDate)
+                                }
+                            }) {
+                                Label("Sincronizar Correos", systemImage: "envelope.arrow.triangle.branch")
+                            }
                         }
                     }
                     
@@ -190,15 +211,84 @@ struct SettingsView: View {
             }
             
             Section(header: Text("Bancos a Sincronizar"), footer: Text("Selecciona de qué bancos quieres que la app lea notificaciones automáticamente.")) {
-                Toggle("BBVA (Activo)", isOn: $syncBBVA).tint(.blue)
-                Toggle("BCP", isOn: $syncBCP).tint(.orange)
-                Toggle("Yape", isOn: $syncYape).tint(.purple)
-                Toggle("Interbank", isOn: $syncInterbank).tint(.green)
-                Toggle("Scotiabank", isOn: $syncScotiabank).tint(.red)
+                Toggle(isOn: $syncBBVA) {
+                    HStack {
+                        Text("BBVA (Activo)")
+                        Button(action: {
+                            bankInfoMessage = "Detecta: Plin, Pagos Automáticos, Pagos con tarjeta en físico (contactless) y Pagos con tarjeta de crédito en línea."
+                            showBankInfo = true
+                        }) {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.blue)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }.tint(.blue)
+                
+                Toggle(isOn: $syncBCP) {
+                    HStack {
+                        Text("BCP")
+                        Button(action: {
+                            bankInfoMessage = "Detecta: Pagos con tarjeta y transferencias convencionales."
+                            showBankInfo = true
+                        }) {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.orange)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }.tint(.orange)
+                
+                Toggle(isOn: $syncYape) {
+                    HStack {
+                        Text("Yape")
+                        Button(action: {
+                            bankInfoMessage = "Detecta: Yapeos convencionales recibidos y enviados."
+                            showBankInfo = true
+                        }) {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.purple)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }.tint(.purple)
+                
+                Toggle(isOn: $syncInterbank) {
+                    HStack {
+                        Text("Interbank")
+                        Button(action: {
+                            bankInfoMessage = "Detecta: Pagos con tarjeta y transferencias."
+                            showBankInfo = true
+                        }) {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.green)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }.tint(.green)
+                
+                Toggle(isOn: $syncScotiabank) {
+                    HStack {
+                        Text("Scotiabank")
+                        Button(action: {
+                            bankInfoMessage = "Detecta: Pagos con tarjeta y transferencias."
+                            showBankInfo = true
+                        }) {
+                            Image(systemName: "info.circle")
+                                .foregroundColor(.red)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }.tint(.red)
             }
         }
         .navigationTitle("Sincronización Inicial")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Información del Banco", isPresented: $showBankInfo) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(bankInfoMessage)
+        }
     }
     
     private var onlineConfigView: some View {
@@ -220,12 +310,11 @@ struct SettingsView: View {
             }
             Section(header: Text("Debug")) {
                 Button(action: {
-                    gmailSync.diagnosticYape()
+                    gmailSync.diagnosticBBVA()
                 }) {
-                    Label("Diagnóstico Yape", systemImage: "ladybug.fill")
-                        .foregroundColor(.orange)
+                    Label("Diagnóstico BBVA Pago", systemImage: "stethoscope")
                 }
-            }
+            }.foregroundColor(.orange)
         }
         .navigationTitle("Configuración Online")
         .navigationBarTitleDisplayMode(.inline)
