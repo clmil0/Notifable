@@ -158,6 +158,8 @@ struct SettingsView: View {
             
             // El toggle "Sincronizar filtros entre pestañas" desaparece: ahora
             // hay un solo periodo para toda la app, no hay nada que sincronizar.
+            
+            BudgetSettingsSection(tint: currentTint)
         }
         .navigationTitle("Apariencia y Navegación")
         .navigationBarTitleDisplayMode(.inline)

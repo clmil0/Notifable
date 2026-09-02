@@ -129,9 +129,7 @@ struct SocialView: View {
                                     .font(.headline)
                                     .fontWeight(.bold)
                             }
-                            .padding()
-                            .background(Color.primary.opacity(0.05))
-                            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .surfaceCard(radius: 16)
                             .padding(.horizontal)
                         }
                     }

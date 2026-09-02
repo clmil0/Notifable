@@ -58,6 +58,11 @@ struct CategoriesView: View {
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
+
+    /// Paleta con contraste verificado. Sustituye a `Color.primary.opacity(0.05)`,
+    /// que en modo claro es #F2F2F2 sobre blanco: 4 % de diferencia de luminancia,
+    /// invisible al sol o con el brillo bajo.
+    private var palette: Palette { Palette(colorScheme) }
     
     @State private var selectedTab: CategoryTab = .misCategorias
     @State private var selectedMerchantToCategorize: MerchantWrapper?
@@ -224,7 +229,7 @@ struct CategoriesView: View {
                             }
                         }
                     }
-                    .background(Color.primary.opacity(0.05))
+                    .background(palette.surface)
                     .clipShape(Capsule())
                     .padding(.horizontal)
                     .padding(.bottom, -12) // Reduce the 24 spacing to 12
@@ -289,7 +294,7 @@ struct CategoriesView: View {
                             .padding(.vertical, 12)
                             .background(
                                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(colorScheme == .light ? Color.white : Color(UIColor.systemGray6))
+                                    .fill(palette.surfaceElevated)
                                     .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
                             )
                         }
@@ -371,9 +376,7 @@ struct CategoriesView: View {
 
             donutChart
         }
-        .padding()
-        .background(Color.primary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .surfaceCard(radius: 24)
         .padding(.horizontal)
     }
 
@@ -537,7 +540,7 @@ struct CategoriesView: View {
                         }
                     }
                     .padding(10)
-                    .background(Color(.systemGray6))
+                    .background(palette.surface)
                     .cornerRadius(10)
                     .padding(.horizontal)
                     .padding(.bottom, 8)
@@ -569,7 +572,7 @@ struct CategoriesView: View {
         let isExpanded = expandedCategories.contains(item.category)
         let background: Color = highlightedID == item.category
             ? themeColor.opacity(0.15)
-            : Color.primary.opacity(0.05)
+            : palette.surface
 
         return VStack(spacing: 0) {
             categoryHeader(for: item, isExpanded: isExpanded)
@@ -623,7 +626,7 @@ struct CategoriesView: View {
 
     private func categoryMerchants(for item: CategoryRow) -> some View {
         VStack(spacing: 8) {
-            Divider().background(Color.primary.opacity(0.1))
+            Divider().background(palette.separator)
 
             ForEach(item.merchants) { merchantItem in
                 HStack {
@@ -677,7 +680,7 @@ struct CategoriesView: View {
         let isExpanded = expandedMerchants.contains(group.merchant)
         let background: Color = highlightedID == group.merchant
             ? themeColor.opacity(0.15)
-            : Color.primary.opacity(0.05)
+            : palette.surface
 
         return VStack(spacing: 0) {
             inboxHeader(for: group, isExpanded: isExpanded)
@@ -778,7 +781,7 @@ struct CategoriesView: View {
 
     private func inboxExpenses(for group: InboxGroup) -> some View {
         VStack(spacing: 8) {
-            Divider().background(Color.primary.opacity(0.1))
+            Divider().background(palette.separator)
 
             ForEach(group.expenses) { expense in
                 HStack {

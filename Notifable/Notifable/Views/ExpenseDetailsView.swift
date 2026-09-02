@@ -17,6 +17,14 @@ struct ExpenseDetailsView: View {
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// Paleta con contraste verificado. Sustituye a `Color.primary.opacity(0.05)`,
+    /// que en modo claro es #F2F2F2 sobre blanco: 4 % de diferencia de luminancia,
+    /// invisible al sol o con el brillo bajo.
+    private var palette: Palette { Palette(colorScheme) }
+
     
     var allCategories: [String] {
         let defaults = ["Comida", "Transporte", "Entretenimiento", "Supermercado", "Otros"]
@@ -84,8 +92,7 @@ struct ExpenseDetailsView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .background(Color(.systemGray6))
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .surfaceCard(radius: 16, padding: 0)
                     .padding(.horizontal)
                     
                     if expense.isDebt || !(expense.payments ?? []).isEmpty {
@@ -192,7 +199,7 @@ struct ExpenseDetailsView: View {
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule()
-                            .fill(Color.primary.opacity(0.1))
+                            .fill(palette.track)
                             .frame(height: 8)
                         
                         Capsule()
@@ -203,8 +210,7 @@ struct ExpenseDetailsView: View {
                 .frame(height: 8)
             }
             .padding()
-            .background(Color(.systemGray6))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .surfaceCard(radius: 16, padding: 0)
             .padding(.horizontal)
             
             if let payments = expense.payments, !payments.isEmpty {
@@ -242,8 +248,7 @@ struct ExpenseDetailsView: View {
                         }
                     }
                 }
-                .background(Color(.systemGray6))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .surfaceCard(radius: 16, padding: 0)
                 .padding(.horizontal)
             } else {
                 Text("Aún no hay pagos registrados.")

@@ -27,6 +27,11 @@ struct TrendsView: View {
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
+
+    /// Paleta con contraste verificado. Sustituye a `Color.primary.opacity(0.05)`,
+    /// que en modo claro es #F2F2F2 sobre blanco: 4 % de diferencia de luminancia,
+    /// invisible al sol o con el brillo bajo.
+    private var palette: Palette { Palette(colorScheme) }
     
     // MARK: - Totales
     //
@@ -246,9 +251,7 @@ struct TrendsView: View {
                 }
             }
         }
-        .padding()
-        .background(Color.primary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .surfaceCard(radius: 24)
         .padding(.horizontal)
     }
     
@@ -336,8 +339,7 @@ struct TrendsView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.primary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .surfaceCard(radius: 16, padding: 0)
     }
     
     // MARK: - Comparison View
@@ -373,9 +375,7 @@ struct TrendsView: View {
                 .font(.title3.bold())
                 .foregroundStyle(isLess ? .green : .red)
         }
-        .padding()
-        .background(Color.primary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .surfaceCard(radius: 16)
         .padding(.horizontal)
     }
 }

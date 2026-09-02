@@ -39,6 +39,11 @@ struct DashboardView: View {
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
+
+    /// Paleta con contraste verificado. Sustituye a `Color.primary.opacity(0.05)`,
+    /// que en modo claro es #F2F2F2 sobre blanco: 4 % de diferencia de luminancia,
+    /// invisible al sol o con el brillo bajo.
+    private var palette: Palette { Palette(colorScheme) }
     
     @State private var searchText: String = ""
     
@@ -47,6 +52,10 @@ struct DashboardView: View {
     @State private var isPressingTotalUSD = false
     
     @State private var selectedExpenseForDetails: Expense? = nil
+    @State private var showBudgetSheet = false
+    /// La tira de ingresos filtra la actividad reciente a sólo ingresos.
+    @State private var showsIncomesOnly = false
+    @AppStorage(BudgetStore.tracksIncomeKey) private var tracksIncome = true
     
     // MARK: - Totales
     //
@@ -88,7 +97,7 @@ struct DashboardView: View {
     }
 
     var searchedTransactions: [TransactionItem] {
-        let exps = filteredExpenses.map { TransactionItem.expense($0) }
+        let exps = showsIncomesOnly ? [] : filteredExpenses.map { TransactionItem.expense($0) }
         let incs = filteredIncomes.map { TransactionItem.income($0) }
         let allTransactions = (exps + incs).sorted { $0.date > $1.date }
         
@@ -118,110 +127,49 @@ struct DashboardView: View {
                         // Una sola fila de periodo + scrubber de días.
                         PeriodHeader(period: $period, dailySpent: dailySpent(for:))
                         
-                        // Tarjeta Principal (3 Divs)
-                        VStack(spacing: 12) {
-                            // 1. Div de Arriba (Gastos)
-                            VStack(spacing: 8) {
-                                HStack {
-                                    Text("Gastos")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary.opacity(0.7))
-                                        .textCase(.uppercase)
-                                    
-                                    Spacer()
-                                    
-                                    if period.granularity != .rango {
-                                        Text(period.shortTitle)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                            .padding(.horizontal, 8)
-                                            .padding(.vertical, 4)
-                                            .background(Color.primary.opacity(0.1))
-                                            .clipShape(Capsule())
-                                    }
-                                }
-                                
-                                Text(Money.format(totalCombinedPEN))
-                                    .font(.system(size: 48, weight: .bold, design: .rounded))
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(isPressingTotalCombined ? nil : 1)
-                                    .minimumScaleFactor(0.6)
-                                    .truncationMode(.tail)
-                                    .onLongPressGesture(minimumDuration: .infinity, perform: {}) { isPressing in
-                                        withAnimation(.spring) {
-                                            isPressingTotalCombined = isPressing
-                                        }
-                                    }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 32)
-                            .padding(.horizontal, 16)
-                            .background(Color.primary.opacity(0.05))
-                            .clipShape(RoundedRectangle(cornerRadius: 32, style: .continuous))
-                            
-                            // 2. Fila con 2 Divs de Abajo (Ingresos y Gastos)
-                            HStack(spacing: 12) {
-                                // Div Ingresos
-                                VStack(spacing: 8) {
-                                    Text("Ingresos")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary.opacity(0.7))
-                                    Text(Money.format(totalCombinedIncomePEN))
-                                        .font(.title2.bold())
-                                        .lineLimit(isPressingTotalPEN ? nil : 1)
-                                        .minimumScaleFactor(0.6)
-                                        .truncationMode(.tail)
-                                        .onLongPressGesture(minimumDuration: .infinity, perform: {}) { isPressing in
-                                            withAnimation(.spring) {
-                                                isPressingTotalPEN = isPressing
-                                            }
-                                        }
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 20)
-                                .padding(.horizontal, 12)
-                                .background(Color.primary.opacity(0.05))
-                                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                                
-                                // Div Restante
-                                VStack(spacing: 8) {
-                                    Text("Restante")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary.opacity(0.7))
-                                    // `balance` es nil si no hay ingresos: se
-                                    // muestra "—" en vez de un restante que es
-                                    // el gasto en negativo.
-                                    let restante = totals.balance
-                                    Text(restante.map { Money.format($0) } ?? "—")
-                                        .font(.title2.bold())
-                                        .foregroundStyle((restante ?? 0) < 0 ? .red : .primary)
-                                        .lineLimit(isPressingTotalUSD ? nil : 1)
-                                        .minimumScaleFactor(0.6)
-                                        .truncationMode(.tail)
-                                        .onLongPressGesture(minimumDuration: .infinity, perform: {}) { isPressing in
-                                            withAnimation(.spring) {
-                                                isPressingTotalUSD = isPressing
-                                            }
-                                        }
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 20)
-                                .padding(.horizontal, 12)
-                                .background(Color.primary.opacity(0.05))
-                                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                            }
+                        // Tarjeta principal: el monto leído contra el
+                        // presupuesto, con la marca de ritmo.
+                        BudgetHeroCard(period: period, totals: totals) {
+                            showBudgetSheet = true
                         }
-                        .padding(.horizontal)
                         
+                        // Tira de ingresos. Sólo si el usuario los registra.
+                        IncomeStrip(totals: totals) {
+                            withAnimation(.spring) { showsIncomesOnly.toggle() }
+                        } onEnableIncome: {
+                            tracksIncome = true
+                        }
+                        
+
                         if !expensesByMerchant.isEmpty {
                             chartCard
                         }
                         
                         VStack(alignment: .leading, spacing: 12) {
-                            Text("Actividad Reciente")
-                                .font(.title3)
-                                .fontWeight(.bold)
-                                .padding(.horizontal)
+                            HStack {
+                                Text("Actividad Reciente")
+                                    .font(.title3)
+                                    .fontWeight(.bold)
+                                
+                                Spacer()
+                                
+                                // Al tocar la tira de ingresos la lista se filtra;
+                                // el chip dice que hay un filtro puesto y lo quita.
+                                if showsIncomesOnly {
+                                    Button {
+                                        withAnimation(.spring) { showsIncomesOnly = false }
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Text("Sólo ingresos")
+                                            Image(systemName: "xmark")
+                                        }
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(themeColor)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.horizontal)
                             
                             // Barra de búsqueda por proximidad
                             HStack {
@@ -242,7 +190,7 @@ struct DashboardView: View {
                                 }
                             }
                             .padding(10)
-                            .background(Color(.systemGray6))
+                            .background(palette.surface)
                             .cornerRadius(10)
                             .padding(.horizontal)
                             
@@ -271,6 +219,9 @@ struct DashboardView: View {
         }
         .sheet(item: $selectedExpenseForDetails) { expense in
             ExpenseDetailsView(expense: expense)
+        }
+        .sheet(isPresented: $showBudgetSheet) {
+            BudgetSheet()
         }
     }
     
@@ -324,9 +275,7 @@ struct DashboardView: View {
             }
             .padding(.top, 4)
         }
-        .padding()
-        .background(Color.primary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .surfaceCard(radius: 24)
         .padding(.horizontal)
     }
     
@@ -448,9 +397,7 @@ struct DashboardView: View {
                 }
             }
         }
-        .padding()
-        .background(Color.primary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .surfaceCard(radius: 16)
         .padding(.horizontal)
         .contextMenu {
             Button {
@@ -561,9 +508,7 @@ struct DashboardView: View {
                 .fontWeight(.bold)
                 .foregroundStyle(isDebtPayment ? Color.orange : .green)
         }
-        .padding()
-        .background(Color.primary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .surfaceCard(radius: 16)
         .padding(.horizontal)
         .contextMenu {
             Button(role: .destructive) {
