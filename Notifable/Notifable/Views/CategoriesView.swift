@@ -966,6 +966,7 @@ struct AssignCategoryView: View {
                 }
             }
             .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appTextSize()
         }
     }
 }

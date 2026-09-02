@@ -22,6 +22,9 @@ struct BudgetHeroCard: View {
     @AppStorage(BudgetStore.monthlyBudgetKey) private var monthlyBudget: Double = 0
 
     @State private var isExpandingAmount = false
+    /// `.system(size:)` es un valor fijo: no lo mueve `DynamicTypeSize`, así que
+    /// el ajuste de tamaño de letra lo escala aparte.
+    @ScaledAmountFont(44) private var amountSize
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
@@ -88,7 +91,7 @@ struct BudgetHeroCard: View {
     /// ver la cifra completa cuando es muy larga.
     private var amount: some View {
         Text(Money.format(totals.spent))
-            .font(.system(size: 44, weight: .bold, design: .rounded))
+            .font(.system(size: amountSize, weight: .bold, design: .rounded))
             .foregroundStyle(palette.label)
             .lineLimit(isExpandingAmount ? nil : 1)
             .minimumScaleFactor(0.6)

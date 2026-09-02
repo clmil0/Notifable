@@ -68,6 +68,7 @@ struct ClassifyFlowView: View {
                 }
             }
             .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appTextSize()
         }
     }
 

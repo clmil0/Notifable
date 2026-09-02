@@ -57,6 +57,9 @@ struct DashboardView: View {
     
     @State private var selectedExpenseForDetails: Expense? = nil
     @State private var showBudgetSheet = false
+    /// Un ingreso no tiene pantalla de detalle; al tocarlo se ofrece la única
+    /// acción que tenía en el menú.
+    @State private var incomeToActOn: Income?
     /// La tira de ingresos filtra la actividad reciente a sólo ingresos.
     @State private var showsIncomesOnly = false
     @AppStorage(BudgetStore.tracksIncomeKey) private var tracksIncome = true
@@ -233,6 +236,17 @@ struct DashboardView: View {
         .sheet(isPresented: $showBudgetSheet) {
             BudgetSheet()
         }
+        .confirmationDialog(incomeDialogTitle,
+                            isPresented: incomeDialogBinding,
+                            titleVisibility: .visible) {
+            Button("Eliminar ingreso", role: .destructive) {
+                if let income = incomeToActOn {
+                    withAnimation { modelContext.delete(income) }
+                }
+                incomeToActOn = nil
+            }
+            Button("Cancelar", role: .cancel) { incomeToActOn = nil }
+        }
     }
     
     // MARK: - Subviews
@@ -350,6 +364,17 @@ struct DashboardView: View {
         }
     }
     
+    private var incomeDialogBinding: Binding<Bool> {
+        Binding(get: { incomeToActOn != nil },
+                set: { if !$0 { incomeToActOn = nil } })
+    }
+
+    private var incomeDialogTitle: String {
+        guard let income = incomeToActOn else { return "" }
+        let name = income.title ?? income.source
+        return name + " · " + Money.format(income.amount, currency: income.currency)
+    }
+
     /// Una fila de movimiento. Partida en piezas: los ternarios de color dentro
     /// de `.fill()` y `.background()` obligan al comprobador de tipos a probar
     /// todas las sobrecargas de ShapeStyle, y en una expresión larga se rinde.
@@ -361,11 +386,6 @@ struct DashboardView: View {
             Spacer()
 
             expenseAmount(for: expense)
-
-            // El menú de la fila, siempre visible: las mismas acciones que
-            // antes vivían en el context menu, que no se anuncia en ninguna
-            // parte y por eso nadie encontraba.
-            expenseMenu(for: expense)
         }
         .surfaceCard(radius: 16)
         .padding(.horizontal)
@@ -481,79 +501,6 @@ struct DashboardView: View {
     }
 
     
-    /// Menú de una fila de gasto. Botón `ellipsis` de 28 pt, siempre visible.
-    private func expenseMenu(for expense: Expense) -> some View {
-        Menu {
-            Button {
-                selectedExpenseForDetails = expense
-            } label: {
-                Label("Detalles", systemImage: "info.circle")
-            }
-
-            Button {
-                toggleDebt(expense)
-            } label: {
-                Label(expense.isDebt ? "Desmarcar deuda" : "Marcar deuda",
-                      systemImage: expense.isDebt ? "xmark.circle" : "exclamationmark.circle")
-            }
-
-            Button(role: .destructive) {
-                delete(expense)
-            } label: {
-                Label("Eliminar", systemImage: "trash")
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(palette.secondaryLabel)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-        }
-        .accessibilityLabel("Acciones del movimiento")
-    }
-
-    private func incomeMenu(for income: Income) -> some View {
-        Menu {
-            Button(role: .destructive) {
-                withAnimation { modelContext.delete(income) }
-            } label: {
-                Label("Eliminar", systemImage: "trash")
-            }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(palette.secondaryLabel)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-        }
-        .accessibilityLabel("Acciones del ingreso")
-    }
-
-    private func toggleDebt(_ expense: Expense) {
-        withAnimation {
-            expense.isDebt.toggle()
-            try? modelContext.save()
-
-            let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.isDebt == true })
-            let hasDebts = ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
-            NotificationManager.shared.updateDebtNotification(hasDebts: hasDebts)
-            NotificationManager.shared.requestPermission()
-        }
-    }
-
-    private func delete(_ expense: Expense) {
-        withAnimation {
-            if let emailID = expense.emailID {
-                var recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
-                if !recoveryIDs.contains(emailID) {
-                    recoveryIDs.append(emailID)
-                    UserDefaults.standard.set(recoveryIDs, forKey: "pendingRecoveryIDs")
-                }
-            }
-            modelContext.delete(expense)
-        }
-    }
-
     private func incomeCard(for income: Income) -> some View {
         HStack(spacing: 16) {
             ZStack {
@@ -623,11 +570,11 @@ struct DashboardView: View {
                 .font(.title3)
                 .fontWeight(.bold)
                 .foregroundStyle(isDebtPayment ? Color.orange : .green)
-
-            incomeMenu(for: income)
         }
         .surfaceCard(radius: 16)
         .padding(.horizontal)
+        .contentShape(Rectangle())
+        .onTapGesture { incomeToActOn = income }
     }
     
     // MARK: - Helpers

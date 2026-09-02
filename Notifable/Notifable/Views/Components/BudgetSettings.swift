@@ -85,6 +85,7 @@ struct BudgetSheet: View {
                 }
             }
             .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appTextSize()
         }
         .presentationDetents([.fraction(0.45)])
         .presentationDragIndicator(.visible)

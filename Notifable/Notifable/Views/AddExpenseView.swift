@@ -150,6 +150,7 @@ struct AddExpenseView: View {
                 }
             }
             .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appTextSize()
         }
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)

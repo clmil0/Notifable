@@ -23,6 +23,7 @@ struct ExpenseDetailsView: View {
     @State private var showingCategoryPicker = false
     @State private var showingEditor = false
     @State private var showingDeleteConfirmation = false
+    @ScaledAmountFont(40) private var amountSize
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var themeColor: Color { accent.color }
@@ -83,6 +84,7 @@ struct ExpenseDetailsView: View {
             }
         }
         .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appTextSize()
         .presentationCornerRadius(32)
     }
 
@@ -100,7 +102,7 @@ struct ExpenseDetailsView: View {
             }
 
             Text(Money.format(expense.amount, currency: expense.currency))
-                .font(.system(size: 40, weight: .bold, design: .rounded))
+                .font(.system(size: amountSize, weight: .bold, design: .rounded))
                 .foregroundStyle(palette.label)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
@@ -497,6 +499,7 @@ struct EditExpenseSheet: View {
                 date = expense.date
             }
             .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appTextSize()
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)

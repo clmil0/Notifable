@@ -31,6 +31,7 @@ struct NotifableApp: App {
         WindowGroup {
             ContentView()
                 .tint(AppThemeColor(rawValue: appAccentColor)?.color ?? .purple)
+                .appTextSize()
         }
         .modelContainer(sharedModelContainer) // Inyecta la BD a todas las vistas
         .onChange(of: scenePhase) { oldPhase, newPhase in

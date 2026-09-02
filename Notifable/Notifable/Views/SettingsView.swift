@@ -12,6 +12,7 @@ struct SettingsView: View {
     
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("isDarkMode") private var isDarkMode = true
+    @AppStorage(AppTextSize.storageKey) private var appTextSize = AppTextSize.sistema.rawValue
     @AppStorage("syncBBVA") private var syncBBVA = true
     @AppStorage("syncBCP") private var syncBCP = true
     @AppStorage("syncYape") private var syncYape = true
@@ -107,6 +108,7 @@ struct SettingsView: View {
                 }
             }
             .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appTextSize()
             .alert("Borrar Reglas", isPresented: $showDeleteClassificationsConfirmation) {
                 Button("Borrar Categorías", role: .destructive) { deleteClassifications() }
                 Button("Cancelar", role: .cancel) {}
@@ -151,9 +153,21 @@ struct SettingsView: View {
                 }
             }
             
-            Section(header: Text("Visualización")) {
+            Section {
                 Toggle("Modo Oscuro", isOn: $isDarkMode)
                     .tint(currentTint)
+
+                Picker("Tamaño de letra", selection: $appTextSize) {
+                    ForEach(AppTextSize.allCases) { size in
+                        Text(size.rawValue).tag(size.rawValue)
+                    }
+                }
+            } header: {
+                Text("Visualización")
+            } footer: {
+                Text(appTextSize == AppTextSize.sistema.rawValue
+                     ? "Se usa el tamaño de letra que tengas configurado en iOS."
+                     : "Este tamaño manda sobre el que tengas configurado en iOS.")
             }
             
             // El toggle "Sincronizar filtros entre pestañas" desaparece: ahora
