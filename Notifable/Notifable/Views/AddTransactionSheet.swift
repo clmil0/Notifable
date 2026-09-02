@@ -130,8 +130,11 @@ struct AddTransactionSheet: View {
 
     // MARK: - 1. Barra superior
 
+    /// Sólo "Cancelar". El tipo de movimiento se elige en los botones flotantes
+    /// del `+` antes de abrir, así que un segmentado aquí repetía esa decisión y
+    /// se comía la altura que el teclado necesita.
     private var topBar: some View {
-        HStack(spacing: 0) {
+        HStack {
             Button {
                 if draft.hasAmount { showDiscardDialog = true } else { dismiss() }
             } label: {
@@ -139,84 +142,11 @@ struct AddTransactionSheet: View {
                     .font(.body)
                     .foregroundStyle(accentText)
             }
-            .frame(width: 64, alignment: .leading)
 
-            typeSegmentedControl
-                .frame(maxWidth: .infinity)
-
-            // Mantiene el segmentado centrado ópticamente frente a "Cancelar".
-            Color.clear.frame(width: 64, height: 1)
+            Spacer()
         }
         .padding(.horizontal, 16)
         .frame(height: 56)
-    }
-
-    /// Segmentado propio: `Picker(.segmented)` no admite el color de acento, y
-    /// aquí el color es lo que distingue gasto de ingreso.
-    private var typeSegmentedControl: some View {
-        HStack(spacing: 0) {
-            ForEach(TransactionType.allCases) { type in
-                Button {
-                    switchType(to: type)
-                } label: {
-                    Text(type.rawValue)
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(segmentForeground(type))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 30)
-                        .background(segmentBackground(type))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(3)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-        .frame(maxWidth: 220)
-    }
-
-    @ViewBuilder
-    private func segmentBackground(_ type: TransactionType) -> some View {
-        if draft.type == type {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(scheme == .dark ? fillFor(type) : Color.white)
-                .shadow(color: .black.opacity(scheme == .dark ? 0 : 0.12), radius: 1, y: 1)
-        } else {
-            Color.clear
-        }
-    }
-
-    private func segmentForeground(_ type: TransactionType) -> Color {
-        guard draft.type == type else { return palette.secondaryLabel }
-        if scheme == .dark { return .white }
-        return type == .gasto ? themeAccent.onSurface(scheme) : accentTextFor(type)
-    }
-
-    private func fillFor(_ type: TransactionType) -> Color {
-        type == .gasto ? themeAccent.color : Self.incomeFill
-    }
-
-    private func accentTextFor(_ type: TransactionType) -> Color {
-        type == .gasto
-            ? themeAccent.onSurface(scheme)
-            : (scheme == .dark ? Color(red: 0.188, green: 0.820, blue: 0.345)
-                               : Color(red: 0.114, green: 0.498, blue: 0.235))
-    }
-
-    /// Cambiar de tipo conserva monto, moneda y fecha: son lo mismo en ambos.
-    private func switchType(to type: TransactionType) {
-        guard draft.type != type else { return }
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-            draft.type = type
-            if type == .gasto {
-                draft.isDebtPayment = false
-                draft.selectedDebt = nil
-                draft.title = ""
-            } else {
-                draft.merchant = ""
-                draft.isSubscription = false
-            }
-        }
     }
 
     // MARK: - 2. Hero de monto
