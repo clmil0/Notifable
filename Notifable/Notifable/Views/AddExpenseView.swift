@@ -100,7 +100,7 @@ struct AddExpenseView: View {
                             Picker("Abonar a Deuda (Opcional)", selection: $selectedDebt) {
                                 Text("Ninguna").tag(Expense?.none)
                                 ForEach(activeDebts) { debt in
-                                    Text("\(debt.merchant) - S/ \(debt.unpaidAmount, specifier: "%.2f")").tag(Expense?.some(debt))
+                                    Text(Accounting.displayName(debt.merchant) + " - " + Money.format(Accounting.outstanding(of: debt), currency: debt.currency)).tag(Expense?.some(debt))
                                 }
                             }
                             
@@ -160,10 +160,8 @@ struct AddExpenseView: View {
         let amount = Double(amountText.replacingOccurrences(of: ",", with: ".")) ?? 0.0
         guard amount > 0, !merchant.isEmpty else { return }
         
-        let roundedAmount = (amount * 100).rounded() / 100
-        
         let expense = Expense(
-            amount: roundedAmount,
+            amount: amount,
             merchant: merchant,
             category: category,
             isSubscription: isSubscription,
@@ -189,10 +187,9 @@ struct AddExpenseView: View {
         let selected = options.randomElement()!
         
         let randomValue = Double.random(in: 10.0...150.0)
-        let roundedAmount = (randomValue * 100).rounded() / 100
         
         let mock = Expense(
-            amount: roundedAmount,
+            amount: randomValue,
             merchant: selected.0,
             category: selected.1,
             isSubscription: selected.0 == "Netflix"
@@ -208,10 +205,13 @@ struct AddExpenseView: View {
         let amount = Double(amountText.replacingOccurrences(of: ",", with: ".")) ?? 0.0
         guard amount > 0 else { return }
         
-        let roundedAmount = (amount * 100).rounded() / 100
+        // Un abono nunca puede exceder el saldo: el exceso se rechaza, no se
+        // absorbe en silencio (ACCOUNTING.md §6).
+        let finalAmount = selectedDebt.map { Accounting.clampPayment(amount, to: $0) } ?? amount
+        guard finalAmount > 0 else { return }
         
         let income = Income(
-            amount: roundedAmount,
+            amount: finalAmount,
             currency: currency,
             source: incomeSource,
             title: incomeTitle.isEmpty ? nil : incomeTitle,

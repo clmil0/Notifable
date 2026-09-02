@@ -30,8 +30,7 @@ struct ExpenseDetailsView: View {
                 VStack(spacing: 24) {
                     // Header con Monto
                     VStack(spacing: 8) {
-                        let currencySymbol = expense.currency == "USD" ? "$" : "S/"
-                        Text("\(currencySymbol) \(expense.amount, specifier: "%.2f")")
+                        Text(Money.format(expense.amount, currency: expense.currency))
                             .font(.system(size: 48, weight: .bold, design: .rounded))
                             .foregroundStyle(.primary)
                         
@@ -50,6 +49,13 @@ struct ExpenseDetailsView: View {
                         detailRow(title: "Moneda", value: expense.currency == "PEN" ? "Soles (PEN)" : "Dólares (USD)")
                         
                         Divider().padding(.leading, 16)
+                        
+                        if expense.currency != "PEN", let fx = expense.fxRateAtCapture {
+                            // El tipo de cambio del día del movimiento, no el de hoy.
+                            detailRow(title: "Tipo de cambio", value: "S/ " + String(format: "%.3f", fx) + " por $ 1")
+                            
+                            Divider().padding(.leading, 16)
+                        }
                         
                         if let card = expense.cardLastDigits {
                             detailRow(title: "Tarjeta", value: "*\(card)")
@@ -147,19 +153,40 @@ struct ExpenseDetailsView: View {
                 .fontWeight(.bold)
                 .padding(.horizontal)
             
-            let paid = (expense.payments ?? []).reduce(0) { $0 + $1.amount }
+            // Sólo cuentan los abonos en la moneda del gasto: un abono de $ 40
+            // no salda 40 soles (ACCOUNTING.md §5).
+            let paid = Accounting.paid(of: expense)
             let total = expense.amount
-            let ratio = total > 0 ? min(paid / total, 1.0) : 0
+            let pending = Accounting.outstanding(of: expense)
+            let ratio = min(Money.ratio(paid, to: total) ?? 0, 1.0)
             
             VStack(alignment: .leading, spacing: 8) {
+                if Accounting.hasForeignPayments(expense) {
+                    Label("Hay abonos en otra moneda. El saldo no se puede calcular con ellos y quedan fuera de esta cuenta.",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .padding(.bottom, 4)
+                }
+                
                 HStack {
-                    Text("S/ \(paid, specifier: "%.2f") pagado")
+                    Text(Money.format(paid, currency: expense.currency) + " pagado")
                         .font(.subheadline)
                         .foregroundStyle(.green)
                     Spacer()
-                    Text("S/ \(total, specifier: "%.2f") total")
+                    Text(Money.format(total, currency: expense.currency) + " total")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                }
+                
+                HStack {
+                    Text("Pendiente")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(Money.format(pending, currency: expense.currency))
+                        .font(.caption.bold())
+                        .foregroundStyle(Money.isZero(pending) ? .green : .orange)
                 }
                 
                 GeometryReader { geo in
@@ -192,7 +219,7 @@ struct ExpenseDetailsView: View {
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text("+S/ \(payment.amount, specifier: "%.2f")")
+                            Text("+" + Money.format(payment.amount, currency: payment.currency))
                                 .fontWeight(.bold)
                                 .foregroundStyle(.green)
                         }

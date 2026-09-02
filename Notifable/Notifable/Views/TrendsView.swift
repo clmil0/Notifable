@@ -15,310 +15,134 @@ struct TrendsView: View {
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
     @Query(sort: \Income.date, order: .reverse) private var incomes: [Income]
     @Environment(\.colorScheme) var colorScheme
-    @AppStorage("isDarkMode") private var isDarkMode = true
     
     @Binding var scrollOffset: CGFloat
     @Binding var scrollToTopTrigger: Bool
     
     @StateObject private var exchangeRateService = ExchangeRateService.shared
     
-    @AppStorage("dashboardFilter") private var selectedFilter: DashboardFilter = .mes
-    @AppStorage("categoriesFilter") private var categoriesFilter: DashboardFilter = .mes
-    @AppStorage("syncFilters") private var syncFilters = true
+    /// El mismo `Period` que Resumen y Categorías.
+    @AppStorage("period") private var period = Period()
     
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     
-    @State private var showRangePicker = false
-    @State private var startDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
-    @State private var endDate: Date = Date()
+    // MARK: - Totales
+    //
+    // Todo se deriva de `PeriodTotals`, que a su vez se deriva de `Period.days`.
+    // Antes los gráficos se construían con `now` en lugar del periodo navegado,
+    // así que al retroceder una semana los números de arriba cambiaban pero el
+    // gráfico seguía dibujando la semana actual (ACCOUNTING.md §11). Ahora es
+    // imposible desincronizarlos: no hay dos fuentes.
     
-    @State private var referenceDate: Date = Date()
-    @State private var slideDirection: Edge = .leading
+    var rate: Double { exchangeRateService.usdToPenRate }
     
-    // MARK: - Filtered Data
+    var totals: PeriodTotals {
+        Accounting.totals(expenses: expenses, incomes: incomes, period: period, usdToPen: rate)
+    }
     
-    var filteredExpenses: [Expense] {
-        let calendar = Calendar.current
-        
-        return expenses.filter { expense in
-            switch selectedFilter {
-            case .hoy:
-                return calendar.isDate(expense.date, inSameDayAs: referenceDate)
-            case .semana:
-                var cal = Calendar.current
-                cal.firstWeekday = 2
-                if let interval = cal.dateInterval(of: .weekOfYear, for: referenceDate) {
-                    return expense.date >= interval.start && expense.date <= interval.end
-                }
-                return true
-            case .mes:
-                if let interval = calendar.dateInterval(of: .month, for: referenceDate) {
-                    return expense.date >= interval.start && expense.date <= interval.end
-                }
-                return true
-            case .rango:
-                let start = calendar.startOfDay(for: startDate)
-                let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
-                return expense.date >= start && expense.date <= end
-            }
-        }
+    var previousTotals: PeriodTotals {
+        Accounting.totals(expenses: expenses, incomes: incomes, period: period.previous, usdToPen: rate)
+    }
+    
+    func dailySpent(for period: Period) -> [PeriodTotals.DayTotal] {
+        Accounting.totals(expenses: expenses, incomes: incomes, period: period, usdToPen: rate).dailySpent
     }
     
     var filteredIncomes: [Income] {
-        let calendar = Calendar.current
-        
-        return incomes.filter { income in
-            switch selectedFilter {
-            case .hoy:
-                return calendar.isDate(income.date, inSameDayAs: referenceDate)
-            case .semana:
-                var cal = Calendar.current
-                cal.firstWeekday = 2
-                if let interval = cal.dateInterval(of: .weekOfYear, for: referenceDate) {
-                    return income.date >= interval.start && income.date <= interval.end
-                }
-                return true
-            case .mes:
-                if let interval = calendar.dateInterval(of: .month, for: referenceDate) {
-                    return income.date >= interval.start && income.date <= interval.end
-                }
-                return true
-            case .rango:
-                let start = calendar.startOfDay(for: startDate)
-                let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
-                return income.date >= start && income.date <= end
-            }
-        }
+        incomes.filter { period.contains($0.date) }
     }
     
-    // Previous period
-    var previousPeriodExpenses: [Expense] {
-        let calendar = Calendar.current
-        
-        return expenses.filter { expense in
-            switch selectedFilter {
-            case .hoy:
-                if let prevDay = calendar.date(byAdding: .day, value: -1, to: referenceDate) {
-                    return calendar.isDate(expense.date, inSameDayAs: prevDay)
-                }
-                return false
-            case .semana:
-                var cal = Calendar.current
-                cal.firstWeekday = 2
-                if let currentInterval = cal.dateInterval(of: .weekOfYear, for: referenceDate),
-                   let prevWeekDate = cal.date(byAdding: .weekOfYear, value: -1, to: currentInterval.start),
-                   let prevInterval = cal.dateInterval(of: .weekOfYear, for: prevWeekDate) {
-                    return expense.date >= prevInterval.start && expense.date < prevInterval.end
-                }
-                return false
-            case .mes:
-                if let currentInterval = calendar.dateInterval(of: .month, for: referenceDate),
-                   let prevMonthDate = calendar.date(byAdding: .month, value: -1, to: currentInterval.start),
-                   let prevInterval = calendar.dateInterval(of: .month, for: prevMonthDate) {
-                    return expense.date >= prevInterval.start && expense.date < prevInterval.end
-                }
-                return false
-            case .rango:
-                return false
-            }
-        }
-    }
-    
-    func amountInPEN(_ expense: Expense) -> Double {
-        expense.currency == "USD" ? expense.amount * exchangeRateService.usdToPenRate : expense.amount
-    }
-    
-    func incomeInPEN(_ income: Income) -> Double {
-        income.currency == "USD" ? income.amount * exchangeRateService.usdToPenRate : income.amount
-    }
-    
-    var totalCurrentPEN: Double {
-        filteredExpenses.reduce(0) { $0 + amountInPEN($1) }
-    }
-    
-    var totalPreviousPEN: Double {
-        previousPeriodExpenses.reduce(0) { $0 + amountInPEN($1) }
-    }
-    
-    var totalCurrentIncomePEN: Double {
-        filteredIncomes.reduce(0) { $0 + incomeInPEN($1) }
-    }
+    var totalCurrentPEN: Double { totals.spent }
+    var totalPreviousPEN: Double { previousTotals.spent }
+    /// Sin abonos a deuda: antes esta vista los sumaba como ingreso y Resumen no
+    /// (ACCOUNTING.md §3), así que "Gasto/Ingreso" salía inflado.
+    var totalCurrentIncomePEN: Double { totals.income }
     
     // MARK: - Chart Data
     
+    /// Balance acumulado del periodo. Un punto por día (por hora si el periodo
+    /// es un solo día), siempre dentro del periodo navegado.
     var trendData: [TrendDataPoint] {
-        let calendar = Calendar.current
+        period.granularity == .dia ? hourlyBalance : dailyBalance
+    }
+    
+    private var dailyBalance: [TrendDataPoint] {
+        let cal = Period.calendar
         let now = Date()
-        
-        switch selectedFilter {
-        case .hoy:
-            return buildHourlyData(calendar: calendar, now: now)
-        case .semana:
-            return buildWeeklyData(calendar: calendar, now: now)
-        case .mes:
-            return buildMonthlyData(calendar: calendar, now: now)
-        case .rango:
-            return buildRangeData(calendar: calendar)
+        var incomeByDay: [Date: Int] = [:]
+        for income in filteredIncomes where !income.isDebtPayment {
+            incomeByDay[cal.startOfDay(for: income.date), default: 0] += Accounting.penCents(income.accountingSnapshot, fallbackRate: rate)
         }
-    }
-    
-    private func buildHourlyData(calendar: Calendar, now: Date) -> [TrendDataPoint] {
-        var points: [TrendDataPoint] = []
-        let startOfDay = calendar.startOfDay(for: now)
-        let currentHour = calendar.component(.hour, from: now)
-        var cumulativeBalance: Double = 0
         
-        for hour in 0...currentHour {
-            guard let hourDate = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: startOfDay) else { continue }
-            
-            let expenseTotal = filteredExpenses
-                .filter { calendar.component(.hour, from: $0.date) == hour }
-                .reduce(0) { $0 + amountInPEN($1) }
-            
-            let incomeTotal = filteredIncomes
-                .filter { calendar.component(.hour, from: $0.date) == hour }
-                .reduce(0) { $0 + incomeInPEN($1) }
-            
-            cumulativeBalance += (incomeTotal - expenseTotal)
-            let label = "\(hour)h"
-            points.append(TrendDataPoint(label: label, date: hourDate, amount: cumulativeBalance, type: "Balance"))
+        var cumulative = 0
+        var points: [TrendDataPoint] = []
+        for day in totals.dailySpent {
+            if day.date > now { break }
+            cumulative += (incomeByDay[day.date] ?? 0) - Money.cents(day.total)
+            points.append(TrendDataPoint(label: "\(cal.component(.day, from: day.date))",
+                                         date: day.date,
+                                         amount: Money.value(cumulative),
+                                         type: "Balance"))
         }
         return points
     }
     
-    private func buildWeeklyData(calendar: Calendar, now: Date) -> [TrendDataPoint] {
-        var points: [TrendDataPoint] = []
-        var cal = Calendar.current
-        cal.firstWeekday = 2
-        var cumulativeBalance: Double = 0
+    private var hourlyBalance: [TrendDataPoint] {
+        let cal = Period.calendar
+        let interval = period.interval
+        let now = Date()
+        let lastHour = period.isCurrent ? cal.component(.hour, from: now) : 23
         
-        guard let weekInterval = cal.dateInterval(of: .weekOfYear, for: now) else { return [] }
-        let dayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-        
-        for dayIndex in 0..<7 {
-            guard let dayDate = cal.date(byAdding: .day, value: dayIndex, to: weekInterval.start) else { continue }
-            let startOfDay = cal.startOfDay(for: dayDate)
-            let endOfDay = cal.date(bySettingHour: 23, minute: 59, second: 59, of: dayDate) ?? dayDate
-            
-            if startOfDay > now { break }
-            
-            let expenseTotal = filteredExpenses
-                .filter { $0.date >= startOfDay && $0.date <= endOfDay }
-                .reduce(0) { $0 + amountInPEN($1) }
-            
-            let incomeTotal = filteredIncomes
-                .filter { $0.date >= startOfDay && $0.date <= endOfDay }
-                .reduce(0) { $0 + incomeInPEN($1) }
-            
-            cumulativeBalance += (incomeTotal - expenseTotal)
-            let label = dayNames[dayIndex]
-            points.append(TrendDataPoint(label: label, date: dayDate, amount: cumulativeBalance, type: "Balance"))
+        var expenseByHour: [Int: Int] = [:]
+        for expense in expenses where period.contains(expense.date) {
+            expenseByHour[cal.component(.hour, from: expense.date), default: 0] += Accounting.penCents(expense.accountingSnapshot, fallbackRate: rate)
         }
-        return points
-    }
-    
-    private func buildMonthlyData(calendar: Calendar, now: Date) -> [TrendDataPoint] {
-        var points: [TrendDataPoint] = []
-        
-        guard let monthInterval = calendar.dateInterval(of: .month, for: now) else { return [] }
-        let daysInMonth = calendar.range(of: .day, in: .month, for: now)?.count ?? 30
-        let currentDay = calendar.component(.day, from: now)
-        var cumulativeBalance: Double = 0
-        
-        for day in 1...daysInMonth {
-            guard let dayDate = calendar.date(bySetting: .day, value: day, of: monthInterval.start) else { continue }
-            let startOfDay = calendar.startOfDay(for: dayDate)
-            guard let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: dayDate) else { continue }
-            
-            if day > currentDay { break }
-            
-            let expenseTotal = filteredExpenses
-                .filter { $0.date >= startOfDay && $0.date <= endOfDay }
-                .reduce(0) { $0 + amountInPEN($1) }
-                
-            let incomeTotal = filteredIncomes
-                .filter { $0.date >= startOfDay && $0.date <= endOfDay }
-                .reduce(0) { $0 + incomeInPEN($1) }
-            
-            cumulativeBalance += (incomeTotal - expenseTotal)
-            let label = "\(day)"
-            points.append(TrendDataPoint(label: label, date: dayDate, amount: cumulativeBalance, type: "Balance"))
+        var incomeByHour: [Int: Int] = [:]
+        for income in filteredIncomes where !income.isDebtPayment {
+            incomeByHour[cal.component(.hour, from: income.date), default: 0] += Accounting.penCents(income.accountingSnapshot, fallbackRate: rate)
         }
-        return points
-    }
-    
-    private func buildRangeData(calendar: Calendar) -> [TrendDataPoint] {
-        var points: [TrendDataPoint] = []
-        let start = calendar.startOfDay(for: startDate)
-        let end = calendar.startOfDay(for: endDate)
-        var cumulativeBalance: Double = 0
         
-        var current = start
-        while current <= end {
-            let startOfDay = current
-            let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: current) ?? current
-            
-            let expenseTotal = filteredExpenses
-                .filter { $0.date >= startOfDay && $0.date <= endOfDay }
-                .reduce(0) { $0 + amountInPEN($1) }
-            
-            let incomeTotal = filteredIncomes
-                .filter { $0.date >= startOfDay && $0.date <= endOfDay }
-                .reduce(0) { $0 + incomeInPEN($1) }
-            
-            cumulativeBalance += (incomeTotal - expenseTotal)
-            let day = calendar.component(.day, from: current)
-            let label = "\(day)"
-            points.append(TrendDataPoint(label: label, date: current, amount: cumulativeBalance, type: "Balance"))
-            
-            current = calendar.date(byAdding: .day, value: 1, to: current) ?? current
+        var cumulative = 0
+        var points: [TrendDataPoint] = []
+        for hour in 0...max(0, lastHour) {
+            guard let date = cal.date(byAdding: .hour, value: hour, to: interval.start) else { continue }
+            cumulative += (incomeByHour[hour] ?? 0) - (expenseByHour[hour] ?? 0)
+            points.append(TrendDataPoint(label: "\(hour)h", date: date,
+                                         amount: Money.value(cumulative), type: "Balance"))
         }
         return points
     }
     
     // MARK: - Stats
     
-    var avgDailyExpense: Double {
-        let calendar = Calendar.current
-        let now = Date()
-        let days: Int
-        switch selectedFilter {
-        case .hoy: days = 1
-        case .semana:
-            let weekday = calendar.component(.weekday, from: now)
-            let adjustedDay = (weekday + 5) % 7 + 1 // Monday = 1
-            days = adjustedDay
-        case .mes:
-            days = calendar.component(.day, from: now)
-        case .rango:
-            days = max(1, calendar.dateComponents([.day], from: startDate, to: endDate).day ?? 1)
-        }
-        return days > 0 ? totalCurrentPEN / Double(days) : 0
-    }
+    var avgDailyExpense: Double { totals.averagePerDay }
     
-    var peakDay: (label: String, amount: Double) {
-        let gastos = trendData.filter { $0.type == "Gastos" && $0.amount > 0 }
-        guard let peak = gastos.max(by: { $0.amount < $1.amount }) else {
-            return ("—", 0)
-        }
-        return (peak.label, peak.amount)
+    /// El día del periodo con más gasto.
+    var peakDay: (label: String, amount: Double)? {
+        guard let top = totals.dailySpent.max(by: { Money.cents($0.total) < Money.cents($1.total) }),
+              !Money.isZero(top.total) else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_PE")
+        f.dateFormat = period.granularity == .anio ? "d MMM" : "EEE d"
+        return (f.string(from: top.date).capitalizedFirst, top.total)
     }
     
     var largestIncome: Double {
-        filteredIncomes.map { incomeInPEN($0) }.max() ?? 0
+        filteredIncomes
+            .filter { !$0.isDebtPayment }
+            .map { Accounting.amountInPEN($0, fallbackRate: rate) }
+            .max() ?? 0
     }
     
-    var spendingRatio: Double {
-        guard totalCurrentIncomePEN > 0 else { return 0 }
-        return (totalCurrentPEN / totalCurrentIncomePEN) * 100
-    }
+    /// `nil` cuando no hay ingresos: la tarjeta muestra "—" en vez de "nan%".
+    var spendingRatio: Double? { Money.percent(totalCurrentPEN, of: totalCurrentIncomePEN) }
     
     var percentageChange: Double? {
-        guard selectedFilter == .semana || selectedFilter == .mes else { return nil }
-        guard totalPreviousPEN > 0 else { return nil }
-        return ((totalCurrentPEN - totalPreviousPEN) / totalPreviousPEN) * 100
+        guard period.granularity != .rango else { return nil }
+        guard let ratio = Money.ratio(Money.subtract(totalCurrentPEN, totalPreviousPEN), to: totalPreviousPEN) else { return nil }
+        return ratio * 100
     }
     
     // MARK: - Body
@@ -326,42 +150,7 @@ struct TrendsView: View {
     var body: some View {
         TrackableScrollView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 24) {
-                // Filtros
-                HStack(spacing: 8) {
-                    ForEach(DashboardFilter.allCases, id: \.self) { filter in
-                        Button {
-                            withAnimation(.spring) {
-                                selectedFilter = filter
-                                if syncFilters {
-                                    categoriesFilter = filter
-                                }
-                                if filter == .rango {
-                                    showRangePicker = true
-                                }
-                            }
-                        } label: {
-                            Text(filter.rawValue)
-                                .font(.subheadline)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                                .fontWeight(selectedFilter == filter ? .semibold : .regular)
-                                .foregroundStyle(selectedFilter == filter ? .white : (colorScheme == .dark ? .white : .black))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(
-                                    Capsule()
-                                        .fill(selectedFilter == filter ? themeColor.opacity(0.8) : Color.primary.opacity(0.05))
-                                )
-                        }
-                    }
-                }
-                .padding(.horizontal)
-                
-                DateNavigatorView(
-                    referenceDate: $referenceDate,
-                    selectedFilter: $selectedFilter,
-                    slideDirection: $slideDirection
-                )
+                PeriodHeader(period: $period, dailySpent: dailySpent(for:))
                 
                 // Gráfica Principal
                 trendChartView
@@ -376,28 +165,6 @@ struct TrendsView: View {
                 
                 Spacer(minLength: 100)
             }
-        }
-        .sheet(isPresented: $showRangePicker) {
-            NavigationStack {
-                Form {
-                    Section(header: Text("Selecciona el rango de fechas")) {
-                        DatePicker("Desde", selection: $startDate, displayedComponents: .date)
-                            .datePickerStyle(.compact)
-                        DatePicker("Hasta", selection: $endDate, displayedComponents: .date)
-                            .datePickerStyle(.compact)
-                    }
-                }
-                .navigationTitle("Rango de Fechas")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Aplicar") { showRangePicker = false }
-                    }
-                }
-                .preferredColorScheme(isDarkMode ? .dark : .light)
-            }
-            .presentationDetents([.fraction(0.4)])
-            .presentationDragIndicator(.visible)
         }
     }
     
@@ -453,7 +220,7 @@ struct TrendsView: View {
                     AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [4]))
                     AxisValueLabel {
                         if let val = value.as(Double.self) {
-                            Text("S/\(val, specifier: "%.0f")")
+                            Text(Money.formatCompact(val))
                                 .font(.caption2)
                         }
                     }
@@ -462,7 +229,7 @@ struct TrendsView: View {
             .frame(height: 220)
             
             // Current day indicator for weekly view
-            if selectedFilter == .semana {
+            if period.granularity == .semana && period.isCurrent {
                 let calendar = Calendar.current
                 let weekday = calendar.component(.weekday, from: Date())
                 let dayNames = ["", "Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"]
@@ -486,32 +253,32 @@ struct TrendsView: View {
     }
     
     private var xAxisDesiredCount: Int {
-        switch selectedFilter {
-        case .hoy: return 6
+        switch period.granularity {
+        case .dia: return 6
         case .semana: return 7
         case .mes: return 8
-        case .rango:
-            let calendar = Calendar.current
-            let days = calendar.dateComponents([.day], from: startDate, to: endDate).day ?? 7
-            return min(days, 10)
+        case .anio: return 12
+        case .rango: return min(max(2, period.totalDays), 10)
         }
     }
     
     private func xAxisLabel(for date: Date) -> String {
-        let calendar = Calendar.current
-        switch selectedFilter {
-        case .hoy:
-            let hour = calendar.component(.hour, from: date)
-            return "\(hour)h"
+        let cal = Period.calendar
+        switch period.granularity {
+        case .dia:
+            return "\(cal.component(.hour, from: date))h"
         case .semana:
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "es_PE")
             formatter.dateFormat = "EEE"
-            let str = formatter.string(from: date)
-            return str.prefix(3).capitalized
+            return String(formatter.string(from: date).prefix(3)).capitalizedFirst
+        case .anio:
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "es_PE")
+            formatter.dateFormat = "MMM"
+            return formatter.string(from: date).capitalizedFirst
         case .mes, .rango:
-            let day = calendar.component(.day, from: date)
-            return "\(day)"
+            return "\(cal.component(.day, from: date))"
         }
     }
     
@@ -521,30 +288,30 @@ struct TrendsView: View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
             statCard(
                 title: "Promedio Diario",
-                value: "S/ " + String(format: "%.2f", avgDailyExpense),
+                value: Money.format(avgDailyExpense),
                 icon: "chart.bar.fill",
                 color: themeColor
             )
             
             statCard(
                 title: "Día Pico",
-                value: peakDay.amount > 0 ? "\(peakDay.label): S/" + String(format: "%.0f", peakDay.amount) : "—",
+                value: peakDay.map { "\($0.label): " + Money.formatCompact($0.amount) } ?? "—",
                 icon: "flame.fill",
                 color: .orange
             )
             
             statCard(
                 title: "Mayor Ingreso",
-                value: largestIncome > 0 ? "S/ " + String(format: "%.2f", largestIncome) : "—",
+                value: Money.isZero(largestIncome) ? "—" : Money.format(largestIncome),
                 icon: "arrow.down.left.circle.fill",
                 color: .green
             )
             
             statCard(
                 title: "Gasto/Ingreso",
-                value: totalCurrentIncomePEN > 0 ? String(format: "%.0f", spendingRatio) + "%" : "—",
+                value: Money.formatPercent(totalCurrentPEN, of: totalCurrentIncomePEN),
                 icon: "percent",
-                color: spendingRatio > 100 ? .red : .blue
+                color: (spendingRatio ?? 0) > 100 ? .red : .blue
             )
         }
         .padding(.horizontal)
@@ -578,7 +345,7 @@ struct TrendsView: View {
     private func comparisonView(change: Double) -> some View {
         let isLess = change < 0
         let absChange = abs(change)
-        let periodLabel = selectedFilter == .semana ? "la semana pasada" : "el mes pasado"
+        let periodLabel = period.granularity.previousLabel
         
         return HStack(spacing: 12) {
             ZStack {

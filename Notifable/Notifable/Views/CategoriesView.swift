@@ -24,23 +24,18 @@ struct CategoriesView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
     @Environment(\.colorScheme) var colorScheme
-    @AppStorage("isDarkMode") private var isDarkMode = true
     
     @Binding var scrollOffset: CGFloat
     @Binding var scrollToTopTrigger: Bool
     
     @StateObject private var exchangeRateService = ExchangeRateService.shared
     
-    @AppStorage("categoriesFilter") private var selectedFilter: DashboardFilter = .mes
-    @AppStorage("dashboardFilter") private var dashboardFilter: DashboardFilter = .mes
-    @AppStorage("syncFilters") private var syncFilters = true
+    /// El mismo `Period` que Resumen y Ritmo.
+    @AppStorage("period") private var period = Period()
     
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
-    @State private var showRangePicker = false
-    @State private var startDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
-    @State private var endDate: Date = Date()
     
     @State private var selectedTab: CategoryTab = .misCategorias
     @State private var selectedMerchantToCategorize: MerchantWrapper?
@@ -54,119 +49,92 @@ struct CategoriesView: View {
     @State private var selectedChartCategory: String?
     @Namespace private var animation
     
-    @State private var referenceDate: Date = Date()
-    @State private var slideDirection: Edge = .leading
+    // MARK: - Totales
+    //
+    // Todo viene de `Accounting.totals`: el mismo criterio y las mismas cifras
+    // que Resumen. Antes esta vista sumaba `amount` mientras Resumen sumaba
+    // `unpaidAmount`, y cada gasto en USD se convertía por separado antes de
+    // sumar (ACCOUNTING.md §2 y §10).
     
-    // Filtrar los gastos según el filtro de tiempo
-    var filteredExpenses: [Expense] {
-        let calendar = Calendar.current
-        
-        return expenses.filter { expense in
-            switch selectedFilter {
-            case .hoy:
-                return calendar.isDate(expense.date, inSameDayAs: referenceDate)
-            case .semana:
-                var calendar = Calendar.current
-                calendar.firstWeekday = 2 // Lunes
-                if let interval = calendar.dateInterval(of: .weekOfYear, for: referenceDate) {
-                    return expense.date >= interval.start && expense.date <= interval.end
-                }
-                return true
-            case .mes:
-                if let interval = calendar.dateInterval(of: .month, for: referenceDate) {
-                    return expense.date >= interval.start && expense.date <= interval.end
-                }
-                return true
-            case .rango:
-                let start = calendar.startOfDay(for: startDate)
-                let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
-                return expense.date >= start && expense.date <= end
-            }
-        }
+    var totals: PeriodTotals {
+        Accounting.totals(expenses: expenses,
+                          incomes: [],
+                          period: period,
+                          usdToPen: exchangeRateService.usdToPenRate)
     }
     
-    // Categorías válidas (para no mostrar "Sin Clasificar" en los gráficos normales)
-    var validExpenses: [Expense] {
-        filteredExpenses.filter { $0.category != "Sin Clasificar" }
+    func dailySpent(for period: Period) -> [PeriodTotals.DayTotal] {
+        Accounting.totals(expenses: expenses,
+                          incomes: [],
+                          period: period,
+                          usdToPen: exchangeRateService.usdToPenRate).dailySpent
+    }
+    
+    var filteredExpenses: [Expense] {
+        expenses.filter { period.contains($0.date) }
     }
     
     var allCategories: [String] {
         let defaults = ["Comida", "Transporte", "Entretenimiento", "Supermercado", "Otros"]
-        let existing = Set(expenses.map { $0.category }.filter { $0 != "Sin Clasificar" })
+        let existing = Set(expenses.map { $0.category }.filter { $0 != Accounting.unclassified })
         return Array(existing.union(defaults)).sorted()
     }
     
-    // Gastos no clasificados agrupados por comercio
+    /// Comercios sin clasificar del periodo, agrupados.
     var inboxGroups: [(merchant: String, expenses: [Expense], combinedTotal: Double)] {
-        let uncategorized = filteredExpenses.filter { $0.category == "Sin Clasificar" }
-        let grouped = Dictionary(grouping: uncategorized, by: { $0.merchant })
-        return grouped.map { (merchant, expenses) in
-            let pen = expenses.filter { $0.currency == "PEN" }.reduce(0) { $0 + $1.amount }
-            let usd = expenses.filter { $0.currency == "USD" }.reduce(0) { $0 + $1.amount }
-            let combined = pen + (usd * exchangeRateService.usdToPenRate)
-            return (merchant: merchant, expenses: expenses.sorted { $0.date > $1.date }, combinedTotal: combined)
-        }.sorted { 
-            if $0.expenses.count == $1.expenses.count {
-                return $0.merchant < $1.merchant
+        let uncategorized = filteredExpenses.filter { $0.category == Accounting.unclassified }
+        let byMerchant = Dictionary(uniqueKeysWithValues: totals.byMerchant.map { ($0.merchant, $0.total) })
+        return Dictionary(grouping: uncategorized, by: { $0.merchant })
+            .map { merchant, items in
+                (merchant: merchant,
+                 expenses: items.sorted { $0.date > $1.date },
+                 combinedTotal: byMerchant[merchant] ?? 0)
             }
-            return $0.expenses.count > $1.expenses.count 
-        }
+            .sorted {
+                $0.expenses.count == $1.expenses.count
+                    ? $0.merchant < $1.merchant
+                    : $0.expenses.count > $1.expenses.count
+            }
     }
     
     var filteredInboxGroups: [(merchant: String, expenses: [Expense], combinedTotal: Double)] {
-        if searchText.isEmpty {
-            return inboxGroups
-        } else {
-            return inboxGroups.filter { $0.merchant.localizedCaseInsensitiveContains(searchText) }
-        }
+        searchText.isEmpty
+            ? inboxGroups
+            : inboxGroups.filter { $0.merchant.localizedCaseInsensitiveContains(searchText) }
     }
     
-    var chartTotals: [(category: String, combinedTotal: Double)] {
-        let grouped = Dictionary(grouping: filteredExpenses, by: { $0.category })
-        let summed = grouped.map { (category, expenses) -> (category: String, combinedTotal: Double) in
-            let pen = expenses.filter { $0.currency == "PEN" }.reduce(0) { $0 + $1.amount }
-            let usd = expenses.filter { $0.currency == "USD" }.reduce(0) { $0 + $1.amount }
-            let combined = pen + (usd * exchangeRateService.usdToPenRate)
-            return (category: category, combinedTotal: combined)
-        }
-        return summed.sorted { $0.combinedTotal > $1.combinedTotal }
-    }
+    /// Datos de la dona: todas las categorías del periodo, incluida Sin Clasificar.
+    var chartTotals: [PeriodTotals.CategoryTotal] { totals.byCategory }
     
-    var categoryTotals: [(category: String, totalPEN: Double, totalUSD: Double, combinedTotal: Double, merchants: [(merchant: String, combinedTotal: Double, totalPEN: Double, totalUSD: Double)])] {
-        let grouped = Dictionary(grouping: validExpenses, by: { $0.category })
-        var summed = grouped.map { (category, expenses) -> (category: String, totalPEN: Double, totalUSD: Double, combinedTotal: Double, merchants: [(merchant: String, combinedTotal: Double, totalPEN: Double, totalUSD: Double)]) in
-            let pen = expenses.filter { $0.currency == "PEN" }.reduce(0) { $0 + $1.amount }
-            let usd = expenses.filter { $0.currency == "USD" }.reduce(0) { $0 + $1.amount }
-            let combined = pen + (usd * exchangeRateService.usdToPenRate)
-            
-            let merchantGroup = Dictionary(grouping: expenses, by: { $0.merchant })
-            let merchants = merchantGroup.map { (merchant, mExpenses) -> (merchant: String, combinedTotal: Double, totalPEN: Double, totalUSD: Double) in
-                let mPen = mExpenses.filter { $0.currency == "PEN" }.reduce(0) { $0 + $1.amount }
-                let mUsd = mExpenses.filter { $0.currency == "USD" }.reduce(0) { $0 + $1.amount }
-                let mCombined = mPen + (mUsd * exchangeRateService.usdToPenRate)
-                return (merchant: merchant, combinedTotal: mCombined, totalPEN: mPen, totalUSD: mUsd)
-            }.sorted {
-                if $0.combinedTotal == $1.combinedTotal {
-                    return $0.merchant < $1.merchant
-                }
-                return $0.combinedTotal > $1.combinedTotal 
-            }
-            
-            return (category: category, totalPEN: pen, totalUSD: usd, combinedTotal: combined, merchants: merchants)
-        }
+    /// Filas de "Mis Categorías": sin la bandeja, con sus comercios y las
+    /// categorías vacías al final para poder asignarlas.
+    var categoryTotals: [(category: String, combinedTotal: Double, merchants: [PeriodTotals.MerchantTotal])] {
+        let merchantsByCategory = Dictionary(grouping: filteredExpenses.filter { $0.category != Accounting.unclassified },
+                                             by: { $0.category })
+            .mapValues { Set($0.map(\.merchant)) }
+        let merchantTotals = Dictionary(uniqueKeysWithValues: totals.byMerchant.map { ($0.merchant, $0) })
         
-        let existingCategories = Set(summed.map { $0.category })
-        for category in allCategories {
-            if !existingCategories.contains(category) {
-                summed.append((category: category, totalPEN: 0, totalUSD: 0, combinedTotal: 0, merchants: []))
+        var rows = totals.byCategory
+            .filter { $0.category != Accounting.unclassified }
+            .map { item -> (category: String, combinedTotal: Double, merchants: [PeriodTotals.MerchantTotal]) in
+                let merchants = (merchantsByCategory[item.category] ?? [])
+                    .compactMap { merchantTotals[$0] }
+                    .sorted {
+                        Money.cents($0.total) == Money.cents($1.total)
+                            ? $0.merchant < $1.merchant
+                            : Money.cents($0.total) > Money.cents($1.total)
+                    }
+                return (category: item.category, combinedTotal: item.total, merchants: merchants)
             }
-        }
         
-        return summed.sorted {
-            if $0.combinedTotal == $1.combinedTotal {
-                return $0.category < $1.category
-            }
-            return $0.combinedTotal > $1.combinedTotal
+        let existing = Set(rows.map(\.category))
+        for category in allCategories where !existing.contains(category) {
+            rows.append((category: category, combinedTotal: 0, merchants: []))
+        }
+        return rows.sorted {
+            Money.cents($0.combinedTotal) == Money.cents($1.combinedTotal)
+                ? $0.category < $1.category
+                : Money.cents($0.combinedTotal) > Money.cents($1.combinedTotal)
         }
     }
     
@@ -174,43 +142,9 @@ struct CategoriesView: View {
         ScrollViewReader { proxy in
             TrackableScrollView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger) {
                 VStack(spacing: 24) {
-                    // 1. Filtros de Tiempo
-                    HStack(spacing: 8) {
-                        ForEach(DashboardFilter.allCases, id: \.self) { filter in
-                            Button {
-                                withAnimation(.spring) {
-                                    selectedFilter = filter
-                                    if syncFilters {
-                                        dashboardFilter = filter
-                                    }
-                                    if filter == .rango {
-                                        showRangePicker = true
-                                    }
-                                }
-                            } label: {
-                                Text(filter.rawValue)
-                                    .font(.subheadline)
-                                    .lineLimit(1)
-                                    .minimumScaleFactor(0.8)
-                                    .fontWeight(selectedFilter == filter ? .semibold : .regular)
-                                    .foregroundStyle(selectedFilter == filter ? .white : (colorScheme == .dark ? .white : .black))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 10)
-                                    .background(
-                                        Capsule()
-                                            .fill(selectedFilter == filter ? themeColor.opacity(0.8) : Color.primary.opacity(0.05))
-                                    )
-                            }
-                        }
-                    }
-                    .padding(.horizontal)
-                    .id("TOP")
-                    
-                    DateNavigatorView(
-                        referenceDate: $referenceDate,
-                        selectedFilter: $selectedFilter,
-                        slideDirection: $slideDirection
-                    )
+                    // 1. Periodo: una sola fila, compartida con las otras pestañas.
+                    PeriodHeader(period: $period, dailySpent: dailySpent(for:))
+                        .id("TOP")
                     
                     // 2. Gráfico de Dona (sólo si estamos en Mis Categorías y hay datos)
                     if selectedTab == .misCategorias && !chartTotals.isEmpty {
@@ -339,34 +273,9 @@ struct CategoriesView: View {
                 expandedMerchants.removeAll()
             }
         }
-        .sheet(isPresented: $showRangePicker) {
-            NavigationStack {
-                Form {
-                    Section(header: Text("Selecciona el rango de fechas")) {
-                        DatePicker("Desde", selection: $startDate, displayedComponents: .date)
-                            .datePickerStyle(.compact)
-                        
-                        DatePicker("Hasta", selection: $endDate, displayedComponents: .date)
-                            .datePickerStyle(.compact)
-                    }
-                }
-                .navigationTitle("Rango de Fechas")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Aplicar") {
-                            showRangePicker = false
-                        }
-                    }
-                }
-                .preferredColorScheme(isDarkMode ? .dark : .light)
-            }
-            .presentationDetents([.fraction(0.4)])
-            .presentationDragIndicator(.visible)
-        }
         .sheet(item: $selectedMerchantToCategorize) { wrapper in
             AssignCategoryView(merchant: wrapper.id, existingCategories: allCategories) { newCategory in
-                let uncategorized = expenses.filter { $0.merchant == wrapper.id && $0.category == "Sin Clasificar" }
+                let uncategorized = expenses.filter { $0.merchant == wrapper.id && $0.category == Accounting.unclassified }
                 for expense in uncategorized {
                     expense.category = newCategory
                 }
@@ -402,7 +311,7 @@ struct CategoriesView: View {
     
     private func chartColor(for category: String) -> Color {
         switch category {
-        case "Sin Clasificar": return .gray
+        case Accounting.unclassified: return .gray
         case "Comida": return .orange
         case "Transporte": return .blue
         case "Entretenimiento": return themeColor
@@ -444,11 +353,11 @@ struct CategoriesView: View {
             }
             .padding(.bottom, 8)
             
-            let grandTotal = chartTotals.reduce(0) { $0 + $1.combinedTotal }
+            let grandTotal = totals.spent
             
             Chart(chartTotals, id: \.category) { item in
                 SectorMark(
-                    angle: .value("Total", item.combinedTotal),
+                    angle: .value("Total", item.total),
                     innerRadius: .ratio(0.6),
                     angularInset: 2.0
                 )
@@ -456,17 +365,18 @@ struct CategoriesView: View {
                 .foregroundStyle(chartColor(for: item.category))
                 .opacity(selectedChartCategory == nil || selectedChartCategory == item.category ? 1.0 : 0.3)
                 .annotation(position: .overlay) {
-                    let percentage = (item.combinedTotal / grandTotal) * 100
+                    // `percent` devuelve nil si el total es cero: nunca "nan%".
+                    let percentage = Money.percent(item.total, of: grandTotal) ?? 0
                     if percentage > 6.0 {
                         if showPercentages {
-                            Text("\(percentage, specifier: "%.0f")%")
+                            Text(Money.formatPercent(item.total, of: grandTotal))
                                 .font(.caption2)
                                 .fontWeight(.heavy)
                                 .foregroundStyle(.white)
                                 .shadow(color: .black.opacity(0.6), radius: 1, x: 0, y: 1)
                                 .shadow(color: .black.opacity(0.3), radius: 3)
                         } else {
-                            Text("S/\(item.combinedTotal, specifier: "%.0f")")
+                            Text(Money.formatCompact(item.total))
                                 .font(.caption2)
                                 .fontWeight(.heavy)
                                 .foregroundStyle(.white)
@@ -495,8 +405,7 @@ struct CategoriesView: View {
                                 angle += 2 * .pi
                             }
                             
-                            let grandTotal = chartTotals.reduce(0) { $0 + $1.combinedTotal }
-                            let valueAtAngle = (angle / (2 * .pi)) * grandTotal
+                            let valueAtAngle = (angle / (2 * .pi)) * totals.spent
                             
                             withAnimation(.spring) {
                                 let selected = findCategory(at: valueAtAngle)
@@ -522,7 +431,7 @@ struct CategoriesView: View {
     private func findCategory(at value: Double) -> String? {
         var accumulatedTotal = 0.0
         for item in chartTotals {
-            accumulatedTotal += item.combinedTotal
+            accumulatedTotal = Money.add(accumulatedTotal, item.total)
             if value <= accumulatedTotal {
                 return item.category
             }
@@ -555,7 +464,7 @@ struct CategoriesView: View {
                                 Spacer()
                                 
                                 VStack(alignment: .trailing, spacing: 2) {
-                                    Text("S/ \(item.combinedTotal, specifier: "%.2f")")
+                                    Text(Money.format(item.combinedTotal))
                                         .font(.subheadline)
                                         .bold()
                                         .foregroundStyle(.primary)
@@ -586,7 +495,7 @@ struct CategoriesView: View {
                                     }
                                 }
                             }
-                            .opacity(item.combinedTotal == 0 ? 0.4 : 1.0)
+                            .opacity(Money.isZero(item.combinedTotal) ? 0.4 : 1.0)
                             
                             if expandedCategories.contains(item.category) {
                                 VStack(spacing: 8) {
@@ -594,30 +503,15 @@ struct CategoriesView: View {
                                     
                                     ForEach(item.merchants, id: \.merchant) { merchantItem in
                                         HStack {
-                                            Text(merchantItem.merchant)
+                                            Text(Accounting.displayName(merchantItem.merchant))
                                                 .font(.caption)
                                                 .foregroundStyle(.primary)
                                             
                                             Spacer()
                                             
-                                            if merchantItem.totalUSD > 0 {
-                                                if merchantItem.totalPEN > 0 {
-                                                    // Mixed
-                                                    Text("S/ \(merchantItem.combinedTotal, specifier: "%.2f")")
-                                                        .font(.caption).bold()
-                                                        .padding(.trailing, 8)
-                                                } else {
-                                                    // Only USD
-                                                    Text("$\(merchantItem.totalUSD, specifier: "%.2f") (S/ \(merchantItem.combinedTotal, specifier: "%.2f"))")
-                                                        .font(.caption).bold()
-                                                        .padding(.trailing, 8)
-                                                }
-                                            } else {
-                                                // Only PEN
-                                                Text("S/ \(merchantItem.combinedTotal, specifier: "%.2f")")
-                                                    .font(.caption).bold()
-                                                    .padding(.trailing, 8)
-                                            }
+                                            Text(Money.format(merchantItem.total))
+                                                .font(.caption).bold()
+                                                .padding(.trailing, 8)
                                             
                                             Button(action: {
                                                 selectedMerchantToUncategorize = (merchant: merchantItem.merchant, category: item.category)
@@ -716,7 +610,7 @@ struct CategoriesView: View {
                                 }
                                 
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(group.merchant.replacingOccurrences(of: "PLIN - ", with: "").replacingOccurrences(of: "YAPE - ", with: ""))
+                                    Text(Accounting.displayName(group.merchant))
                                         .font(.headline)
                                     Text("\(group.expenses.count) transac.")
                                         .font(.caption)
@@ -728,7 +622,7 @@ struct CategoriesView: View {
                                 // Right Side Grouping
                                 VStack(alignment: .trailing, spacing: 8) {
                                     HStack(spacing: 6) {
-                                        Text("S/ \(group.combinedTotal, specifier: "%.2f")")
+                                        Text(Money.format(group.combinedTotal))
                                             .font(.subheadline).bold()
                                         
                                         Image(systemName: "chevron.down")
@@ -772,14 +666,9 @@ struct CategoriesView: View {
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                             Spacer()
-                                            if expense.currency == "PEN" {
-                                                Text("S/ \(expense.amount, specifier: "%.2f")")
-                                                    .font(.caption).bold()
-                                            } else {
-                                                Text("$ \(expense.amount, specifier: "%.2f")")
-                                                    .font(.caption).bold()
-                                                    .foregroundStyle(.green)
-                                            }
+                                            Text(Money.format(expense.amount, currency: expense.currency))
+                                                .font(.caption).bold()
+                                                .foregroundStyle(expense.currency == "PEN" ? .primary : .green)
                                         }
                                         .padding(.vertical, 4)
                                     }
@@ -817,7 +706,7 @@ struct CategoriesView: View {
         }
     }
     private func iconColor(for category: String) -> Color {
-        if category == "Sin Clasificar" {
+        if category == Accounting.unclassified {
             return themeColor
         }
         switch category {
@@ -831,7 +720,7 @@ struct CategoriesView: View {
     private func uncategorize(merchant: String, from category: String) {
         let expensesToUpdate = expenses.filter { $0.category == category && $0.merchant == merchant }
         for expense in expensesToUpdate {
-            expense.category = "Sin Clasificar"
+            expense.category = Accounting.unclassified
         }
         try? modelContext.save()
         
@@ -950,5 +839,5 @@ struct AssignCategoryView: View {
 
 #Preview {
     CategoriesView(scrollOffset: .constant(100), scrollToTopTrigger: .constant(false))
-        .modelContainer(for: Expense.self, inMemory: true)
+        .modelContainer(for: [Expense.self, Income.self], inMemory: true)
 }

@@ -2,13 +2,6 @@ import SwiftUI
 import SwiftData
 import Charts
 
-enum DashboardFilter: String, CaseIterable {
-    case hoy = "Hoy"
-    case semana = "Semana"
-    case mes = "Mes"
-    case rango = "Rango"
-}
-
 enum TransactionItem: Identifiable {
     case expense(Expense)
     case income(Income)
@@ -33,24 +26,19 @@ struct DashboardView: View {
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
     @Query(sort: \Income.date, order: .reverse) private var incomes: [Income]
     @Environment(\.colorScheme) var colorScheme
-    @AppStorage("isDarkMode") private var isDarkMode = true
     
     @Binding var scrollOffset: CGFloat
     @Binding var scrollToTopTrigger: Bool
     
     @StateObject private var exchangeRateService = ExchangeRateService.shared
     
-    @AppStorage("dashboardFilter") private var selectedFilter: DashboardFilter = .mes
-    @AppStorage("categoriesFilter") private var categoriesFilter: DashboardFilter = .mes
-    @AppStorage("syncFilters") private var syncFilters = true
+    /// Un solo periodo para toda la app. Sustituye a `dashboardFilter` +
+    /// `categoriesFilter` + `syncFilters` + tres `referenceDate` independientes.
+    @AppStorage("period") private var period = Period()
     
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
-    
-    @State private var showRangePicker = false
-    @State private var startDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
-    @State private var endDate: Date = Date()
     
     @State private var searchText: String = ""
     
@@ -58,107 +46,45 @@ struct DashboardView: View {
     @State private var isPressingTotalPEN = false
     @State private var isPressingTotalUSD = false
     
-    @State private var referenceDate: Date = Date()
     @State private var selectedExpenseForDetails: Expense? = nil
-    @State private var slideDirection: Edge = .trailing
+    
+    // MARK: - Totales
+    //
+    // Única fuente de verdad: `Accounting.totals`. Antes esta vista sumaba
+    // `unpaidAmount` mientras Categorías sumaba `amount`, así que el mismo mes
+    // mostraba dos cifras distintas (ACCOUNTING.md §2). El filtrado por fecha
+    // también vivía aquí duplicado, con el extremo derecho inclusivo (§1).
+    
+    var totals: PeriodTotals {
+        Accounting.totals(expenses: expenses,
+                          incomes: incomes,
+                          period: period,
+                          usdToPen: exchangeRateService.usdToPenRate)
+    }
+    
+    func dailySpent(for period: Period) -> [PeriodTotals.DayTotal] {
+        Accounting.totals(expenses: expenses,
+                          incomes: incomes,
+                          period: period,
+                          usdToPen: exchangeRateService.usdToPenRate).dailySpent
+    }
     
     var filteredExpenses: [Expense] {
-        let calendar = Calendar.current
-        
-        return expenses.filter { expense in
-            switch selectedFilter {
-            case .hoy:
-                return calendar.isDate(expense.date, inSameDayAs: referenceDate)
-            case .semana:
-                var cal = Calendar.current
-                cal.firstWeekday = 2 // Lunes
-                if let interval = cal.dateInterval(of: .weekOfYear, for: referenceDate) {
-                    return expense.date >= interval.start && expense.date <= interval.end
-                }
-                return true
-            case .mes:
-                if let interval = calendar.dateInterval(of: .month, for: referenceDate) {
-                    return expense.date >= interval.start && expense.date <= interval.end
-                }
-                return true
-            case .rango:
-                let start = calendar.startOfDay(for: startDate)
-                let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
-                return expense.date >= start && expense.date <= end
-            }
-        }
+        expenses.filter { period.contains($0.date) }
     }
     
     var filteredIncomes: [Income] {
-        let calendar = Calendar.current
-        
-        return incomes.filter { income in
-            switch selectedFilter {
-            case .hoy:
-                return calendar.isDate(income.date, inSameDayAs: referenceDate)
-            case .semana:
-                var cal = Calendar.current
-                cal.firstWeekday = 2 // Lunes
-                if let interval = cal.dateInterval(of: .weekOfYear, for: referenceDate) {
-                    return income.date >= interval.start && income.date <= interval.end
-                }
-                return true
-            case .mes:
-                if let interval = calendar.dateInterval(of: .month, for: referenceDate) {
-                    return income.date >= interval.start && income.date <= interval.end
-                }
-                return true
-            case .rango:
-                let start = calendar.startOfDay(for: startDate)
-                let end = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
-                return income.date >= start && income.date <= end
-            }
-        }
+        incomes.filter { period.contains($0.date) }
     }
     
-    var totalSpentPEN: Double {
-        filteredExpenses.filter { $0.currency == "PEN" }.reduce(0) { $0 + $1.unpaidAmount }
-    }
+    /// Gasto del periodo en soles.
+    var totalCombinedPEN: Double { totals.spent }
     
-    var totalSpentUSD: Double {
-        filteredExpenses.filter { $0.currency == "USD" }.reduce(0) { $0 + $1.unpaidAmount }
-    }
+    /// Ingreso del periodo, sin los abonos a deuda (ACCOUNTING.md §3).
+    var totalCombinedIncomePEN: Double { totals.income }
     
-    var totalCombinedPEN: Double {
-        totalSpentPEN + (totalSpentUSD * exchangeRateService.usdToPenRate)
-    }
-    
-    var totalIncomePEN: Double {
-        filteredIncomes.filter { $0.currency == "PEN" && $0.debtReference == nil }.reduce(0) { $0 + $1.amount }
-    }
-    
-    var totalIncomeUSD: Double {
-        filteredIncomes.filter { $0.currency == "USD" && $0.debtReference == nil }.reduce(0) { $0 + $1.amount }
-    }
-    
-    var totalCombinedIncomePEN: Double {
-        totalIncomePEN + (totalIncomeUSD * exchangeRateService.usdToPenRate)
-    }
-    
-    var expensesByMerchant: [(merchant: String, total: Double)] {
-        let grouped = Dictionary(grouping: filteredExpenses, by: { $0.merchant })
-        let summed = grouped.map { (merchant, expenses) in
-            // Convert all to PEN for the chart
-            let total = expenses.reduce(0) { sum, exp in
-                if exp.currency == "USD" {
-                    return sum + (exp.unpaidAmount * exchangeRateService.usdToPenRate)
-                } else {
-                    return sum + exp.unpaidAmount
-                }
-            }
-            return (merchant: merchant, total: total)
-        }
-        return summed.sorted {
-            if $0.total == $1.total {
-                return $0.merchant < $1.merchant
-            }
-            return $0.total > $1.total
-        }.prefix(5).map { $0 }
+    var expensesByMerchant: [PeriodTotals.MerchantTotal] {
+        Array(totals.byMerchant.prefix(5))
     }
 
     var searchedTransactions: [TransactionItem] {
@@ -189,40 +115,8 @@ struct DashboardView: View {
                     // Contenedor principal para no tapar el top header
                     VStack(spacing: 20) {
                         
-                        // Filtros
-                        HStack(spacing: 8) {
-                            ForEach(DashboardFilter.allCases, id: \.self) { filter in
-                                Button {
-                                    withAnimation(.spring) {
-                                        selectedFilter = filter
-                                        if syncFilters {
-                                            categoriesFilter = filter
-                                        }
-                                        if filter == .rango {
-                                            showRangePicker = true
-                                        } else {
-                                            referenceDate = Date()
-                                        }
-                                    }
-                                } label: {
-                                    Text(filter.rawValue)
-                                        .font(.subheadline)
-                                        .lineLimit(1)
-                                        .minimumScaleFactor(0.8)
-                                        .fontWeight(selectedFilter == filter ? .semibold : .regular)
-                                        .foregroundStyle(selectedFilter == filter ? .white : (colorScheme == .dark ? .white : .black))
-                                        .frame(maxWidth: .infinity)
-                                        .padding(.vertical, 10)
-                                        .background(
-                                            Capsule()
-                                                .fill(selectedFilter == filter ? themeColor.opacity(0.8) : Color.primary.opacity(0.05))
-                                        )
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                        
-                        subFiltersView
+                        // Una sola fila de periodo + scrubber de días.
+                        PeriodHeader(period: $period, dailySpent: dailySpent(for:))
                         
                         // Tarjeta Principal (3 Divs)
                         VStack(spacing: 12) {
@@ -236,8 +130,8 @@ struct DashboardView: View {
                                     
                                     Spacer()
                                     
-                                    if selectedFilter != .rango {
-                                        Text(formattedReferenceDate)
+                                    if period.granularity != .rango {
+                                        Text(period.shortTitle)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                             .padding(.horizontal, 8)
@@ -247,7 +141,7 @@ struct DashboardView: View {
                                     }
                                 }
                                 
-                                Text("S/ \(totalCombinedPEN, specifier: "%.2f")")
+                                Text(Money.format(totalCombinedPEN))
                                     .font(.system(size: 48, weight: .bold, design: .rounded))
                                     .foregroundStyle(.primary)
                                     .lineLimit(isPressingTotalCombined ? nil : 1)
@@ -272,7 +166,7 @@ struct DashboardView: View {
                                     Text("Ingresos")
                                         .font(.subheadline)
                                         .foregroundStyle(.primary.opacity(0.7))
-                                    Text("S/ \(totalCombinedIncomePEN, specifier: "%.2f")")
+                                    Text(Money.format(totalCombinedIncomePEN))
                                         .font(.title2.bold())
                                         .lineLimit(isPressingTotalPEN ? nil : 1)
                                         .minimumScaleFactor(0.6)
@@ -294,10 +188,13 @@ struct DashboardView: View {
                                     Text("Restante")
                                         .font(.subheadline)
                                         .foregroundStyle(.primary.opacity(0.7))
-                                    let restante = totalCombinedIncomePEN - totalCombinedPEN
-                                    Text("S/ \(restante, specifier: "%.2f")")
+                                    // `balance` es nil si no hay ingresos: se
+                                    // muestra "—" en vez de un restante que es
+                                    // el gasto en negativo.
+                                    let restante = totals.balance
+                                    Text(restante.map { Money.format($0) } ?? "—")
                                         .font(.title2.bold())
-                                        .foregroundStyle(restante < 0 ? .red : .primary)
+                                        .foregroundStyle((restante ?? 0) < 0 ? .red : .primary)
                                         .lineLimit(isPressingTotalUSD ? nil : 1)
                                         .minimumScaleFactor(0.6)
                                         .truncationMode(.tail)
@@ -372,31 +269,6 @@ struct DashboardView: View {
                 }
             }
         }
-        .sheet(isPresented: $showRangePicker) {
-            NavigationStack {
-                Form {
-                    Section(header: Text("Selecciona el rango de fechas")) {
-                        DatePicker("Desde", selection: $startDate, in: ...endDate, displayedComponents: .date)
-                            .datePickerStyle(.compact)
-                        
-                        DatePicker("Hasta", selection: $endDate, in: startDate..., displayedComponents: .date)
-                            .datePickerStyle(.compact)
-                    }
-                }
-                .navigationTitle("Rango de Fechas")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Aplicar") {
-                            showRangePicker = false
-                        }
-                    }
-                }
-                .preferredColorScheme(isDarkMode ? .dark : .light)
-            }
-            .presentationDetents([.fraction(0.4)])
-            .presentationDragIndicator(.visible)
-        }
         .sheet(item: $selectedExpenseForDetails) { expense in
             ExpenseDetailsView(expense: expense)
         }
@@ -408,12 +280,12 @@ struct DashboardView: View {
             Text("Top Comercios")
                 .font(.headline)
             
-            let maxTotal = expensesByMerchant.map { $0.total }.max() ?? 1.0
+            let maxTotal = expensesByMerchant.map { $0.total }.max() ?? 0
             
             VStack(spacing: 16) {
                 ForEach(expensesByMerchant, id: \.merchant) { item in
                     VStack(alignment: .leading, spacing: 6) {
-                        let displayName = item.merchant.replacingOccurrences(of: "PLIN - ", with: "").replacingOccurrences(of: "YAPE - ", with: "")
+                        let displayName = Accounting.displayName(item.merchant)
                         
                         Button {
                             withAnimation {
@@ -431,15 +303,15 @@ struct DashboardView: View {
                         GeometryReader { geo in
                             HStack(spacing: 12) {
                                 // Barra horizontal delgada
-                                let ratio = maxTotal > 0 ? (item.total / maxTotal) : 0
-                                let width = ratio * (geo.size.width - 80) // 80pt reservados para el texto
+                                let ratio = Money.ratio(item.total, to: maxTotal) ?? 0
+                                let width = CGFloat(ratio) * (geo.size.width - 80) // 80pt reservados para el texto
                                 
                                 RoundedRectangle(cornerRadius: 4)
                                     .fill(Color.accentColor.opacity(0.8))
                                     .frame(width: max(width, 4), height: 6) // Barra delgada
                                 
                                 // Valor a la derecha
-                                Text(String(format: "S/ %.2f", item.total))
+                                Text(Money.format(item.total))
                                     .font(.caption)
                                     .fontWeight(.bold)
                                     .foregroundColor(.secondary)
@@ -517,7 +389,7 @@ struct DashboardView: View {
             
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    let displayName = expense.merchant.replacingOccurrences(of: "PLIN - ", with: "").replacingOccurrences(of: "YAPE - ", with: "")
+                    let displayName = Accounting.displayName(expense.merchant)
                     
                     Button {
                         withAnimation {
@@ -560,11 +432,21 @@ struct DashboardView: View {
             
             Spacer()
             
-            let currencySymbol = expense.currency == "USD" ? "$" : "S/"
-            Text("- \(currencySymbol) \(expense.unpaidAmount, specifier: "%.2f")")
-                .font(.title3)
-                .fontWeight(.bold)
-                .foregroundStyle(.primary)
+            // Lo gastado es `amount`. Lo que aún debes es otra cifra y se
+            // muestra aparte, en vez de restarse del gasto (ACCOUNTING.md §2).
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("- " + Money.format(expense.amount, currency: expense.currency))
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundStyle(.primary)
+                
+                if expense.isDebt {
+                    let pending = Accounting.outstanding(of: expense)
+                    Text("debes " + Money.format(pending, currency: expense.currency))
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
         }
         .padding()
         .background(Color.primary.opacity(0.05))
@@ -641,13 +523,13 @@ struct DashboardView: View {
                         Text(displayTitle)
                             .font(.headline)
                             .lineLimit(1)
-                            .foregroundColor(income.debtReference != nil ? .orange : .primary)
+                            .foregroundColor(income.isDebtPayment ? .orange : .primary)
                     }
                     .buttonStyle(.plain)
                 }
                 
                 HStack(spacing: 6) {
-                    let isDebtPayment = income.debtReference != nil
+                    let isDebtPayment = income.isDebtPayment
                     let (baseColor, _) = incomeIconAndColor(for: income)
                     let tagColor = isDebtPayment ? Color.orange : baseColor
                     let tagText = isDebtPayment ? "Deuda" : income.source
@@ -673,9 +555,8 @@ struct DashboardView: View {
             
             Spacer()
             
-            let currencySymbol = income.currency == "USD" ? "$" : "S/"
-            let isDebtPayment = income.debtReference != nil
-            Text("\(currencySymbol) \(income.amount, specifier: "%.2f")")
+            let isDebtPayment = income.isDebtPayment
+            Text(Money.format(income.amount, currency: income.currency))
                 .font(.title3)
                 .fontWeight(.bold)
                 .foregroundStyle(isDebtPayment ? Color.orange : .green)
@@ -736,26 +617,7 @@ struct DashboardView: View {
     }
 }
 
-// MARK: - DashboardView Navigation and SubFilters
-extension DashboardView {
-    private var formattedReferenceDate: String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "es_ES")
-        formatter.dateFormat = "MMMM yyyy"
-        return formatter.string(from: referenceDate).capitalized
-    }
-    
-    @ViewBuilder
-    private var subFiltersView: some View {
-        DateNavigatorView(
-            referenceDate: $referenceDate,
-            selectedFilter: $selectedFilter,
-            slideDirection: $slideDirection
-        )
-    }
-}
-
 #Preview {
     DashboardView(scrollOffset: .constant(100), scrollToTopTrigger: .constant(false))
-        .modelContainer(for: Expense.self, inMemory: true)
+        .modelContainer(for: [Expense.self, Income.self], inMemory: true)
 }

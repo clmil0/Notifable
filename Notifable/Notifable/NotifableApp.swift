@@ -18,6 +18,12 @@ struct NotifableApp: App {
         }
     }()
 
+    init() {
+        // Traduce el `dashboardFilter` guardado por la versión anterior al
+        // nuevo `Period` único y borra las claves que ya no existen.
+        Period.migrateLegacyFilterIfNeeded()
+    }
+
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
 

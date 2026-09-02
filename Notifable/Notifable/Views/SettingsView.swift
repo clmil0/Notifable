@@ -11,7 +11,6 @@ struct SettingsView: View {
     @State private var showRecoveryAlert = false
     
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
-    @AppStorage("syncFilters") private var syncFilters = true
     @AppStorage("isDarkMode") private var isDarkMode = true
     @AppStorage("syncBBVA") private var syncBBVA = true
     @AppStorage("syncBCP") private var syncBCP = true
@@ -157,10 +156,8 @@ struct SettingsView: View {
                     .tint(currentTint)
             }
             
-            Section(header: Text("Navegación")) {
-                Toggle("Sincronizar filtros entre pestañas", isOn: $syncFilters)
-                    .tint(currentTint)
-            }
+            // El toggle "Sincronizar filtros entre pestañas" desaparece: ahora
+            // hay un solo periodo para toda la app, no hay nada que sincronizar.
         }
         .navigationTitle("Apariencia y Navegación")
         .navigationBarTitleDisplayMode(.inline)
