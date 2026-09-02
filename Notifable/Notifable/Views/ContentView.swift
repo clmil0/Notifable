@@ -28,6 +28,9 @@ struct ContentView: View {
     @Query private var expenses: [Expense]
     @State private var selectedTab: AppTab = .home
     @State private var scrollOffset: CGFloat = 0
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    
+    var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     @State private var showSettings = false
     @AppStorage("isDarkMode") private var isDarkMode = true
     @State private var selectedTransactionType: TransactionType? = nil
@@ -106,7 +109,7 @@ struct ContentView: View {
                                     Text("Gasto")
                                         .font(.caption.bold())
                                 }
-                                .foregroundStyle(Color.purple)
+                                .foregroundStyle(themeColor)
                                 .frame(width: 70, height: 60)
                             }
                             
@@ -146,7 +149,7 @@ struct ContentView: View {
                     VStack(spacing: 24) {
                         Image(systemName: "bell.badge.fill")
                             .font(.system(size: 80))
-                            .foregroundStyle(.purple)
+                            .foregroundStyle(themeColor)
                             .scaleEffect(isPulsing ? 1.1 : 0.9)
                             .opacity(isPulsing ? 1.0 : 0.5)
                         
@@ -180,7 +183,7 @@ struct ContentView: View {
         HStack {
             Image(systemName: "bell.badge.fill")
                 .font(.title)
-                .foregroundStyle(.purple)
+                .foregroundStyle(themeColor)
             
             Text("AgruPay")
                 .font(.title)
@@ -244,13 +247,13 @@ struct ContentView: View {
                                 .frame(width: 52, height: 32)
                                 .background(
                                     Capsule()
-                                        .fill(selectedTab == tab ? Color.purple.opacity(0.25) : Color.clear)
+                                        .fill(selectedTab == tab ? themeColor.opacity(0.25) : Color.clear)
                                 )
                             
                             Text(tab.title)
                                 .font(.system(size: 11, weight: selectedTab == tab ? .bold : .regular))
                         }
-                        .foregroundStyle(selectedTab == tab ? Color.purple : Color.gray)
+                        .foregroundStyle(selectedTab == tab ? themeColor : Color.gray)
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
                     }

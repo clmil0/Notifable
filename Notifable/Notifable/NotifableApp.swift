@@ -19,10 +19,12 @@ struct NotifableApp: App {
     }()
 
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .tint(AppThemeColor(rawValue: appAccentColor)?.color ?? .purple)
         }
         .modelContainer(sharedModelContainer) // Inyecta la BD a todas las vistas
         .onChange(of: scenePhase) { oldPhase, newPhase in

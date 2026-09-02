@@ -19,6 +19,11 @@ struct SettingsView: View {
     @AppStorage("syncInterbank") private var syncInterbank = true
     @AppStorage("syncScotiabank") private var syncScotiabank = true
     
+    @AppStorage("debtNotificationTimeInterval") private var debtNotificationTimeInterval: Double = 0
+    @AppStorage("debtNotificationFrequency") private var debtNotificationFrequency: String = "Diario"
+    
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    
     @AppStorage("cloudAIAnalysis") private var cloudAIAnalysis = true
     @AppStorage("cloudSocialFeed") private var cloudSocialFeed = false
     
@@ -30,56 +35,55 @@ struct SettingsView: View {
     @State private var showBankInfo: Bool = false
     @State private var bankInfoMessage: String = ""
     
+    var debtNotificationDateBinding: Binding<Date> {
+        Binding(
+            get: {
+                if debtNotificationTimeInterval > 0 {
+                    return Date(timeIntervalSince1970: debtNotificationTimeInterval)
+                }
+                return Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: Date())!
+            },
+            set: {
+                debtNotificationTimeInterval = $0.timeIntervalSince1970
+                updateDebtNotificationIfNeeded()
+            }
+        )
+    }
+    
+    var debtNotificationFrequencyBinding: Binding<String> {
+        Binding(
+            get: { debtNotificationFrequency },
+            set: {
+                debtNotificationFrequency = $0
+                updateDebtNotificationIfNeeded()
+            }
+        )
+    }
+    
+    private func updateDebtNotificationIfNeeded() {
+        let hasDebts = expenses.contains { $0.isDebt }
+        NotificationManager.shared.updateDebtNotification(hasDebts: hasDebts)
+    }
+    
     var body: some View {
         NavigationStack {
             Form {
-                Section(header: Text("Preferencias")) {
-                    Toggle("Notificaciones de Presupuesto", isOn: $notificationsEnabled)
-                        .tint(.purple)
-                    
-                    Toggle("Sincronizar filtros entre pestañas", isOn: $syncFilters)
-                        .tint(.purple)
-                    
-                    Toggle("Modo Oscuro", isOn: $isDarkMode)
-                        .tint(.purple)
-                    
-                    Button(action: {
-                        // TODO: Implement CSV Export
-                    }) {
-                        Label("Exportar a CSV", systemImage: "square.and.arrow.up")
+                Section {
+                    NavigationLink(destination: appearanceView) {
+                        Label("Apariencia y Navegación", systemImage: "paintbrush.fill")
                     }
-                    .foregroundStyle(.primary)
-                }
-                
-                Section(header: Text("Conexiones")) {
+                    NavigationLink(destination: notificationsView) {
+                        Label("Notificaciones y Recordatorios", systemImage: "bell.badge.fill")
+                    }
                     NavigationLink(destination: initialSyncView) {
-                        Label("Sincronización Inicial", systemImage: "building.columns.fill")
+                        Label("Bancos y Sincronización Automática", systemImage: "building.columns.fill")
                     }
-                    
                     NavigationLink(destination: onlineConfigView) {
-                        Label("Configuración Online", systemImage: "cloud.fill")
+                        Label("Respaldo y Funciones Online", systemImage: "cloud.fill")
                     }
-                }
-                
-                Section(header: Text("Gestión de Datos"), footer: Text("Estas acciones son irreversibles y afectarán tu base de datos local.")) {
-                    Button(role: .destructive, action: {
-                        showDeleteClassificationsConfirmation = true
-                    }) {
-                        Label("Borrar configuraciones", systemImage: "tag.slash.fill")
+                    NavigationLink(destination: advancedView) {
+                        Label("Gestión de Datos Avanzada", systemImage: "gearshape.2.fill")
                     }
-                    
-                    Button(role: .destructive, action: {
-                        showDeleteExpensesConfirmation = true
-                    }) {
-                        Label("Borrar datos de gastos", systemImage: "trash.fill")
-                    }
-                    
-                    Button(action: {
-                        gmailSync.resetSyncState()
-                    }) {
-                        Label("Restaurar caché de sincronización", systemImage: "arrow.triangle.2.circlepath.doc.on.clipboard")
-                    }
-                    .foregroundStyle(.orange)
                 }
                 
                 Section(header: Text("Acerca de")) {
@@ -133,6 +137,91 @@ struct SettingsView: View {
     }
     
     // MARK: - Submenús
+    
+    private var appearanceView: some View {
+        let currentTint = AppThemeColor(rawValue: appAccentColor)?.color ?? .purple
+        return Form {
+            Section(header: Text("Color de Acento")) {
+                Picker("Color del Tema", selection: $appAccentColor) {
+                    ForEach(AppThemeColor.allCases) { theme in
+                        HStack {
+                            Circle().fill(theme.color).frame(width: 12, height: 12)
+                            Text(theme.rawValue)
+                        }.tag(theme.rawValue)
+                    }
+                }
+            }
+            
+            Section(header: Text("Visualización")) {
+                Toggle("Modo Oscuro", isOn: $isDarkMode)
+                    .tint(currentTint)
+            }
+            
+            Section(header: Text("Navegación")) {
+                Toggle("Sincronizar filtros entre pestañas", isOn: $syncFilters)
+                    .tint(currentTint)
+            }
+        }
+        .navigationTitle("Apariencia y Navegación")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+    
+    private var notificationsView: some View {
+        let currentTint = AppThemeColor(rawValue: appAccentColor)?.color ?? .purple
+        return Form {
+            Section(header: Text("Notificaciones Generales")) {
+                Toggle("Notificaciones de Presupuesto", isOn: $notificationsEnabled)
+                    .tint(currentTint)
+            }
+            
+            Section(header: Text("Recordatorios de Deuda")) {
+                DatePicker("Hora de recordatorio", selection: debtNotificationDateBinding, displayedComponents: .hourAndMinute)
+                
+                Picker("Frecuencia", selection: debtNotificationFrequencyBinding) {
+                    Text("Diario").tag("Diario")
+                    Text("Semanal").tag("Semanal")
+                    Text("Mensual").tag("Mensual")
+                }
+            }
+        }
+        .navigationTitle("Notificaciones")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+    
+    private var advancedView: some View {
+        Form {
+            Section(header: Text("Gestión de Datos"), footer: Text("Estas acciones son irreversibles y afectarán tu base de datos local.")) {
+                Button(role: .destructive, action: {
+                    showDeleteClassificationsConfirmation = true
+                }) {
+                    Label("Borrar configuraciones", systemImage: "tag.slash.fill")
+                }
+                
+                Button(role: .destructive, action: {
+                    showDeleteExpensesConfirmation = true
+                }) {
+                    Label("Borrar datos de gastos", systemImage: "trash.fill")
+                }
+                
+                Button(action: {
+                    gmailSync.resetSyncState()
+                }) {
+                    Label("Restaurar caché de sincronización", systemImage: "arrow.triangle.2.circlepath.doc.on.clipboard")
+                }
+                .foregroundStyle(.orange)
+            }
+            
+            Section(header: Text("Debug")) {
+                Button(action: {
+                    gmailSync.diagnosticBBVA()
+                }) {
+                    Label("Diagnóstico BBVA Pago", systemImage: "stethoscope")
+                }
+            }.foregroundColor(.orange)
+        }
+        .navigationTitle("Avanzado")
+        .navigationBarTitleDisplayMode(.inline)
+    }
     
     private var initialSyncView: some View {
         Form {
@@ -293,6 +382,15 @@ struct SettingsView: View {
     
     private var onlineConfigView: some View {
         Form {
+            Section(header: Text("Datos Locales")) {
+                Button(action: {
+                    // TODO: Implement CSV Export
+                }) {
+                    Label("Exportar a CSV", systemImage: "square.and.arrow.up")
+                }
+                .foregroundStyle(.primary)
+            }
+            
             Section(header: Text("Respaldo en la Nube (Supabase)"), footer: Text("Tus datos se guardarán de forma segura en nuestros servidores.")) {
                 Button(action: {
                     Task { await SyncManager.shared.syncLocalExpensesToCloud(localExpenses: expenses) }
@@ -308,13 +406,6 @@ struct SettingsView: View {
                 Toggle("Feed en vivo de amigos", isOn: $cloudSocialFeed)
                     .tint(.blue)
             }
-            Section(header: Text("Debug")) {
-                Button(action: {
-                    gmailSync.diagnosticBBVA()
-                }) {
-                    Label("Diagnóstico BBVA Pago", systemImage: "stethoscope")
-                }
-            }.foregroundColor(.orange)
         }
         .navigationTitle("Configuración Online")
         .navigationBarTitleDisplayMode(.inline)

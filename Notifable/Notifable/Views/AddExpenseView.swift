@@ -13,6 +13,8 @@ struct AddExpenseView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("isDarkMode") private var isDarkMode = true
     
+    @Query(filter: #Predicate<Expense> { $0.isDebt == true }, sort: \.date, order: .reverse) private var activeDebts: [Expense]
+    
     let transactionType: TransactionType
     
     // Gasto states
@@ -27,6 +29,11 @@ struct AddExpenseView: View {
     @State private var incomeTitle: String = ""
     @State private var incomeNotes: String = ""
     @State private var incomeDate: Date = Date()
+    @State private var selectedDebt: Expense? = nil
+    @State private var isFinalPayment: Bool = false
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    
+    var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
 
     
     let categories = ["Comida", "Transporte", "Entretenimiento", "Otros", "Sin Clasificar"]
@@ -60,7 +67,7 @@ struct AddExpenseView: View {
                         }
                         
                         Toggle("Es Suscripción", isOn: $isSubscription)
-                            .tint(.purple)
+                            .tint(themeColor)
                     }
                 } else {
                     Section(header: Text("Detalles del Ingreso")) {
@@ -88,6 +95,20 @@ struct AddExpenseView: View {
                         TextField("Descripción (Opcional)", text: $incomeNotes)
                         
                         DatePicker("Fecha y Hora", selection: $incomeDate)
+                        
+                        if !activeDebts.isEmpty {
+                            Picker("Abonar a Deuda (Opcional)", selection: $selectedDebt) {
+                                Text("Ninguna").tag(Expense?.none)
+                                ForEach(activeDebts) { debt in
+                                    Text("\(debt.merchant) - S/ \(debt.unpaidAmount, specifier: "%.2f")").tag(Expense?.some(debt))
+                                }
+                            }
+                            
+                            if selectedDebt != nil {
+                                Toggle("Es el último pago (Cancela la deuda)", isOn: $isFinalPayment)
+                                    .tint(.green)
+                            }
+                        }
                     }
                 }
                 
@@ -105,7 +126,7 @@ struct AddExpenseView: View {
                             .foregroundStyle(.white)
                             .padding(.vertical, 4)
                     }
-                    .listRowBackground(transactionType == .gasto ? Color.purple : Color.green)
+                    .listRowBackground(transactionType == .gasto ? themeColor : Color.green)
                     
                     if transactionType == .gasto {
                         Button(action: addRandomExpense) {
@@ -195,11 +216,16 @@ struct AddExpenseView: View {
             source: incomeSource,
             title: incomeTitle.isEmpty ? nil : incomeTitle,
             date: incomeDate,
-            notes: incomeNotes.isEmpty ? nil : incomeNotes
+            notes: incomeNotes.isEmpty ? nil : incomeNotes,
+            debtReference: selectedDebt,
+            isFinalDebtPayment: isFinalPayment
         )
         
         withAnimation {
             modelContext.insert(income)
+            if let debt = selectedDebt, isFinalPayment {
+                debt.isDebt = false
+            }
         }
         dismiss()
     }

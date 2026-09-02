@@ -26,29 +26,35 @@ struct TrendsView: View {
     @AppStorage("categoriesFilter") private var categoriesFilter: DashboardFilter = .mes
     @AppStorage("syncFilters") private var syncFilters = true
     
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    
+    var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
+    
     @State private var showRangePicker = false
     @State private var startDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
     @State private var endDate: Date = Date()
+    
+    @State private var referenceDate: Date = Date()
+    @State private var slideDirection: Edge = .leading
     
     // MARK: - Filtered Data
     
     var filteredExpenses: [Expense] {
         let calendar = Calendar.current
-        let now = Date()
         
         return expenses.filter { expense in
             switch selectedFilter {
             case .hoy:
-                return calendar.isDateInToday(expense.date)
+                return calendar.isDate(expense.date, inSameDayAs: referenceDate)
             case .semana:
                 var cal = Calendar.current
                 cal.firstWeekday = 2
-                if let interval = cal.dateInterval(of: .weekOfYear, for: now) {
+                if let interval = cal.dateInterval(of: .weekOfYear, for: referenceDate) {
                     return expense.date >= interval.start && expense.date <= interval.end
                 }
                 return true
             case .mes:
-                if let interval = calendar.dateInterval(of: .month, for: now) {
+                if let interval = calendar.dateInterval(of: .month, for: referenceDate) {
                     return expense.date >= interval.start && expense.date <= interval.end
                 }
                 return true
@@ -62,21 +68,20 @@ struct TrendsView: View {
     
     var filteredIncomes: [Income] {
         let calendar = Calendar.current
-        let now = Date()
         
         return incomes.filter { income in
             switch selectedFilter {
             case .hoy:
-                return calendar.isDateInToday(income.date)
+                return calendar.isDate(income.date, inSameDayAs: referenceDate)
             case .semana:
                 var cal = Calendar.current
                 cal.firstWeekday = 2
-                if let interval = cal.dateInterval(of: .weekOfYear, for: now) {
+                if let interval = cal.dateInterval(of: .weekOfYear, for: referenceDate) {
                     return income.date >= interval.start && income.date <= interval.end
                 }
                 return true
             case .mes:
-                if let interval = calendar.dateInterval(of: .month, for: now) {
+                if let interval = calendar.dateInterval(of: .month, for: referenceDate) {
                     return income.date >= interval.start && income.date <= interval.end
                 }
                 return true
@@ -91,23 +96,25 @@ struct TrendsView: View {
     // Previous period
     var previousPeriodExpenses: [Expense] {
         let calendar = Calendar.current
-        let now = Date()
         
         return expenses.filter { expense in
             switch selectedFilter {
             case .hoy:
-                return calendar.isDateInYesterday(expense.date)
+                if let prevDay = calendar.date(byAdding: .day, value: -1, to: referenceDate) {
+                    return calendar.isDate(expense.date, inSameDayAs: prevDay)
+                }
+                return false
             case .semana:
                 var cal = Calendar.current
                 cal.firstWeekday = 2
-                if let currentInterval = cal.dateInterval(of: .weekOfYear, for: now),
+                if let currentInterval = cal.dateInterval(of: .weekOfYear, for: referenceDate),
                    let prevWeekDate = cal.date(byAdding: .weekOfYear, value: -1, to: currentInterval.start),
                    let prevInterval = cal.dateInterval(of: .weekOfYear, for: prevWeekDate) {
                     return expense.date >= prevInterval.start && expense.date < prevInterval.end
                 }
                 return false
             case .mes:
-                if let currentInterval = calendar.dateInterval(of: .month, for: now),
+                if let currentInterval = calendar.dateInterval(of: .month, for: referenceDate),
                    let prevMonthDate = calendar.date(byAdding: .month, value: -1, to: currentInterval.start),
                    let prevInterval = calendar.dateInterval(of: .month, for: prevMonthDate) {
                     return expense.date >= prevInterval.start && expense.date < prevInterval.end
@@ -343,12 +350,18 @@ struct TrendsView: View {
                                 .padding(.vertical, 10)
                                 .background(
                                     Capsule()
-                                        .fill(selectedFilter == filter ? Color.purple.opacity(0.8) : Color.primary.opacity(0.05))
+                                        .fill(selectedFilter == filter ? themeColor.opacity(0.8) : Color.primary.opacity(0.05))
                                 )
                         }
                     }
                 }
                 .padding(.horizontal)
+                
+                DateNavigatorView(
+                    referenceDate: $referenceDate,
+                    selectedFilter: $selectedFilter,
+                    slideDirection: $slideDirection
+                )
                 
                 // Gráfica Principal
                 trendChartView
@@ -510,7 +523,7 @@ struct TrendsView: View {
                 title: "Promedio Diario",
                 value: "S/ " + String(format: "%.2f", avgDailyExpense),
                 icon: "chart.bar.fill",
-                color: .purple
+                color: themeColor
             )
             
             statCard(

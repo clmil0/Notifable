@@ -26,9 +26,17 @@ class NotificationManager {
             content.body = "Tienes deudas pendientes por cancelar. ¡Revisa tu resumen!"
             content.sound = .default
             
-            var dateComponents = DateComponents()
-            dateComponents.hour = 10
-            dateComponents.minute = 0
+            let timeInterval = UserDefaults.standard.double(forKey: "debtNotificationTimeInterval")
+            let date = timeInterval > 0 ? Date(timeIntervalSince1970: timeInterval) : Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: Date())!
+            
+            var dateComponents = Calendar.current.dateComponents([.hour, .minute], from: date)
+            
+            let frequency = UserDefaults.standard.string(forKey: "debtNotificationFrequency") ?? "Diario"
+            if frequency == "Semanal" {
+                dateComponents.weekday = Calendar.current.component(.weekday, from: date)
+            } else if frequency == "Mensual" {
+                dateComponents.day = Calendar.current.component(.day, from: date)
+            }
             
             let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
             let request = UNNotificationRequest(identifier: "dailyDebtReminder", content: content, trigger: trigger)
@@ -37,7 +45,7 @@ class NotificationManager {
                 if let error = error {
                     print("Error programando notificación de deuda: \(error.localizedDescription)")
                 } else {
-                    print("Notificación de deuda programada con éxito para las 10:00 AM")
+                    print("Notificación de deuda programada para: \(dateComponents) (\(frequency))")
                 }
             }
         } else {

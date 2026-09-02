@@ -34,6 +34,10 @@ struct CategoriesView: View {
     @AppStorage("categoriesFilter") private var selectedFilter: DashboardFilter = .mes
     @AppStorage("dashboardFilter") private var dashboardFilter: DashboardFilter = .mes
     @AppStorage("syncFilters") private var syncFilters = true
+    
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    
+    var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     @State private var showRangePicker = false
     @State private var startDate: Date = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
     @State private var endDate: Date = Date()
@@ -50,24 +54,26 @@ struct CategoriesView: View {
     @State private var selectedChartCategory: String?
     @Namespace private var animation
     
+    @State private var referenceDate: Date = Date()
+    @State private var slideDirection: Edge = .leading
+    
     // Filtrar los gastos según el filtro de tiempo
     var filteredExpenses: [Expense] {
         let calendar = Calendar.current
-        let now = Date()
         
         return expenses.filter { expense in
             switch selectedFilter {
             case .hoy:
-                return calendar.isDateInToday(expense.date)
+                return calendar.isDate(expense.date, inSameDayAs: referenceDate)
             case .semana:
                 var calendar = Calendar.current
                 calendar.firstWeekday = 2 // Lunes
-                if let interval = calendar.dateInterval(of: .weekOfYear, for: now) {
+                if let interval = calendar.dateInterval(of: .weekOfYear, for: referenceDate) {
                     return expense.date >= interval.start && expense.date <= interval.end
                 }
                 return true
             case .mes:
-                if let interval = calendar.dateInterval(of: .month, for: now) {
+                if let interval = calendar.dateInterval(of: .month, for: referenceDate) {
                     return expense.date >= interval.start && expense.date <= interval.end
                 }
                 return true
@@ -128,7 +134,7 @@ struct CategoriesView: View {
     
     var categoryTotals: [(category: String, totalPEN: Double, totalUSD: Double, combinedTotal: Double, merchants: [(merchant: String, combinedTotal: Double, totalPEN: Double, totalUSD: Double)])] {
         let grouped = Dictionary(grouping: validExpenses, by: { $0.category })
-        let summed = grouped.map { (category, expenses) -> (category: String, totalPEN: Double, totalUSD: Double, combinedTotal: Double, merchants: [(merchant: String, combinedTotal: Double, totalPEN: Double, totalUSD: Double)]) in
+        var summed = grouped.map { (category, expenses) -> (category: String, totalPEN: Double, totalUSD: Double, combinedTotal: Double, merchants: [(merchant: String, combinedTotal: Double, totalPEN: Double, totalUSD: Double)]) in
             let pen = expenses.filter { $0.currency == "PEN" }.reduce(0) { $0 + $1.amount }
             let usd = expenses.filter { $0.currency == "USD" }.reduce(0) { $0 + $1.amount }
             let combined = pen + (usd * exchangeRateService.usdToPenRate)
@@ -148,11 +154,19 @@ struct CategoriesView: View {
             
             return (category: category, totalPEN: pen, totalUSD: usd, combinedTotal: combined, merchants: merchants)
         }
-        return summed.sorted { 
+        
+        let existingCategories = Set(summed.map { $0.category })
+        for category in allCategories {
+            if !existingCategories.contains(category) {
+                summed.append((category: category, totalPEN: 0, totalUSD: 0, combinedTotal: 0, merchants: []))
+            }
+        }
+        
+        return summed.sorted {
             if $0.combinedTotal == $1.combinedTotal {
                 return $0.category < $1.category
             }
-            return $0.combinedTotal > $1.combinedTotal 
+            return $0.combinedTotal > $1.combinedTotal
         }
     }
     
@@ -184,13 +198,19 @@ struct CategoriesView: View {
                                     .padding(.vertical, 10)
                                     .background(
                                         Capsule()
-                                            .fill(selectedFilter == filter ? Color.purple.opacity(0.8) : Color.primary.opacity(0.05))
+                                            .fill(selectedFilter == filter ? themeColor.opacity(0.8) : Color.primary.opacity(0.05))
                                     )
                             }
                         }
                     }
                     .padding(.horizontal)
                     .id("TOP")
+                    
+                    DateNavigatorView(
+                        referenceDate: $referenceDate,
+                        selectedFilter: $selectedFilter,
+                        slideDirection: $slideDirection
+                    )
                     
                     // 2. Gráfico de Dona (sólo si estamos en Mis Categorías y hay datos)
                     if selectedTab == .misCategorias && !chartTotals.isEmpty {
@@ -222,8 +242,8 @@ struct CategoriesView: View {
                                         ZStack {
                                             if selectedTab == tab {
                                                 Capsule()
-                                                    .fill(Color.purple.opacity(0.8))
-                                                    .shadow(color: .purple.opacity(0.3), radius: 8, x: 0, y: 4)
+                                                    .fill(themeColor.opacity(0.8))
+                                                    .shadow(color: themeColor.opacity(0.3), radius: 8, x: 0, y: 4)
                                                     .matchedGeometryEffect(id: "TAB", in: animation)
                                             }
                                         }
@@ -385,7 +405,7 @@ struct CategoriesView: View {
         case "Sin Clasificar": return .gray
         case "Comida": return .orange
         case "Transporte": return .blue
-        case "Entretenimiento": return .purple
+        case "Entretenimiento": return themeColor
         case "Supermercado": return .teal
         case "Otros": return .green
         default:
@@ -411,7 +431,7 @@ struct CategoriesView: View {
                     } label: {
                         Text("Ver todo")
                             .font(.caption)
-                            .foregroundStyle(.purple)
+                            .foregroundStyle(themeColor)
                     }
                 }
                 
@@ -566,6 +586,7 @@ struct CategoriesView: View {
                                     }
                                 }
                             }
+                            .opacity(item.combinedTotal == 0 ? 0.4 : 1.0)
                             
                             if expandedCategories.contains(item.category) {
                                 VStack(spacing: 8) {
@@ -617,7 +638,7 @@ struct CategoriesView: View {
                                 .padding(.bottom)
                             }
                         }
-                        .background(highlightedID == item.category ? Color.purple.opacity(0.15) : Color.primary.opacity(0.05))
+                        .background(highlightedID == item.category ? themeColor.opacity(0.15) : Color.primary.opacity(0.05))
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .padding(.horizontal)
                         .id(item.category)
@@ -768,7 +789,7 @@ struct CategoriesView: View {
                             }
                         }
                         .padding()
-                        .background(highlightedID == group.merchant ? Color.purple.opacity(0.15) : Color.primary.opacity(0.05))
+                        .background(highlightedID == group.merchant ? themeColor.opacity(0.15) : Color.primary.opacity(0.05))
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .padding(.horizontal)
                         .id(group.merchant)
@@ -797,12 +818,12 @@ struct CategoriesView: View {
     }
     private func iconColor(for category: String) -> Color {
         if category == "Sin Clasificar" {
-            return .purple
+            return themeColor
         }
         switch category {
         case "Comida": return .orange
         case "Transporte": return .blue
-        case "Entretenimiento": return .purple
+        case "Entretenimiento": return themeColor
         default: return .green
         }
     }
