@@ -110,6 +110,107 @@ struct Rhythm {
         Money.divide(current.spent, by: max(1, elapsedDays.count))
     }
 
+    // MARK: - Agrupación del gráfico
+
+    /// Una barra del gráfico. En un mes es un día; en un año, un mes.
+    struct Bucket: Identifiable {
+        let date: Date
+        let total: Double
+        let label: String
+        let containsToday: Bool
+        var id: Date { date }
+    }
+
+    /// Un año son 365 barras: con 3 pt de separación la fila mide más de mil
+    /// puntos y revienta el ancho de la pantalla. Pasado cierto número de días
+    /// el gráfico agrupa —por semana, y por mes en el año— en vez de intentar
+    /// dibujar un día por barra.
+    enum Grouping {
+        case day, week, month
+
+        var unitTitle: String {
+            switch self {
+            case .day: return "Día por día"
+            case .week: return "Semana a semana"
+            case .month: return "Mes a mes"
+            }
+        }
+
+        var averageLabel: String {
+            switch self {
+            case .day: return "promedio diario"
+            case .week: return "promedio semanal"
+            case .month: return "promedio mensual"
+            }
+        }
+    }
+
+    var grouping: Grouping {
+        switch period.granularity {
+        case .anio: return .month
+        case .dia, .semana: return .day
+        case .mes, .rango: return period.totalDays > 45 ? .week : .day
+        }
+    }
+
+    /// Las barras a dibujar, ya agrupadas y recortadas a lo transcurrido.
+    var chartBuckets: [Bucket] {
+        let cal = Period.calendar
+        let days = elapsedDays
+
+        switch grouping {
+        case .day:
+            return days.map {
+                Bucket(date: $0.date,
+                       total: $0.total,
+                       label: "\(cal.component(.day, from: $0.date))",
+                       containsToday: cal.isDateInToday($0.date))
+            }
+        case .week:
+            return group(days, by: .weekOfYear) { start in
+                "\(cal.component(.day, from: start))"
+            }
+        case .month:
+            return group(days, by: .month) { start in
+                let f = DateFormatter()
+                f.locale = Locale(identifier: "es_PE")
+                f.dateFormat = "MMM"
+                return f.string(from: start).capitalizedFirst
+            }
+        }
+    }
+
+    /// Suma en céntimos por grupo, para no perder ni inventar nada al agrupar:
+    /// la suma de las barras sigue siendo exactamente el gasto del periodo.
+    private func group(_ days: [PeriodTotals.DayTotal],
+                       by component: Calendar.Component,
+                       label: (Date) -> String) -> [Bucket] {
+        let cal = Period.calendar
+        var cents: [Date: Int] = [:]
+        var hasToday: Set<Date> = []
+        var order: [Date] = []
+
+        for day in days {
+            guard let start = cal.dateInterval(of: component, for: day.date)?.start else { continue }
+            if cents[start] == nil { order.append(start) }
+            cents[start, default: 0] += Money.cents(day.total)
+            if cal.isDateInToday(day.date) { hasToday.insert(start) }
+        }
+
+        return order.map { start in
+            Bucket(date: start,
+                   total: Money.value(cents[start] ?? 0),
+                   label: label(start),
+                   containsToday: hasToday.contains(start))
+        }
+    }
+
+    /// Media por barra, para la línea horizontal. Con el gráfico agrupado tiene
+    /// que ser la media del grupo, no la del día, o la línea queda al ras del suelo.
+    var averagePerBucket: Double {
+        Money.divide(current.spent, by: max(1, chartBuckets.count))
+    }
+
     /// Día de la semana con mayor gasto medio.
     var busiestWeekday: (name: String, average: Double)? {
         let cal = Period.calendar

@@ -94,6 +94,45 @@ struct RhythmTests {
         #expect(r.daysWithoutSpending <= period.totalDays)
     }
 
+    @Test("Un año se dibuja en 12 barras, no en 365")
+    func agrupacionPorAno() {
+        let year = Period(granularity: .anio, reference: Self.date(2025, 6, 15))
+        // Un gasto cada día de 2025.
+        var current: [ExpenseSnapshot] = []
+        for month in 1...12 {
+            let days = Period.calendar.range(of: .day, in: .month, for: Self.date(2025, month, 1))!.count
+            for day in 1...days {
+                current.append(ExpenseSnapshot(amount: 10, date: Self.date(2025, month, day),
+                                               category: "Comida", merchant: "Metro"))
+            }
+        }
+
+        let r = Rhythm(period: year,
+                       current: Accounting.totals(expenses: current, incomes: [], period: year, usdToPen: Self.rate),
+                       previous: PeriodTotals.empty)
+
+        #expect(r.grouping == .month)
+        #expect(r.chartBuckets.count == 12, "salieron \(r.chartBuckets.count) barras")
+        // Agrupar no puede perder ni inventar dinero.
+        #expect(Money.equals(Money.sum(r.chartBuckets) { $0.total }, r.current.spent))
+        #expect(Money.equals(r.averagePerBucket, Money.divide(r.current.spent, by: 12)))
+    }
+
+    @Test("Un mes corto se dibuja día a día; un rango largo, por semanas")
+    func agrupacionSegunLongitud() {
+        let month = Self.closedMonth
+        let r = Self.rhythm(current: [], previous: [], period: month)
+        #expect(r.grouping == .day)
+        #expect(r.chartBuckets.count == 30)
+
+        let longRange = Period(granularity: .rango,
+                               customStart: Self.date(2026, 1, 1),
+                               customEnd: Self.date(2026, 6, 30))
+        let long = Self.rhythm(current: [], previous: [], period: longRange)
+        #expect(long.grouping == .week)
+        #expect(long.chartBuckets.count < 30, "un rango de seis meses no puede dar 181 barras")
+    }
+
     @Test("El día más caro es un día de la semana con media, no un total")
     func diaMasCaro() {
         let period = Self.closedMonth

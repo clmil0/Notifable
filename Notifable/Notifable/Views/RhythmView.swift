@@ -73,10 +73,10 @@ struct RhythmView: View {
 
                 headline
 
-                DailyBarsChart(days: rhythm.elapsedDays,
-                               allDays: totals.dailySpent,
-                               average: rhythm.averageOfElapsedDays,
-                               accent: accent.color)
+                RhythmBarsChart(buckets: rhythm.chartBuckets,
+                                average: rhythm.averagePerBucket,
+                                grouping: rhythm.grouping,
+                                accent: accent.color)
 
                 twoCards
 
@@ -218,38 +218,62 @@ struct RhythmView: View {
     }
 }
 
-// MARK: - Gráfico día a día
+// MARK: - Gráfico de barras
 
-/// Barras diarias con la línea de promedio. Los días por encima del promedio van
-/// en acento pleno; el resto, apagados. Es la lectura que se busca: cuáles se
-/// salieron de la media.
-struct DailyBarsChart: View {
+/// Barras con la línea de promedio. Las que superan el promedio van en acento
+/// pleno; el resto, apagadas. Es la lectura que se busca: cuáles se salieron.
+///
+/// La unidad de cada barra la decide `Rhythm.grouping`: un día en el mes, un mes
+/// en el año. Dibujar 365 barras de ancho fijo no cabe en la pantalla —ése era
+/// el desbordamiento al filtrar por año— y además no se lee.
+struct RhythmBarsChart: View {
 
-    let days: [PeriodTotals.DayTotal]
-    let allDays: [PeriodTotals.DayTotal]
+    let buckets: [Rhythm.Bucket]
     let average: Double
+    let grouping: Rhythm.Grouping
     let accent: Color
 
     @Environment(\.colorScheme) private var scheme
     private var palette: Palette { Palette(scheme) }
-    private var cal: Calendar { Period.calendar }
 
-    private var maxTotal: Double { days.map(\.total).max() ?? 0 }
+    private var maxTotal: Double { buckets.map(\.total).max() ?? 0 }
+
+    /// Con muchas barras la separación se encoge; si no, la suma de huecos
+    /// arrastra la fila más allá del ancho disponible.
+    private var spacing: CGFloat {
+        switch buckets.count {
+        case ..<16: return 4
+        case ..<32: return 3
+        case ..<60: return 2
+        default: return 1
+        }
+    }
+
+    private var barCorner: CGFloat { buckets.count > 40 ? 1 : 3 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Día por día")
+                Text(grouping.unitTitle)
                     .font(.headline)
                     .foregroundStyle(palette.label)
                 Spacer()
-                Text("promedio " + Money.format(average))
+                Text(grouping.averageLabel + " " + Money.format(average))
                     .font(.caption)
                     .foregroundStyle(palette.secondaryLabel)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
 
-            bars
-            axis
+            if buckets.isEmpty {
+                Text("Aún no hay nada que dibujar en este periodo.")
+                    .font(.footnote)
+                    .foregroundStyle(palette.secondaryLabel)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            } else {
+                bars
+                axis
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .surfaceCard(radius: 20)
@@ -258,17 +282,17 @@ struct DailyBarsChart: View {
 
     private var bars: some View {
         ZStack(alignment: .bottom) {
-            HStack(alignment: .bottom, spacing: 3) {
-                ForEach(days) { day in
-                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(color(for: day))
-                        .frame(height: max(2, 140 * fraction(for: day)))
+            HStack(alignment: .bottom, spacing: spacing) {
+                ForEach(buckets) { bucket in
+                    RoundedRectangle(cornerRadius: barCorner, style: .continuous)
+                        .fill(color(for: bucket))
+                        .frame(height: max(2, 140 * fraction(for: bucket)))
                         .frame(maxWidth: .infinity)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .bottom)
             .frame(height: 140, alignment: .bottom)
 
-            // Línea de promedio.
             if !Money.isZero(average), !Money.isZero(maxTotal) {
                 let ratio = Money.ratio(average, to: maxTotal) ?? 0
                 Rectangle()
@@ -278,46 +302,46 @@ struct DailyBarsChart: View {
             }
         }
         .frame(height: 140)
+        .clipped()
     }
 
-    private func fraction(for day: PeriodTotals.DayTotal) -> CGFloat {
-        guard let ratio = Money.ratio(day.total, to: maxTotal) else { return 0 }
+    private func fraction(for bucket: Rhythm.Bucket) -> CGFloat {
+        guard let ratio = Money.ratio(bucket.total, to: maxTotal) else { return 0 }
         return CGFloat(min(1, ratio))
     }
 
-    private func color(for day: PeriodTotals.DayTotal) -> Color {
-        if cal.isDateInToday(day.date) { return accent.opacity(0.55) }
-        return Money.isGreater(day.total, than: average) ? accent : palette.track
+    private func color(for bucket: Rhythm.Bucket) -> Color {
+        if bucket.containsToday { return accent.opacity(0.55) }
+        return Money.isGreater(bucket.total, than: average) ? accent : palette.track
     }
 
-    /// Primer día, día 8, hoy y último: suficiente para orientarse sin llenar
-    /// el eje de números.
+    /// Cuatro referencias como mucho: primera, una intermedia, la actual y la
+    /// última. Suficiente para orientarse sin llenar el eje de números.
     private var axis: some View {
-        HStack {
+        HStack(spacing: 0) {
             ForEach(axisLabels, id: \.self) { label in
                 Text(label)
                     .font(.caption2)
                     .foregroundStyle(palette.secondaryLabel)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity)
             }
         }
     }
 
     private var axisLabels: [String] {
-        guard let first = allDays.first, let last = allDays.last else { return [] }
-        var labels: [String] = [dayLabel(first.date)]
-        if allDays.count > 10, allDays.indices.contains(7) {
-            labels.append(dayLabel(allDays[7].date))
+        guard let first = buckets.first, let last = buckets.last else { return [] }
+        var labels: [String] = [first.label]
+        if buckets.count > 6 {
+            labels.append(buckets[buckets.count / 2].label)
         }
-        if let today = allDays.first(where: { cal.isDateInToday($0.date) }) {
-            labels.append(dayLabel(today.date) + " (hoy)")
+        if let today = buckets.first(where: { $0.containsToday }) {
+            labels.append(today.label + " (hoy)")
         }
-        labels.append(dayLabel(last.date))
-        return Array(NSOrderedSet(array: labels)) as? [String] ?? labels
-    }
+        if buckets.count > 1 { labels.append(last.label) }
 
-    private func dayLabel(_ date: Date) -> String {
-        "\(cal.component(.day, from: date))"
+        var seen: Set<String> = []
+        return labels.filter { seen.insert($0).inserted }
     }
 }
 
