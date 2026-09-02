@@ -7,6 +7,28 @@ enum CategoryTab: String, CaseIterable {
     case inbox = "Bandeja (Sin Clasificar)"
 }
 
+/// Un comercio de la Bandeja con sus gastos sin clasificar.
+///
+/// Antes esto era una tupla con etiquetas. El comprobador de tipos de Swift
+/// tarda un tiempo exponencial en resolver tuplas etiquetadas dentro de cadenas
+/// `map`/`sorted`, y acababa rindiéndose ("unable to type-check this expression
+/// in reasonable time"). Un `struct` con tipos explícitos se resuelve al vuelo.
+struct InboxGroup: Identifiable {
+    let merchant: String
+    let expenses: [Expense]
+    let total: Double
+    var id: String { merchant }
+}
+
+/// Una fila de "Mis Categorías". Mismo motivo que `InboxGroup`.
+struct CategoryRow: Identifiable {
+    let category: String
+    let total: Double
+    let merchants: [PeriodTotals.MerchantTotal]
+    var id: String { category }
+}
+
+
 struct MerchantWrapper: Identifiable {
     let id: String
 }
@@ -81,63 +103,80 @@ struct CategoriesView: View {
     }
     
     /// Comercios sin clasificar del periodo, agrupados.
-    var inboxGroups: [(merchant: String, expenses: [Expense], combinedTotal: Double)] {
-        let uncategorized = filteredExpenses.filter { $0.category == Accounting.unclassified }
-        let byMerchant = Dictionary(uniqueKeysWithValues: totals.byMerchant.map { ($0.merchant, $0.total) })
-        return Dictionary(grouping: uncategorized, by: { $0.merchant })
-            .map { merchant, items in
-                (merchant: merchant,
-                 expenses: items.sorted { $0.date > $1.date },
-                 combinedTotal: byMerchant[merchant] ?? 0)
-            }
-            .sorted {
-                $0.expenses.count == $1.expenses.count
-                    ? $0.merchant < $1.merchant
-                    : $0.expenses.count > $1.expenses.count
-            }
+    var inboxGroups: [InboxGroup] {
+        let totalByMerchant = merchantTotalsByName
+        var grouped: [String: [Expense]] = [:]
+        for expense in filteredExpenses where expense.category == Accounting.unclassified {
+            grouped[expense.merchant, default: []].append(expense)
+        }
+
+        var result: [InboxGroup] = []
+        result.reserveCapacity(grouped.count)
+        for (merchant, items) in grouped {
+            result.append(InboxGroup(merchant: merchant,
+                                     expenses: items.sorted { $0.date > $1.date },
+                                     total: totalByMerchant[merchant]?.total ?? 0))
+        }
+        return result.sorted { lhs, rhs in
+            if lhs.expenses.count == rhs.expenses.count { return lhs.merchant < rhs.merchant }
+            return lhs.expenses.count > rhs.expenses.count
+        }
     }
-    
-    var filteredInboxGroups: [(merchant: String, expenses: [Expense], combinedTotal: Double)] {
-        searchText.isEmpty
-            ? inboxGroups
-            : inboxGroups.filter { $0.merchant.localizedCaseInsensitiveContains(searchText) }
+
+    var filteredInboxGroups: [InboxGroup] {
+        guard !searchText.isEmpty else { return inboxGroups }
+        return inboxGroups.filter { $0.merchant.localizedCaseInsensitiveContains(searchText) }
     }
-    
+
     /// Datos de la dona: todas las categorías del periodo, incluida Sin Clasificar.
     var chartTotals: [PeriodTotals.CategoryTotal] { totals.byCategory }
-    
+
+    private var merchantTotalsByName: [String: PeriodTotals.MerchantTotal] {
+        var map: [String: PeriodTotals.MerchantTotal] = [:]
+        for item in totals.byMerchant { map[item.merchant] = item }
+        return map
+    }
+
     /// Filas de "Mis Categorías": sin la bandeja, con sus comercios y las
     /// categorías vacías al final para poder asignarlas.
-    var categoryTotals: [(category: String, combinedTotal: Double, merchants: [PeriodTotals.MerchantTotal])] {
-        let merchantsByCategory = Dictionary(grouping: filteredExpenses.filter { $0.category != Accounting.unclassified },
-                                             by: { $0.category })
-            .mapValues { Set($0.map(\.merchant)) }
-        let merchantTotals = Dictionary(uniqueKeysWithValues: totals.byMerchant.map { ($0.merchant, $0) })
-        
-        var rows = totals.byCategory
-            .filter { $0.category != Accounting.unclassified }
-            .map { item -> (category: String, combinedTotal: Double, merchants: [PeriodTotals.MerchantTotal]) in
-                let merchants = (merchantsByCategory[item.category] ?? [])
-                    .compactMap { merchantTotals[$0] }
-                    .sorted {
-                        Money.cents($0.total) == Money.cents($1.total)
-                            ? $0.merchant < $1.merchant
-                            : Money.cents($0.total) > Money.cents($1.total)
-                    }
-                return (category: item.category, combinedTotal: item.total, merchants: merchants)
+    var categoryTotals: [CategoryRow] {
+        let totalByMerchant = merchantTotalsByName
+
+        var merchantsByCategory: [String: Set<String>] = [:]
+        for expense in filteredExpenses where expense.category != Accounting.unclassified {
+            merchantsByCategory[expense.category, default: []].insert(expense.merchant)
+        }
+
+        var rows: [CategoryRow] = []
+        for item in totals.byCategory where item.category != Accounting.unclassified {
+            let names = merchantsByCategory[item.category] ?? []
+            var merchants: [PeriodTotals.MerchantTotal] = []
+            merchants.reserveCapacity(names.count)
+            for name in names {
+                if let merchant = totalByMerchant[name] { merchants.append(merchant) }
             }
-        
+            merchants.sort { lhs, rhs in
+                let l = Money.cents(lhs.total)
+                let r = Money.cents(rhs.total)
+                return l == r ? lhs.merchant < rhs.merchant : l > r
+            }
+            rows.append(CategoryRow(category: item.category, total: item.total, merchants: merchants))
+        }
+
+        // Las categorías sin gasto en el periodo van al final, en gris.
         let existing = Set(rows.map(\.category))
         for category in allCategories where !existing.contains(category) {
-            rows.append((category: category, combinedTotal: 0, merchants: []))
+            rows.append(CategoryRow(category: category, total: 0, merchants: []))
         }
-        return rows.sorted {
-            Money.cents($0.combinedTotal) == Money.cents($1.combinedTotal)
-                ? $0.category < $1.category
-                : Money.cents($0.combinedTotal) > Money.cents($1.combinedTotal)
+
+        return rows.sorted { lhs, rhs in
+            let l = Money.cents(lhs.total)
+            let r = Money.cents(rhs.total)
+            return l == r ? lhs.category < rhs.category : l > r
         }
     }
-    
+
+
     var body: some View {
         ScrollViewReader { proxy in
             TrackableScrollView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger) {
@@ -446,96 +485,8 @@ struct CategoriesView: View {
             } else {
                 VStack(spacing: 12) {
                     let displayedCategories = selectedChartCategory != nil ? categoryTotals.filter { $0.category == selectedChartCategory } : categoryTotals
-                    ForEach(displayedCategories, id: \.category) { item in
-                        VStack(spacing: 0) {
-                            HStack {
-                                ZStack {
-                                    let baseColor = iconColor(for: item.category)
-                                    Circle()
-                                        .fill(colorScheme == .light ? baseColor : baseColor.opacity(0.2))
-                                        .frame(width: 40, height: 40)
-                                    Image(systemName: iconName(for: item.category))
-                                        .foregroundStyle(colorScheme == .light ? .white : baseColor)
-                                }
-                                
-                                Text(item.category)
-                                    .font(.headline)
-                                
-                                Spacer()
-                                
-                                VStack(alignment: .trailing, spacing: 2) {
-                                    Text(Money.format(item.combinedTotal))
-                                        .font(.subheadline)
-                                        .bold()
-                                        .foregroundStyle(.primary)
-                                }
-                                
-                                Image(systemName: "chevron.down")
-                                    .rotationEffect(.degrees(expandedCategories.contains(item.category) ? 180 : 0))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.leading, 8)
-                            }
-                            .padding()
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                withAnimation(.spring) {
-                                    if expandedCategories.contains(item.category) {
-                                        expandedCategories.remove(item.category)
-                                    } else {
-                                        expandedCategories.insert(item.category)
-                                    }
-                                }
-                            }
-                            .onLongPressGesture(minimumDuration: 0.5) {
-                                withAnimation(.spring) {
-                                    if expandedCategories.contains(item.category) {
-                                        expandedCategories.remove(item.category)
-                                    } else {
-                                        expandedCategories.insert(item.category)
-                                    }
-                                }
-                            }
-                            .opacity(Money.isZero(item.combinedTotal) ? 0.4 : 1.0)
-                            
-                            if expandedCategories.contains(item.category) {
-                                VStack(spacing: 8) {
-                                    Divider().background(Color.primary.opacity(0.1))
-                                    
-                                    ForEach(item.merchants, id: \.merchant) { merchantItem in
-                                        HStack {
-                                            Text(Accounting.displayName(merchantItem.merchant))
-                                                .font(.caption)
-                                                .foregroundStyle(.primary)
-                                            
-                                            Spacer()
-                                            
-                                            Text(Money.format(merchantItem.total))
-                                                .font(.caption).bold()
-                                                .padding(.trailing, 8)
-                                            
-                                            Button(action: {
-                                                selectedMerchantToUncategorize = (merchant: merchantItem.merchant, category: item.category)
-                                            }) {
-                                                Image(systemName: "xmark")
-                                                    .font(.caption2)
-                                                    .bold()
-                                                    .foregroundStyle(.white)
-                                                    .padding(6)
-                                                    .background(Color.red)
-                                                    .clipShape(Circle())
-                                            }
-                                        }
-                                        .padding(.vertical, 4)
-                                    }
-                                }
-                                .padding(.horizontal)
-                                .padding(.bottom)
-                            }
-                        }
-                        .background(highlightedID == item.category ? themeColor.opacity(0.15) : Color.primary.opacity(0.05))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .padding(.horizontal)
-                        .id(item.category)
+                    ForEach(displayedCategories) { item in
+                        categoryCard(for: item)
                     }
                     
                     // Relleno mínimo para que los últimos elementos sean scrolleables
@@ -582,107 +533,9 @@ struct CategoriesView: View {
                     if filteredInboxGroups.isEmpty {
                         ContentUnavailableView("No se encontraron resultados", systemImage: "magnifyingglass", description: Text("Prueba con otro término de búsqueda."))
                     } else {
-                        ForEach(filteredInboxGroups, id: \.merchant) { group in
-                        VStack(spacing: 0) {
-                            HStack {
-                                ZStack {
-                                    Circle()
-                                        .fill(group.merchant.hasPrefix("PLIN - ") || group.merchant.hasPrefix("YAPE - ") ? Color.primary.opacity(0.1) : Color.gray.opacity(0.15))
-                                        .frame(width: 40, height: 40)
-                                        .shadow(color: group.merchant.hasPrefix("PLIN - ") || group.merchant.hasPrefix("YAPE - ") ? Color.primary.opacity(0.05) : .clear, radius: 2)
-                                    
-                                    if group.merchant.hasPrefix("PLIN - ") {
-                                        Image("plin_icon")
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 26, height: 26)
-                                            .clipShape(Circle())
-                                    } else if group.merchant.hasPrefix("YAPE - ") {
-                                        Image("yape_icon")
-                                            .resizable()
-                                            .scaledToFill()
-                                            .frame(width: 26, height: 26)
-                                            .clipShape(Circle())
-                                    } else {
-                                        Image(systemName: "tray.fill")
-                                            .foregroundStyle(.gray)
-                                    }
-                                }
-                                
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(Accounting.displayName(group.merchant))
-                                        .font(.headline)
-                                    Text("\(group.expenses.count) transac.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                
-                                Spacer()
-                                
-                                // Right Side Grouping
-                                VStack(alignment: .trailing, spacing: 8) {
-                                    HStack(spacing: 6) {
-                                        Text(Money.format(group.combinedTotal))
-                                            .font(.subheadline).bold()
-                                        
-                                        Image(systemName: "chevron.down")
-                                            .rotationEffect(.degrees(expandedMerchants.contains(group.merchant) ? 180 : 0))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    
-                                    Button {
-                                        selectedMerchantToCategorize = MerchantWrapper(id: group.merchant)
-                                    } label: {
-                                        Text("Asignar")
-                                            .font(.caption).bold()
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 6)
-                                            .background(Color.blue)
-                                            .foregroundStyle(.white)
-                                            .clipShape(Capsule())
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 16)
-                            .padding(.horizontal, 10)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                withAnimation(.spring) {
-                                    if expandedMerchants.contains(group.merchant) {
-                                        expandedMerchants.remove(group.merchant)
-                                    } else {
-                                        expandedMerchants.insert(group.merchant)
-                                    }
-                                }
-                            }
-                            
-                            if expandedMerchants.contains(group.merchant) {
-                                VStack(spacing: 8) {
-                                    Divider().background(Color.primary.opacity(0.1))
-                                    
-                                    ForEach(group.expenses) { expense in
-                                        HStack {
-                                            Text(expense.date, style: .date)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                            Spacer()
-                                            Text(Money.format(expense.amount, currency: expense.currency))
-                                                .font(.caption).bold()
-                                                .foregroundStyle(expense.currency == "PEN" ? .primary : .green)
-                                        }
-                                        .padding(.vertical, 4)
-                                    }
-                                }
-                                .padding(.horizontal)
-                                .padding(.bottom)
-                            }
+                        ForEach(filteredInboxGroups) { group in
+                            inboxCard(for: group)
                         }
-                        .padding()
-                        .background(highlightedID == group.merchant ? themeColor.opacity(0.15) : Color.primary.opacity(0.05))
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .padding(.horizontal)
-                        .id(group.merchant)
-                    }
                     } // Cierra el else
                     
                     // Relleno mínimo para que los últimos elementos sean scrolleables en la bandeja
@@ -696,6 +549,210 @@ struct CategoriesView: View {
         }
     }
     
+
+    /// Una fila de categoría. Extraída del cuerpo de la lista: SwiftUI compone
+    /// una única expresión gigante por vista, y pasado cierto tamaño el
+    /// comprobador de tipos se rinde. Cada `func` es un punto de corte.
+    @ViewBuilder
+    private func categoryCard(for item: CategoryRow) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                ZStack {
+                    let baseColor = iconColor(for: item.category)
+                    Circle()
+                        .fill(colorScheme == .light ? baseColor : baseColor.opacity(0.2))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: iconName(for: item.category))
+                        .foregroundStyle(colorScheme == .light ? .white : baseColor)
+                }
+                
+                Text(item.category)
+                    .font(.headline)
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(Money.format(item.total))
+                        .font(.subheadline)
+                        .bold()
+                        .foregroundStyle(.primary)
+                }
+                
+                Image(systemName: "chevron.down")
+                    .rotationEffect(.degrees(expandedCategories.contains(item.category) ? 180 : 0))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 8)
+            }
+            .padding()
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.spring) {
+                    if expandedCategories.contains(item.category) {
+                        expandedCategories.remove(item.category)
+                    } else {
+                        expandedCategories.insert(item.category)
+                    }
+                }
+            }
+            .onLongPressGesture(minimumDuration: 0.5) {
+                withAnimation(.spring) {
+                    if expandedCategories.contains(item.category) {
+                        expandedCategories.remove(item.category)
+                    } else {
+                        expandedCategories.insert(item.category)
+                    }
+                }
+            }
+            .opacity(Money.isZero(item.total) ? 0.4 : 1.0)
+            
+            if expandedCategories.contains(item.category) {
+                VStack(spacing: 8) {
+                    Divider().background(Color.primary.opacity(0.1))
+                    
+                    ForEach(item.merchants, id: \.merchant) { merchantItem in
+                        HStack {
+                            Text(Accounting.displayName(merchantItem.merchant))
+                                .font(.caption)
+                                .foregroundStyle(.primary)
+                            
+                            Spacer()
+                            
+                            Text(Money.format(merchantItem.total))
+                                .font(.caption).bold()
+                                .padding(.trailing, 8)
+                            
+                            Button(action: {
+                                selectedMerchantToUncategorize = (merchant: merchantItem.merchant, category: item.category)
+                            }) {
+                                Image(systemName: "xmark")
+                                    .font(.caption2)
+                                    .bold()
+                                    .foregroundStyle(.white)
+                                    .padding(6)
+                                    .background(Color.red)
+                                    .clipShape(Circle())
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom)
+            }
+        }
+        .background(highlightedID == item.category ? themeColor.opacity(0.15) : Color.primary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal)
+        .id(item.category)
+    }
+
+    /// Una tarjeta de comercio de la Bandeja.
+    private func inboxCard(for group: InboxGroup) -> some View {
+        let isWallet = group.merchant.hasPrefix("PLIN - ") || group.merchant.hasPrefix("YAPE - ")
+        let circleFill: Color = isWallet ? Color.primary.opacity(0.1) : Color.gray.opacity(0.15)
+        let circleShadow: Color = isWallet ? Color.primary.opacity(0.05) : Color.clear
+        
+        return VStack(spacing: 0) {
+            HStack {
+                ZStack {
+                    Circle()
+                        .fill(circleFill)
+                        .frame(width: 40, height: 40)
+                        .shadow(color: circleShadow, radius: 2)
+                    
+                    if group.merchant.hasPrefix("PLIN - ") {
+                        Image("plin_icon")
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 26, height: 26)
+                            .clipShape(Circle())
+                    } else if group.merchant.hasPrefix("YAPE - ") {
+                        Image("yape_icon")
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 26, height: 26)
+                            .clipShape(Circle())
+                    } else {
+                        Image(systemName: "tray.fill")
+                            .foregroundStyle(.gray)
+                    }
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(Accounting.displayName(group.merchant))
+                        .font(.headline)
+                    Text("\(group.expenses.count) transac.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                // Right Side Grouping
+                VStack(alignment: .trailing, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Text(Money.format(group.total))
+                            .font(.subheadline).bold()
+                        
+                        Image(systemName: "chevron.down")
+                            .rotationEffect(.degrees(expandedMerchants.contains(group.merchant) ? 180 : 0))
+                            .foregroundStyle(.secondary)
+                    }
+                    
+                    Button {
+                        selectedMerchantToCategorize = MerchantWrapper(id: group.merchant)
+                    } label: {
+                        Text("Asignar")
+                            .font(.caption).bold()
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Color.blue)
+                            .foregroundStyle(.white)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+            .padding(.vertical, 16)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                withAnimation(.spring) {
+                    if expandedMerchants.contains(group.merchant) {
+                        expandedMerchants.remove(group.merchant)
+                    } else {
+                        expandedMerchants.insert(group.merchant)
+                    }
+                }
+            }
+            
+            if expandedMerchants.contains(group.merchant) {
+                VStack(spacing: 8) {
+                    Divider().background(Color.primary.opacity(0.1))
+                    
+                    ForEach(group.expenses) { expense in
+                        HStack {
+                            Text(expense.date, style: .date)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text(Money.format(expense.amount, currency: expense.currency))
+                                .font(.caption).bold()
+                                .foregroundStyle(expense.currency == "PEN" ? .primary : .green)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom)
+            }
+        }
+        .padding()
+        .background(highlightedID == group.merchant ? themeColor.opacity(0.15) : Color.primary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal)
+        .id(group.merchant)
+    }
+
     // MARK: - Helpers
     private func iconName(for category: String) -> String {
         switch category {
