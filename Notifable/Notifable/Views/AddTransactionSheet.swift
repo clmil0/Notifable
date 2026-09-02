@@ -19,6 +19,7 @@ struct AddTransactionSheet: View {
     @Query(filter: #Predicate<Expense> { $0.isDebt == true }, sort: \Expense.date, order: .reverse)
     private var activeDebts: [Expense]
     @Query(sort: \Expense.date, order: .reverse) private var history: [Expense]
+    @Query(sort: \QuickExpense.sortIndex) private var quickExpenses: [QuickExpense]
 
     @State private var draft: TransactionDraft
     @State private var showDatePicker = false
@@ -26,6 +27,18 @@ struct AddTransactionSheet: View {
     @State private var showDebtPicker = false
     @State private var showDiscardDialog = false
     @State private var justSaved = false
+    @State private var recurrence = RecurrenceDraft()
+    @State private var showRecurrenceSheet = false
+    @State private var showQuickEditor = false
+    @State private var activeQuickID: UUID?
+    @State private var saveAsQuick = false
+    /// Gasto creado por doble toque, mientras el toast de deshacer sigue vivo.
+    @State private var undoTarget: Expense?
+    @State private var pendingDismissToken = UUID()
+    @State private var editingQuick: QuickExpense?
+    /// Mientras se escribe en un campo de texto el teclado del sistema ya ocupa
+    /// media pantalla; el numérico propio sobra y tapaba el formulario.
+    @FocusState private var textFieldFocused: Bool
 
     init(transactionType: TransactionType = .gasto) {
         _draft = State(initialValue: TransactionDraft(type: transactionType))
@@ -74,15 +87,19 @@ struct AddTransactionSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
 
-            Keypad(background: keypadBackground) { key in
-                withAnimation(.none) { draft.press(key) }
-            } onClear: {
-                draft.amountText = ""
+            if !textFieldFocused {
+                Keypad(background: keypadBackground) { key in
+                    withAnimation(.none) { draft.press(key) }
+                } onClear: {
+                    draft.amountText = ""
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
             primaryButton
         }
         .background(palette.background)
+        .animation(.easeInOut(duration: 0.2), value: textFieldFocused)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(32)
@@ -99,6 +116,15 @@ struct AddTransactionSheet: View {
         .sheet(isPresented: $showDatePicker) { datePickerSheet }
         .sheet(isPresented: $showAllCategories) { categoryListSheet }
         .sheet(isPresented: $showDebtPicker) { debtPickerSheet }
+        .sheet(isPresented: $showRecurrenceSheet) {
+            RecurrenceSheet(draft: $recurrence,
+                            merchant: draft.merchant,
+                            amount: draft.amount,
+                            currency: draft.currency)
+        }
+        .sheet(isPresented: $showQuickEditor) {
+            QuickExpenseEditor(quick: editingQuick)
+        }
         .onAppear(perform: preselectSingleDebt)
     }
 
@@ -299,6 +325,10 @@ struct AddTransactionSheet: View {
 
     @ViewBuilder
     private var expenseFields: some View {
+        // Lo primero que se ve: el caso de los S/ 2.50 de pasaje tiene que
+        // resolverse sin bajar la vista.
+        quickExpenseRow
+
         merchantField
 
         if !merchantSuggestions.isEmpty {
@@ -316,6 +346,187 @@ struct AddTransactionSheet: View {
         dateAndSubscriptionCard
     }
 
+    // MARK: - Atajos
+
+    @ViewBuilder
+    private var quickExpenseRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("ATAJOS")
+                    .font(.caption)
+                    .tracking(0.3)
+                    .foregroundStyle(palette.secondaryLabel)
+                Spacer()
+                if !quickExpenses.isEmpty {
+                    Button("Editar") {
+                        editingQuick = nil
+                        showQuickEditor = true
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(accentText)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            if quickExpenses.isEmpty {
+                emptyQuickCard
+            } else {
+                chipRow {
+                    ForEach(quickExpenses.prefix(3)) { quick in
+                        quickCard(quick)
+                    }
+                    addQuickButton
+                }
+            }
+        }
+    }
+
+    private func quickCard(_ quick: QuickExpense) -> some View {
+        let active = activeQuickID == quick.id
+
+        return VStack(alignment: .leading, spacing: 4) {
+            quickIcon(quick)
+            Text(quick.label)
+                .font(.caption.bold())
+                .foregroundStyle(palette.label)
+                .lineLimit(1)
+            Text(Money.format(quick.amount, currency: quick.currency))
+                .font(.system(size: 13, weight: .bold, design: .rounded))
+                .foregroundStyle(palette.secondaryLabel)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .padding(10)
+        .frame(width: 88, height: 62, alignment: .leading)
+        .background(active ? accentFill.opacity(0.2) : palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(active ? accentFill.opacity(0.6) : palette.hairline, lineWidth: active ? 1 : 0.5)
+        )
+        .contentShape(Rectangle())
+        // El orden importa: el doble toque debe reconocerse antes que el simple.
+        .onTapGesture(count: 2) { saveImmediately(quick) }
+        .onTapGesture { apply(quick) }
+        .onLongPressGesture {
+            editingQuick = quick
+            showQuickEditor = true
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(quick.label + ", " + Money.format(quick.amount, currency: quick.currency))
+        .accessibilityHint("Toca para rellenar, toca dos veces para guardar")
+    }
+
+    @ViewBuilder
+    private func quickIcon(_ quick: QuickExpense) -> some View {
+        if quick.iconName == "yape" || quick.iconName == "plin" {
+            Image(quick.iconName + "_icon")
+                .resizable()
+                .scaledToFill()
+                .frame(width: 18, height: 18)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        } else {
+            Image(systemName: quick.iconName)
+                .font(.system(size: 18))
+                .foregroundStyle(accentText)
+        }
+    }
+
+    private var addQuickButton: some View {
+        Button {
+            editingQuick = nil
+            showQuickEditor = true
+        } label: {
+            Image(systemName: "plus")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(palette.secondaryLabel)
+                .frame(width: 56, height: 62)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .strokeBorder(palette.hairline, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Añadir atajo")
+    }
+
+    private var emptyQuickCard: some View {
+        Button {
+            editingQuick = nil
+            showQuickEditor = true
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "plus")
+                    .font(.subheadline.weight(.semibold))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Crea un atajo para lo que pagas en efectivo")
+                        .font(.footnote.weight(.semibold))
+                        .multilineTextAlignment(.leading)
+                    Text("El pasaje de S/ 2.50 en un toque")
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(palette.label)
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(palette.hairline, style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+            )
+            .padding(.horizontal, 16)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Un toque: rellena y espera confirmación. Dos toques en total.
+    private func apply(_ quick: QuickExpense) {
+        withAnimation(.spring(response: 0.25, dampingFraction: 0.85)) {
+            draft.amountText = String(format: "%.2f", quick.amount)
+            draft.currency = quick.currency
+            draft.merchant = quick.merchant
+            draft.category = quick.category
+            activeQuickID = quick.id
+        }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    /// Doble toque: el camino de un solo gesto para el pasaje diario.
+    private func saveImmediately(_ quick: QuickExpense) {
+        let expense = quick.makeExpense()
+        modelContext.insert(expense)
+        quick.useCount += 1
+        quick.lastUsedAt = Date()
+        try? modelContext.save()
+
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        undoTarget = expense
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { justSaved = true }
+        scheduleDismiss()
+    }
+
+    /// Se cierra sola a los 3 s, salvo que se deshaga antes.
+    private func scheduleDismiss() {
+        let token = UUID()
+        pendingDismissToken = token
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+            guard pendingDismissToken == token else { return }
+            dismiss()
+        }
+    }
+
+    private func undoQuickSave() {
+        guard let expense = undoTarget else { return }
+        pendingDismissToken = UUID()          // cancela el cierre programado
+        modelContext.delete(expense)
+        try? modelContext.save()
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            undoTarget = nil
+            justSaved = false
+        }
+    }
+
     private var merchantField: some View {
         HStack(spacing: 10) {
             Image(systemName: "bag")
@@ -327,6 +538,8 @@ struct AddTransactionSheet: View {
                 .textInputAutocapitalization(.words)
                 .disableAutocorrection(true)
                 .submitLabel(.done)
+                .focused($textFieldFocused)
+                .onSubmit { textFieldFocused = false }
 
             if !draft.merchant.isEmpty {
                 Button { draft.merchant = "" } label: {
@@ -447,7 +660,12 @@ struct AddTransactionSheet: View {
         VStack(spacing: 0) {
             dateRow
             Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 14)
-            subscriptionRow
+            repeatRow
+
+            if canSaveAsQuick {
+                Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 14)
+                saveAsQuickRow
+            }
         }
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -520,23 +738,62 @@ struct AddTransactionSheet: View {
         .accessibilityAddTraits(isActive ? [.isSelected] : [])
     }
 
-    private var subscriptionRow: some View {
+    /// El toggle "Es suscripción" desaparece: sólo ponía una marca en un gasto
+    /// suelto, sin programar nada ni saber cuándo tocaba el siguiente.
+    /// `isSubscription` pasa a derivarse de `frequency != .never`.
+    private var repeatRow: some View {
+        Button { showRecurrenceSheet = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 17))
+                    .foregroundStyle(palette.secondaryLabel)
+                Text("Repetir")
+                    .foregroundStyle(palette.label)
+
+                Spacer()
+
+                Text(recurrence.label(merchant: draft.merchant, amount: draft.amount, currency: draft.currency))
+                    .foregroundStyle(recurrence.repeats ? accentText : palette.secondaryLabel)
+                    .lineLimit(1)
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 46)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Sólo aparece cuando hay algo que guardar y no existe ya el mismo atajo.
+    private var canSaveAsQuick: Bool {
+        guard draft.hasAmount, !draft.merchant.trimmed.isEmpty else { return false }
+        let cents = Money.cents(draft.amount)
+        return !quickExpenses.contains {
+            $0.merchant.caseInsensitiveCompare(draft.merchant.trimmed) == .orderedSame
+                && Money.cents($0.amount) == cents
+        }
+    }
+
+    private var saveAsQuickRow: some View {
         HStack(spacing: 10) {
-            Image(systemName: "arrow.clockwise")
+            Image(systemName: "bolt.fill")
                 .font(.system(size: 17))
                 .foregroundStyle(palette.secondaryLabel)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("Es suscripción")
+                Text("Guardar como atajo")
                     .foregroundStyle(palette.label)
-                Text("Se repetirá cada mes")
+                Text("Un toque la próxima vez")
                     .font(.caption)
                     .foregroundStyle(palette.secondaryLabel)
             }
 
             Spacer()
 
-            Toggle("", isOn: $draft.isSubscription)
+            Toggle("", isOn: $saveAsQuick)
                 .labelsHidden()
                 .tint(accentFill)
         }
@@ -635,6 +892,9 @@ struct AddTransactionSheet: View {
                 TextField("Título", text: $draft.title)
                     .font(.body)
                     .textInputAutocapitalization(.sentences)
+                    .submitLabel(.done)
+                    .focused($textFieldFocused)
+                    .onSubmit { textFieldFocused = false }
 
                 // "Opcional" a la derecha en vez de dentro del placeholder: así
                 // no desaparece en cuanto empiezas a escribir.
@@ -885,7 +1145,40 @@ struct AddTransactionSheet: View {
 
     // MARK: - 5. Botón principal
 
+    @ViewBuilder
     private var primaryButton: some View {
+        if undoTarget != nil {
+            undoBar
+        } else {
+            standardButton
+        }
+    }
+
+    /// Tras el doble toque en un atajo, el gasto ya está guardado; esto da los
+    /// segundos para arrepentirse antes de que el modal se cierre solo.
+    private var undoBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(palette.positive)
+            Text("Guardado")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(palette.label)
+            Spacer()
+            Button("Deshacer") { undoQuickSave() }
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(accentText)
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 50)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .padding(.horizontal, 16)
+        .padding(.top, 10)
+        .padding(.bottom, 8)
+        .transition(.move(edge: .bottom).combined(with: .opacity))
+    }
+
+    private var standardButton: some View {
         VStack(spacing: 6) {
             Button(action: save) {
                 buttonLabel
@@ -947,8 +1240,38 @@ struct AddTransactionSheet: View {
         guard draft.validation.isReady else { return }
 
         if draft.type == .gasto {
+            // `isSubscription` ya no se marca a mano: se deriva de la recurrencia.
+            draft.isSubscription = recurrence.repeats
             guard let expense = draft.makeExpense() else { return }
             modelContext.insert(expense)
+
+            if let rule = recurrence.build(merchant: expense.merchant,
+                                           category: expense.category,
+                                           amount: expense.amount,
+                                           currency: expense.currency) {
+                // El gasto de hoy ya está registrado: la regla arranca marcando
+                // esta fecha como resuelta para no proponerla otra vez.
+                rule.lastResolvedOccurrence = expense.date
+                modelContext.insert(rule)
+            }
+
+            if saveAsQuick {
+                let quick = QuickExpense(
+                    label: Accounting.displayName(expense.merchant),
+                    merchant: expense.merchant,
+                    category: expense.category,
+                    amount: expense.amount,
+                    currency: expense.currency,
+                    iconName: CategoryStyle.icon(for: expense.category),
+                    sortIndex: (quickExpenses.map(\.sortIndex).max() ?? -1) + 1
+                )
+                modelContext.insert(quick)
+            }
+
+            if let id = activeQuickID, let used = quickExpenses.first(where: { $0.id == id }) {
+                used.useCount += 1
+                used.lastUsedAt = Date()
+            }
             // Sin guardar regla de comercio: elegir una categoría para un gasto
             // suelto no debería reescribir la que el usuario fijó en la Bandeja.
             // Para eso está la Bandeja.

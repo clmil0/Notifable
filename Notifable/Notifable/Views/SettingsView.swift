@@ -13,6 +13,7 @@ struct SettingsView: View {
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage("isDarkMode") private var isDarkMode = true
     @AppStorage(AppTextSize.storageKey) private var appTextSize = AppTextSize.sistema.rawValue
+    @AppStorage("remindRecurring") private var remindRecurring = true
     @AppStorage("syncBBVA") private var syncBBVA = true
     @AppStorage("syncBCP") private var syncBCP = true
     @AppStorage("syncYape") private var syncYape = true
@@ -83,6 +84,12 @@ struct SettingsView: View {
                     }
                     NavigationLink(destination: advancedView) {
                         Label("Gestión de Datos Avanzada", systemImage: "gearshape.2.fill")
+                    }
+
+                    NavigationLink {
+                        RecurringManagementView()
+                    } label: {
+                        Label("Recurrentes y atajos", systemImage: "arrow.clockwise")
                     }
                 }
                 
@@ -187,6 +194,12 @@ struct SettingsView: View {
                     .tint(currentTint)
             }
             
+            Section(header: Text("Gastos Recurrentes"),
+                    footer: Text("Un aviso el día que hay gastos programados esperando confirmación.")) {
+                Toggle("Recordarme los pendientes", isOn: $remindRecurring)
+                    .tint(currentTint)
+            }
+
             Section(header: Text("Recordatorios de Deuda")) {
                 DatePicker("Hora de recordatorio", selection: debtNotificationDateBinding, displayedComponents: .hourAndMinute)
                 

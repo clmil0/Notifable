@@ -16,9 +16,14 @@ class NotificationManager {
         }
     }
     
+    static let debtReminderID = "dailyDebtReminder"
+    static let recurringReminderID = "recurringPendingReminder"
+
     func updateDebtNotification(hasDebts: Bool) {
         let center = UNUserNotificationCenter.current()
-        center.removeAllPendingNotificationRequests()
+        // Sólo el suyo: `removeAllPendingNotificationRequests` borraba también
+        // el recordatorio de recurrentes.
+        center.removePendingNotificationRequests(withIdentifiers: [NotificationManager.debtReminderID])
         
         if hasDebts {
             let content = UNMutableNotificationContent()
@@ -39,7 +44,7 @@ class NotificationManager {
             }
             
             let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
-            let request = UNNotificationRequest(identifier: "dailyDebtReminder", content: content, trigger: trigger)
+            let request = UNNotificationRequest(identifier: NotificationManager.debtReminderID, content: content, trigger: trigger)
             
             center.add(request) { error in
                 if let error = error {
@@ -50,6 +55,42 @@ class NotificationManager {
             }
         } else {
             print("No hay deudas. Notificaciones canceladas.")
+        }
+    }
+
+    /// Recordatorio de gastos recurrentes vencidos.
+    ///
+    /// Sin esto las pendientes se acumulan sin que nadie las vea, y el mes se ve
+    /// más barato de lo que es: no cuentan en ningún total hasta confirmarlas.
+    func updateRecurringReminder(count: Int, total: Double, merchant: String?, enabled: Bool) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [NotificationManager.recurringReminderID])
+        guard enabled, count > 0 else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = "Gastos programados para hoy"
+        if count == 1, let merchant {
+            content.body = merchant + " " + Money.format(total)
+                + " programado para hoy. Confirma o ajusta el monto."
+        } else {
+            content.body = "\(count) gastos por " + Money.format(total)
+                + " esperan tu confirmación. No cuentan en tu mes hasta que los aceptes."
+        }
+        content.sound = .default
+
+        // A media mañana del mismo día; si ya pasó la hora, en un minuto.
+        let cal = Calendar.current
+        var comps = cal.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = 10
+        comps.minute = 0
+        let fireDate = cal.date(from: comps) ?? Date()
+        let interval = max(60, fireDate.timeIntervalSinceNow)
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+        let request = UNNotificationRequest(identifier: NotificationManager.recurringReminderID,
+                                            content: content, trigger: trigger)
+        center.add(request) { error in
+            if let error { print("Error programando recordatorio de recurrentes: \(error.localizedDescription)") }
         }
     }
 }

@@ -5,9 +5,13 @@ import SwiftData
 struct NotifableApp: App {
     // Configura el contenedor principal de la base de datos de SwiftData
     var sharedModelContainer: ModelContainer = {
+        // Migración aditiva: SwiftData crea las tablas nuevas sin tocar las
+        // existentes.
         let schema = Schema([
             Expense.self,
-            Income.self
+            Income.self,
+            RecurringExpense.self,
+            QuickExpense.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

@@ -29,6 +29,7 @@ struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
     @Query(sort: \Income.date, order: .reverse) private var incomes: [Income]
+    @Query private var recurringRules: [RecurringExpense]
     @Environment(\.colorScheme) var colorScheme
     
     @Binding var scrollOffset: CGFloat
@@ -57,6 +58,7 @@ struct DashboardView: View {
     
     @State private var selectedExpenseForDetails: Expense? = nil
     @State private var showBudgetSheet = false
+    @State private var showPendingSheet = false
     /// Un ingreso no tiene pantalla de detalle; al tocarlo se ofrece la única
     /// acción que tenía en el menú.
     @State private var incomeToActOn: Income?
@@ -139,6 +141,12 @@ struct DashboardView: View {
                         // presupuesto, con la marca de ritmo.
                         BudgetHeroCard(period: period, totals: totals) {
                             showBudgetSheet = true
+                        }
+                        
+                        // Banner de recurrentes pendientes. Va antes que el de
+                        // Bandeja porque afecta a las cifras del mes.
+                        if pendingCount > 0 {
+                            pendingBanner
                         }
                         
                         // Banner de Bandeja: sólo si hay comercios sin clasificar.
@@ -236,6 +244,9 @@ struct DashboardView: View {
         .sheet(isPresented: $showBudgetSheet) {
             BudgetSheet()
         }
+        .sheet(isPresented: $showPendingSheet) {
+            PendingConfirmationView()
+        }
         .confirmationDialog(incomeDialogTitle,
                             isPresented: incomeDialogBinding,
                             titleVisibility: .visible) {
@@ -250,6 +261,64 @@ struct DashboardView: View {
     }
     
     // MARK: - Subviews
+
+    /// Ocurrencias vencidas de reglas recurrentes esperando confirmación.
+    /// No existen como `Expense`, así que no están en ningún total: por eso hay
+    /// que anunciarlas, o el mes se ve más barato de lo que es.
+    private var pendingOccurrences: [PendingOccurrence] {
+        RecurringEngine.pending(rules: recurringRules, expenses: expenses)
+    }
+
+    private var pendingCount: Int {
+        pendingOccurrences.filter(\.isAwaiting).reduce(0) { $0 + $1.dates.count }
+    }
+
+    private var pendingTotal: Double {
+        Money.sum(pendingOccurrences.filter(\.isAwaiting)) { $0.totalAmount }
+    }
+
+    private var pendingBanner: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(palette.warning)
+                    .frame(width: 36, height: 36)
+                Image(systemName: "clock")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pendingCount == 1 ? "1 gasto por confirmar" : "\(pendingCount) gastos por confirmar")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(palette.label)
+                Text(Money.format(pendingTotal) + " que aún no cuentan en tu mes")
+                    .font(.footnote)
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+            
+            Spacer(minLength: 0)
+            
+            Button { showPendingSheet = true } label: {
+                Text("Revisar")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(palette.warning)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(palette.warning.opacity(0.14))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(palette.warning.opacity(0.4), lineWidth: 0.5)
+        )
+        .padding(.horizontal, 16)
+    }
 
     /// La Bandeja es trabajo pendiente: se anuncia donde el usuario mira, no
     /// escondida en otra pestaña.

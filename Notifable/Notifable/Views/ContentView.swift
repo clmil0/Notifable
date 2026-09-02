@@ -26,6 +26,9 @@ enum AppTab: Int, CaseIterable {
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Query private var expenses: [Expense]
+    @Query private var recurringRules: [RecurringExpense]
+    @AppStorage("remindRecurring") private var remindRecurring = true
+    @State private var didResolveRecurring = false
     @State private var selectedTab: AppTab = .home
     @State private var scrollOffset: CGFloat = 0
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
@@ -34,6 +37,7 @@ struct ContentView: View {
     @State private var showSettings = false
     @AppStorage("isDarkMode") private var isDarkMode = true
     @State private var selectedTransactionType: TransactionType? = nil
+    @State private var showAddPicker = false
     @State private var showSplash = true
     @State private var isPulsing = false
     @State private var tabWidth: CGFloat = 0
@@ -42,6 +46,46 @@ struct ContentView: View {
     
     let syncTimer = Timer.publish(every: 1800, on: .main, in: .common).autoconnect()
     
+    /// Aplica las reglas con `autoConfirm` y programa el aviso de las que
+    /// esperan confirmación. Una vez por sesión.
+    private func resolveRecurring() {
+        guard !didResolveRecurring else { return }
+        didResolveRecurring = true
+
+        RecurringEngine.applyAutomatic(rules: recurringRules, expenses: expenses, in: modelContext)
+        try? modelContext.save()
+
+        let awaiting = RecurringEngine.pending(rules: recurringRules, expenses: expenses)
+            .filter(\.isAwaiting)
+        let count = awaiting.reduce(0) { $0 + $1.dates.count }
+        let total = Money.sum(awaiting) { $0.totalAmount }
+        NotificationManager.shared.updateRecurringReminder(
+            count: count,
+            total: total,
+            merchant: awaiting.first.map { Accounting.displayName($0.merchant) },
+            enabled: remindRecurring
+        )
+    }
+
+    /// Cada opción cierra el menú y abre su propio modal.
+    private func addOption(title: String, icon: String, tint: Color, type: TransactionType) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                showAddPicker = false
+            }
+            selectedTransactionType = type
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.title2)
+                Text(title)
+                    .font(.caption.bold())
+            }
+            .foregroundStyle(tint)
+            .frame(width: 70, height: 60)
+        }
+    }
+
     var body: some View {
         ZStack {
             VStack(spacing: 0) {
@@ -72,6 +116,7 @@ struct ContentView: View {
             }
             .background(Color(.systemBackground).ignoresSafeArea())
             .ignoresSafeArea(.keyboard)
+            .onAppear(perform: resolveRecurring)
             .onReceive(syncTimer) { _ in
                 Task {
                     await SyncManager.shared.syncLocalExpensesToCloud(localExpenses: expenses)
@@ -84,9 +129,44 @@ struct ContentView: View {
                 AddTransactionSheet(transactionType: type)
             }
             
-            // El menú previo de elegir Gasto o Ingreso desaparece: el
-            // segmentado del propio modal lo resuelve, y así el + hace
-            // una sola cosa.
+            // Botones flotantes de Gasto e Ingreso al tocar el +.
+            if showAddPicker {
+                Color.black.opacity(0.3)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            showAddPicker = false
+                        }
+                    }
+
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+
+                        HStack(spacing: 0) {
+                            addOption(title: "Gasto",
+                                      icon: "arrow.up.right.circle.fill",
+                                      tint: themeColor,
+                                      type: .gasto)
+
+                            Divider().frame(height: 40)
+
+                            addOption(title: "Ingreso",
+                                      icon: "arrow.down.left.circle.fill",
+                                      tint: .green,
+                                      type: .ingreso)
+                        }
+                        .background(.regularMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 5)
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 90)
+                    .transition(.scale(scale: 0.8, anchor: .bottomTrailing).combined(with: .opacity))
+                }
+            }
+
             
             // Splash Screen Overlay
             if showSplash {
@@ -218,14 +298,14 @@ struct ContentView: View {
             // Botón + separado (como el de búsqueda en WhatsApp)
             Button {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    selectedTransactionType = .gasto
+                    showAddPicker.toggle()
                 }
             } label: {
                 Image(systemName: "plus")
                     .font(.title2.bold())
                     .foregroundStyle(isDarkMode ? .white : .black)
                     .frame(width: 56, height: 56)
-                    .rotationEffect(.degrees(selectedTransactionType != nil ? 45 : 0))
+                    .rotationEffect(.degrees(showAddPicker ? 45 : 0))
             }
             .background(.ultraThinMaterial, in: Circle())
             .overlay(
