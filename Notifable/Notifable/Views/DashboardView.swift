@@ -22,6 +22,10 @@ enum TransactionItem: Identifiable {
 }
 
 struct DashboardView: View {
+    /// Lleva a la pestaña Categorías. Lo resuelve `ContentView`, que es quien
+    /// tiene la pestaña seleccionada.
+    var onOpenInbox: () -> Void = {}
+
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
     @Query(sort: \Income.date, order: .reverse) private var incomes: [Income]
@@ -56,6 +60,7 @@ struct DashboardView: View {
     /// La tira de ingresos filtra la actividad reciente a sólo ingresos.
     @State private var showsIncomesOnly = false
     @AppStorage(BudgetStore.tracksIncomeKey) private var tracksIncome = true
+    @AppStorage("categoriesSegment") private var categoriesSegment = CategoryTab.misCategorias
     
     // MARK: - Totales
     //
@@ -131,6 +136,11 @@ struct DashboardView: View {
                         // presupuesto, con la marca de ritmo.
                         BudgetHeroCard(period: period, totals: totals) {
                             showBudgetSheet = true
+                        }
+                        
+                        // Banner de Bandeja: sólo si hay comercios sin clasificar.
+                        if totals.unclassifiedMerchantCount > 0 {
+                            inboxBanner
                         }
                         
                         // Tira de ingresos. Sólo si el usuario los registra.
@@ -226,6 +236,58 @@ struct DashboardView: View {
     }
     
     // MARK: - Subviews
+
+    /// La Bandeja es trabajo pendiente: se anuncia donde el usuario mira, no
+    /// escondida en otra pestaña.
+    private var inboxBanner: some View {
+        let accent = AppThemeColor(rawValue: appAccentColor) ?? .purple
+        let merchants = totals.unclassifiedMerchantCount
+        
+        return HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(accent.color)
+                    .frame(width: 36, height: 36)
+                Image(systemName: "tray.full.fill")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.white)
+            }
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(merchants == 1 ? "1 comercio sin clasificar" : "\(merchants) comercios sin clasificar")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(palette.label)
+                Text(Money.format(totals.unclassifiedTotal) + " sin categoría")
+                    .font(.footnote)
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+            
+            Spacer(minLength: 0)
+            
+            Button {
+                categoriesSegment = .inbox
+                onOpenInbox()
+            } label: {
+                Text("Clasificar")
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(accent.color)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(accent.softFill(colorScheme))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(accent.color.opacity(0.4), lineWidth: 0.5)
+        )
+        .padding(.horizontal, 16)
+    }
+
     private var chartCard: some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Top Comercios")

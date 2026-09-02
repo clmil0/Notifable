@@ -467,7 +467,17 @@ class GmailSyncService: ObservableObject {
     // MARK: - Autocategorización Global
     
     private func applyAutoCategorization(to expense: Expense) -> Expense {
-        var autoCategory = "Sin Clasificar"
+        // Una regla que el usuario ya definió en la Bandeja manda sobre todo lo
+        // demás: para eso la definió. Antes sólo se reetiquetaban los gastos que
+        // ya estaban en la base y el siguiente correo del mismo comercio volvía
+        // a caer sin clasificar.
+        if let rule = MerchantRules.category(for: expense.merchant) {
+            expense.category = rule
+            expense.isSubscription = rule == "Entretenimiento"
+            return expense
+        }
+
+        var autoCategory = Accounting.unclassified
         let lowerMerchant = expense.merchant.lowercased()
         if lowerMerchant.contains("starbucks") || lowerMerchant.contains("eats") || lowerMerchant.contains("tambo") || lowerMerchant.contains("sharethemeal") {
             autoCategory = "Comida"

@@ -54,7 +54,11 @@ struct ContentView: View {
                     Group {
                         switch selectedTab {
                         case .home:
-                            DashboardView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
+                            DashboardView(onOpenInbox: {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                    selectedTab = .categories
+                                }
+                            }, scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
                         case .categories:
                             CategoriesView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
                         case .trends:

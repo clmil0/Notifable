@@ -2,7 +2,9 @@ import SwiftUI
 import SwiftData
 import Charts
 
-enum CategoryTab: String, CaseIterable {
+enum CategoryTab: String, CaseIterable, Identifiable {
+    var id: String { rawValue }
+
     case misCategorias = "Mis Categorías"
     case inbox = "Bandeja (Sin Clasificar)"
 }
@@ -64,7 +66,9 @@ struct CategoriesView: View {
     /// invisible al sol o con el brillo bajo.
     private var palette: Palette { Palette(colorScheme) }
     
-    @State private var selectedTab: CategoryTab = .misCategorias
+    /// En AppStorage, no en @State: el banner de Resumen necesita poder dejar
+    /// la pestaña abierta en la Bandeja antes de navegar hasta aquí.
+    @AppStorage("categoriesSegment") private var selectedTab: CategoryTab = .misCategorias
     @State private var selectedMerchantToCategorize: MerchantWrapper?
     @State private var selectedMerchantToUncategorize: (merchant: String, category: String)?
     @State private var expandedMerchants: Set<String> = []
@@ -74,6 +78,10 @@ struct CategoriesView: View {
     @State private var highlightedID: String?
     @State private var searchText = ""
     @State private var selectedChartCategory: String?
+    @State private var showClassifyFlow = false
+    /// Aplicar una categoría es reversible: en vez de un alert previo, un toast
+    /// con "Deshacer" durante unos segundos.
+    @State private var pendingUndo: UndoToken?
     @Namespace private var animation
     
     // MARK: - Totales
@@ -181,6 +189,137 @@ struct CategoriesView: View {
         }
     }
 
+
+    // MARK: - Bandeja
+
+    /// Comercios distintos vistos alguna vez, y cuántos están ya clasificados.
+    /// Se cuenta sobre todo el historial, no sobre el periodo: la Bandeja es una
+    /// tarea pendiente, no una cifra del mes.
+    var totalMerchantCount: Int {
+        Set(expenses.map(\.merchant)).count
+    }
+
+    var classifiedMerchantCount: Int {
+        let pending = Set(expenses.filter { $0.category == Accounting.unclassified }.map(\.merchant))
+        return max(0, totalMerchantCount - pending.count)
+    }
+
+    /// Comercios pendientes de todo el historial, para el modo una-por-una.
+    var pendingGroups: [InboxGroup] {
+        let pending = expenses.filter { $0.category == Accounting.unclassified }
+        var grouped: [String: [Expense]] = [:]
+        for expense in pending { grouped[expense.merchant, default: []].append(expense) }
+
+        let rate = exchangeRateService.usdToPenRate
+        return grouped
+            .map { merchant, items in
+                let cents = items.reduce(0) { $0 + Accounting.penCents($1.accountingSnapshot, fallbackRate: rate) }
+                return InboxGroup(merchant: merchant,
+                                  expenses: items.sorted { $0.date > $1.date },
+                                  total: Money.value(cents))
+            }
+            .sorted {
+                $0.expenses.count == $1.expenses.count
+                    ? $0.merchant < $1.merchant
+                    : $0.expenses.count > $1.expenses.count
+            }
+    }
+
+    func suggestion(for group: InboxGroup) -> CategorySuggestion? {
+        SuggestionEngine.suggest(for: group.merchant,
+                                 rules: MerchantRules.all(),
+                                 history: expenses)
+    }
+
+    func frequentCategories(excluding suggestion: CategorySuggestion?) -> [String] {
+        SuggestionEngine.frequentCategories(history: expenses, excluding: suggestion?.category)
+    }
+
+    @ViewBuilder
+    private func merchantCard(for group: InboxGroup) -> some View {
+        let hint = suggestion(for: group)
+        InboxMerchantCard(
+            group: group,
+            suggestion: hint,
+            frequentCategories: frequentCategories(excluding: hint),
+            isExpanded: expandedMerchants.contains(group.merchant),
+            isHighlighted: highlightedID == group.merchant,
+            onToggle: { toggleMerchant(group.merchant) },
+            onPick: { apply($0, to: group.merchant) },
+            onOther: { selectedMerchantToCategorize = MerchantWrapper(id: group.merchant) }
+        )
+        .id(group.merchant)
+    }
+
+    private func toggleMerchant(_ merchant: String) {
+        withAnimation(.spring) {
+            if expandedMerchants.contains(merchant) {
+                expandedMerchants.remove(merchant)
+            } else {
+                expandedMerchants.removeAll()      // sólo uno expandido a la vez
+                expandedMerchants.insert(merchant)
+            }
+        }
+    }
+
+    /// Guarda la regla, reclasifica lo pasado y ofrece deshacer.
+    func apply(_ category: String, to merchant: String) {
+        let token = MerchantRules.apply(category, to: merchant, in: expenses)
+        try? modelContext.save()
+
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            expandedMerchants.remove(merchant)
+            pendingUndo = token
+        }
+
+        // El toast se retira solo a los 4 s, salvo que ya lo hayan deshecho.
+        let id = token.id
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+            withAnimation(.easeInOut) {
+                if pendingUndo?.id == id { pendingUndo = nil }
+            }
+        }
+    }
+
+    private func undoLastApply() {
+        guard let token = pendingUndo else { return }
+        withAnimation(.spring) {
+            MerchantRules.undo(token, in: expenses)
+            try? modelContext.save()
+            pendingUndo = nil
+        }
+    }
+
+    /// El toast de deshacer. Sin alert previo: aplicar es reversible.
+    private var undoToast: some View {
+        Group {
+            if let token = pendingUndo {
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(palette.positive)
+                    Text(Accounting.displayName(token.merchant) + " → " + token.category)
+                        .font(.subheadline)
+                        .foregroundStyle(palette.label)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    Button("Deshacer") { undoLastApply() }
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(themeColor)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(palette.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(palette.hairline, lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+                .padding(.horizontal, 16)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+    }
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -317,15 +456,27 @@ struct CategoriesView: View {
                 expandedMerchants.removeAll()
             }
         }
+        .overlay(alignment: .bottom) {
+            undoToast
+                .padding(.bottom, 110)
+                .animation(.spring(response: 0.35, dampingFraction: 0.85), value: pendingUndo)
+        }
+        .sheet(isPresented: $showClassifyFlow) {
+            ClassifyFlowView(
+                groups: pendingGroups,
+                suggestion: { suggestion(for: $0) },
+                frequentCategories: { frequentCategories(excluding: $0) },
+                onPick: { group, category in apply(category, to: group.merchant) },
+                onOther: { group in
+                    showClassifyFlow = false
+                    selectedMerchantToCategorize = MerchantWrapper(id: group.merchant)
+                }
+            )
+        }
         .sheet(item: $selectedMerchantToCategorize) { wrapper in
             AssignCategoryView(merchant: wrapper.id, existingCategories: allCategories) { newCategory in
-                let uncategorized = expenses.filter { $0.merchant == wrapper.id && $0.category == Accounting.unclassified }
-                for expense in uncategorized {
-                    expense.category = newCategory
-                }
-                try? modelContext.save()
-                
-                showToast(message: "Gastos de \(wrapper.id) movidos a \(newCategory)", tab: .misCategorias, id: newCategory, icon: "checkmark.circle.fill", color: .green)
+                // Misma ruta que los chips: guarda la regla y deja deshacer.
+                apply(newCategory, to: wrapper.id)
             }
             .presentationDetents([.fraction(0.8)])
             .presentationDragIndicator(.visible)
@@ -521,6 +672,12 @@ struct CategoriesView: View {
                 ContentUnavailableView("Bandeja Vacía", systemImage: "checkmark.circle.fill", description: Text("Todos tus gastos están clasificados."))
             } else {
                 VStack(spacing: 12) {
+                    InboxProgressCard(classified: classifiedMerchantCount,
+                                      total: totalMerchantCount) {
+                        showClassifyFlow = true
+                    }
+                    .padding(.bottom, 4)
+                    
                     // Barra de búsqueda para bandeja
                     HStack {
                         Image(systemName: "magnifyingglass")
@@ -549,7 +706,7 @@ struct CategoriesView: View {
                         ContentUnavailableView("No se encontraron resultados", systemImage: "magnifyingglass", description: Text("Prueba con otro término de búsqueda."))
                     } else {
                         ForEach(filteredInboxGroups) { group in
-                            inboxCard(for: group)
+                            merchantCard(for: group)
                         }
                     } // Cierra el else
                     
@@ -669,138 +826,6 @@ struct CategoriesView: View {
         }
     }
 
-
-    /// Una tarjeta de comercio de la Bandeja.
-    ///
-    /// Partida en cuatro funciones a propósito. SwiftUI compone toda una vista
-    /// en una sola expresión, y con este número de modificadores y ternarios el
-    /// comprobador de tipos abandona antes de terminar. Cada `func` con un tipo
-    /// de retorno declarado corta la inferencia en seco.
-    private func inboxCard(for group: InboxGroup) -> some View {
-        let isExpanded = expandedMerchants.contains(group.merchant)
-        let background: Color = highlightedID == group.merchant
-            ? themeColor.opacity(0.15)
-            : palette.surface
-
-        return VStack(spacing: 0) {
-            inboxHeader(for: group, isExpanded: isExpanded)
-
-            if isExpanded {
-                inboxExpenses(for: group)
-            }
-        }
-        .padding()
-        .background(background)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.horizontal)
-        .id(group.merchant)
-    }
-
-    /// Logo del canal (Yape / Plin) o icono genérico.
-    @ViewBuilder
-    private func inboxIcon(for group: InboxGroup) -> some View {
-        let isWallet = group.merchant.hasPrefix("PLIN - ") || group.merchant.hasPrefix("YAPE - ")
-        let circleFill: Color = isWallet ? Color.primary.opacity(0.1) : Color.gray.opacity(0.15)
-        let circleShadow: Color = isWallet ? Color.primary.opacity(0.05) : Color.clear
-
-        ZStack {
-            Circle()
-                .fill(circleFill)
-                .frame(width: 40, height: 40)
-                .shadow(color: circleShadow, radius: 2)
-
-            if group.merchant.hasPrefix("PLIN - ") {
-                walletLogo("plin_icon")
-            } else if group.merchant.hasPrefix("YAPE - ") {
-                walletLogo("yape_icon")
-            } else {
-                Image(systemName: "tray.fill")
-                    .foregroundStyle(.gray)
-            }
-        }
-    }
-
-    private func walletLogo(_ name: String) -> some View {
-        Image(name)
-            .resizable()
-            .scaledToFill()
-            .frame(width: 26, height: 26)
-            .clipShape(Circle())
-    }
-
-    private func inboxHeader(for group: InboxGroup, isExpanded: Bool) -> some View {
-        HStack {
-            inboxIcon(for: group)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(Accounting.displayName(group.merchant))
-                    .font(.headline)
-                Text("\(group.expenses.count) transac.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 8) {
-                HStack(spacing: 6) {
-                    Text(Money.format(group.total))
-                        .font(.subheadline).bold()
-
-                    Image(systemName: "chevron.down")
-                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
-                        .foregroundStyle(.secondary)
-                }
-
-                Button {
-                    selectedMerchantToCategorize = MerchantWrapper(id: group.merchant)
-                } label: {
-                    Text("Asignar")
-                        .font(.caption).bold()
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.blue)
-                        .foregroundStyle(.white)
-                        .clipShape(Capsule())
-                }
-            }
-        }
-        .padding(.vertical, 16)
-        .padding(.horizontal, 10)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            withAnimation(.spring) {
-                if expandedMerchants.contains(group.merchant) {
-                    expandedMerchants.remove(group.merchant)
-                } else {
-                    expandedMerchants.insert(group.merchant)
-                }
-            }
-        }
-    }
-
-    private func inboxExpenses(for group: InboxGroup) -> some View {
-        VStack(spacing: 8) {
-            Divider().background(palette.separator)
-
-            ForEach(group.expenses) { expense in
-                HStack {
-                    Text(expense.date, style: .date)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Text(Money.format(expense.amount, currency: expense.currency))
-                        .font(.caption).bold()
-                        .foregroundStyle(expense.currency == "PEN" ? Color.primary : Color.green)
-                }
-                .padding(.vertical, 4)
-            }
-        }
-        .padding(.horizontal)
-        .padding(.bottom)
-    }
-
-
     // MARK: - Helpers
     private func iconName(for category: String) -> String {
         switch category {
@@ -827,6 +852,9 @@ struct CategoriesView: View {
         for expense in expensesToUpdate {
             expense.category = Accounting.unclassified
         }
+        // Sin borrar la regla, el siguiente correo del comercio volvería a
+        // clasificarse solo y el usuario no entendería por qué.
+        MerchantRules.remove(merchant)
         try? modelContext.save()
         
         showToast(message: "Gastos de \(merchant) enviados a Sin Clasificar", tab: .inbox, id: merchant, icon: "tray.fill", color: .orange)
