@@ -230,12 +230,46 @@ struct SettingsView: View {
                 }) {
                     Label("Diagnóstico BBVA Pago", systemImage: "stethoscope")
                 }
+
+                #if DEBUG
+                // Antes esto era un botón azul dentro del modal de alta, con el
+                // mismo peso visual que la acción real.
+                Button(action: addRandomExpense) {
+                    Label("Añadir gasto de prueba", systemImage: "dice")
+                }
+                #endif
             }.foregroundColor(.orange)
         }
         .navigationTitle("Avanzado")
         .navigationBarTitleDisplayMode(.inline)
     }
     
+    #if DEBUG
+    private func addRandomExpense() {
+        let options = [
+            ("Apple Store", "Entretenimiento"),
+            ("Starbucks", "Comida"),
+            ("Uber", "Transporte"),
+            ("Wong", "Supermercado"),
+            ("Netflix", "Entretenimiento"),
+            ("Oxxo 123", Accounting.unclassified)
+        ]
+        let selected = options.randomElement()!
+        let days = Int.random(in: 0...20)
+        let date = Period.calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
+
+        let expense = Expense(
+            amount: Double.random(in: 10.0...150.0),
+            merchant: selected.0,
+            date: date,
+            category: selected.1,
+            isSubscription: selected.0 == "Netflix"
+        )
+        modelContext.insert(expense)
+        try? modelContext.save()
+    }
+    #endif
+
     private var initialSyncView: some View {
         Form {
             Section(header: Text("Conexión con el Banco")) {

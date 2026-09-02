@@ -37,7 +37,6 @@ struct ContentView: View {
     @State private var showSplash = true
     @State private var isPulsing = false
     @State private var tabWidth: CGFloat = 0
-    @State private var showAddPicker = false
     @State private var scrollToTopTrigger: Bool = false
     @State private var themeButtonCenter: CGPoint = CGPoint(x: UIScreen.main.bounds.width - 80, y: 60)
     
@@ -82,68 +81,12 @@ struct ContentView: View {
                 SettingsView()
             }
             .sheet(item: $selectedTransactionType) { type in
-                AddExpenseView(transactionType: type)
+                AddTransactionSheet(transactionType: type)
             }
             
-            // Add Picker Overlay
-            if showAddPicker {
-                Color.black.opacity(0.3)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            showAddPicker = false
-                        }
-                    }
-                
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-                        
-                        HStack(spacing: 0) {
-                            Button {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                    showAddPicker = false
-                                }
-                                selectedTransactionType = .gasto
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "arrow.up.right.circle.fill")
-                                        .font(.title2)
-                                    Text("Gasto")
-                                        .font(.caption.bold())
-                                }
-                                .foregroundStyle(themeColor)
-                                .frame(width: 70, height: 60)
-                            }
-                            
-                            Divider().frame(height: 40)
-                            
-                            Button {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                    showAddPicker = false
-                                }
-                                selectedTransactionType = .ingreso
-                            } label: {
-                                VStack(spacing: 4) {
-                                    Image(systemName: "arrow.down.left.circle.fill")
-                                        .font(.title2)
-                                    Text("Ingreso")
-                                        .font(.caption.bold())
-                                }
-                                .foregroundStyle(Color.green)
-                                .frame(width: 70, height: 60)
-                            }
-                        }
-                        .background(.regularMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 5)
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 90)
-                    .transition(.scale(scale: 0.8, anchor: .bottomTrailing).combined(with: .opacity))
-                }
-            }
+            // El menú previo de elegir Gasto o Ingreso desaparece: el
+            // segmentado del propio modal lo resuelve, y así el + hace
+            // una sola cosa.
             
             // Splash Screen Overlay
             if showSplash {
@@ -275,14 +218,14 @@ struct ContentView: View {
             // Botón + separado (como el de búsqueda en WhatsApp)
             Button {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    showAddPicker = true
+                    selectedTransactionType = .gasto
                 }
             } label: {
                 Image(systemName: "plus")
                     .font(.title2.bold())
                     .foregroundStyle(isDarkMode ? .white : .black)
                     .frame(width: 56, height: 56)
-                    .rotationEffect(.degrees(showAddPicker ? 45 : 0))
+                    .rotationEffect(.degrees(selectedTransactionType != nil ? 45 : 0))
             }
             .background(.ultraThinMaterial, in: Circle())
             .overlay(
