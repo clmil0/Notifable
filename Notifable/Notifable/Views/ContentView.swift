@@ -10,7 +10,7 @@ enum AppTab: Int, CaseIterable {
         switch self {
         case .home: return "house.fill"
         case .categories: return "tray.full.fill"
-        case .trends: return "chart.line.uptrend.xyaxis"
+        case .trends: return "chart.bar.fill"
         }
     }
     
@@ -18,7 +18,7 @@ enum AppTab: Int, CaseIterable {
         switch self {
         case .home: return "Resumen"
         case .categories: return "Categorías"
-        case .trends: return "Tendencias"
+        case .trends: return "Ritmo"
         }
     }
 }
@@ -62,7 +62,7 @@ struct ContentView: View {
                         case .categories:
                             CategoriesView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
                         case .trends:
-                            TrendsView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
+                            RhythmView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
