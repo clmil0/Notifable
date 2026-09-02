@@ -13,7 +13,6 @@ struct QuickExpenseEditor: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("isDarkMode") private var isDarkMode = true
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
 
     @Query(sort: \Expense.date, order: .reverse) private var history: [Expense]
@@ -111,7 +110,7 @@ struct QuickExpenseEditor: View {
                 Button("Cancelar", role: .cancel) {}
             }
             .onAppear(perform: load)
-            .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appAppearance()
             .appTextSize()
         }
         .presentationDetents([.medium, .large])

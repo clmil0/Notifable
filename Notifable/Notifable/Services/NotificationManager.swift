@@ -31,10 +31,14 @@ class NotificationManager {
             content.body = "Tienes deudas pendientes por cancelar. ¡Revisa tu resumen!"
             content.sound = .default
             
-            let timeInterval = UserDefaults.standard.double(forKey: "debtNotificationTimeInterval")
-            let date = timeInterval > 0 ? Date(timeIntervalSince1970: timeInterval) : Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: Date())!
-            
-            var dateComponents = Calendar.current.dateComponents([.hour, .minute], from: date)
+            // Hora y minuto, no una fecha completa: antes se guardaba un
+            // `timeIntervalSince1970` y el recordatorio quedaba anclado al día
+            // en que se configuró.
+            var dateComponents = DateComponents()
+            dateComponents.hour = NotificationSettings.hour()
+            dateComponents.minute = NotificationSettings.minute()
+            let date = NotificationSettings.date(hour: NotificationSettings.hour(),
+                                                 minute: NotificationSettings.minute())
             
             let frequency = UserDefaults.standard.string(forKey: "debtNotificationFrequency") ?? "Diario"
             if frequency == "Semanal" {

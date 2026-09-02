@@ -67,7 +67,6 @@ struct BudgetSettingsSection: View {
 struct BudgetSheet: View {
 
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("isDarkMode") private var isDarkMode = true
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
 
     private var tint: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
@@ -84,7 +83,7 @@ struct BudgetSheet: View {
                     Button("Listo") { dismiss() }
                 }
             }
-            .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appAppearance()
             .appTextSize()
         }
         .presentationDetents([.fraction(0.45)])

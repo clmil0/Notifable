@@ -883,7 +883,6 @@ struct AssignCategoryView: View {
     var onAssign: (String) -> Void
     
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("isDarkMode") private var isDarkMode = true
     @State private var searchText = ""
     @State private var isCreatingNew = false
     @State private var newCategoryName = ""
@@ -965,7 +964,7 @@ struct AssignCategoryView: View {
                     }
                 }
             }
-            .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appAppearance()
             .appTextSize()
         }
     }

@@ -13,7 +13,6 @@ struct ExpenseDetailsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
-    @AppStorage("isDarkMode") private var isDarkMode = true
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
 
     @Bindable var expense: Expense
@@ -83,7 +82,7 @@ struct ExpenseDetailsView: View {
                 Text("Se borrará de tus cuentas. Esto no se puede deshacer.")
             }
         }
-        .preferredColorScheme(isDarkMode ? .dark : .light)
+        .appAppearance()
             .appTextSize()
         .presentationCornerRadius(32)
     }
@@ -454,7 +453,6 @@ struct EditExpenseSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @AppStorage("isDarkMode") private var isDarkMode = true
 
     @Bindable var expense: Expense
 
@@ -498,7 +496,7 @@ struct EditExpenseSheet: View {
                 merchant = expense.merchant
                 date = expense.date
             }
-            .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appAppearance()
             .appTextSize()
         }
         .presentationDetents([.medium])

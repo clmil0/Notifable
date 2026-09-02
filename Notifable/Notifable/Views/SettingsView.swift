@@ -1,125 +1,77 @@
 import SwiftUI
 import SwiftData
 
+/// Configuración.
+///
+/// Antes eran seis `NavigationLink` idénticos con nombres que no decían qué
+/// contenían ("Apariencia y Navegación", "Respaldo y Funciones Online"), ninguna
+/// fila mostraba su valor, y el dato que sostiene la app —si la lectura de
+/// correo funciona— estaba dos niveles adentro. Ahora: estado arriba, tres
+/// secciones agrupadas por intención, y el valor de cada fila a la vista.
 struct SettingsView: View {
+
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
+
     @Query private var expenses: [Expense]
-    
-    @State private var showDeleteClassificationsConfirmation = false
-    @State private var showDeleteExpensesConfirmation = false
-    @State private var showRecoveryAlert = false
-    
-    @AppStorage("notificationsEnabled") private var notificationsEnabled = true
-    @AppStorage("isDarkMode") private var isDarkMode = true
-    @AppStorage(AppTextSize.storageKey) private var appTextSize = AppTextSize.sistema.rawValue
-    @AppStorage("remindRecurring") private var remindRecurring = true
+    @Query private var recurringRules: [RecurringExpense]
+    @Query private var quickExpenses: [QuickExpense]
+
+    @StateObject private var gmailAuth = GmailAuthService.shared
+    @StateObject private var gmailSync = GmailSyncService.shared
+
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
+    @AppStorage(BudgetStore.monthlyBudgetKey) private var monthlyBudget: Double = 0
+    @AppStorage(BudgetStore.enabledKey) private var budgetEnabled = true
+    // Se leen aquí para que la fila de la raíz se redibuje al cambiarlos dentro.
+    @AppStorage(NotificationSettings.budgetKey) private var notifyBudget = true
+    @AppStorage(NotificationSettings.recurringKey) private var notifyRecurring = true
+    @AppStorage(NotificationSettings.debtEnabledKey) private var notifyDebt = true
     @AppStorage("syncBBVA") private var syncBBVA = true
     @AppStorage("syncBCP") private var syncBCP = true
     @AppStorage("syncYape") private var syncYape = true
     @AppStorage("syncInterbank") private var syncInterbank = true
     @AppStorage("syncScotiabank") private var syncScotiabank = true
-    
-    @AppStorage("debtNotificationTimeInterval") private var debtNotificationTimeInterval: Double = 0
-    @AppStorage("debtNotificationFrequency") private var debtNotificationFrequency: String = "Diario"
-    
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
-    
-    @AppStorage("cloudAIAnalysis") private var cloudAIAnalysis = true
-    @AppStorage("cloudSocialFeed") private var cloudSocialFeed = false
-    
-    @StateObject private var gmailAuth = GmailAuthService.shared
-    @StateObject private var gmailSync = GmailSyncService.shared
-    
-    @State private var syncStartDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
-    @State private var syncEndDate: Date = Date()
 
-    /// Lo que hará la sincronización con el rango elegido.
-    private var rangeSyncExplanation: String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
-        f.dateFormat = "d MMM"
-        let range = f.string(from: syncStartDate) + " – " + f.string(from: syncEndDate)
-        var text = "Se revisa " + range + " completo. Los gastos que ya tienes no se duplican; sólo se añade lo que falte."
-        if !GmailSyncService.reachesNow(syncEndDate) {
-            text += " La sincronización automática seguirá cubriendo desde ahí hasta hoy."
-        }
-        return text
+    @State private var query = ""
+
+    private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
+    private var appearance: AppAppearance { AppAppearance(rawValue: appearanceRaw) ?? .dark }
+    private var palette: Palette { Palette(scheme) }
+
+    /// Azul de "Captura automática": el color separa las secciones sin necesidad
+    /// de leerlas.
+    private var captureTint: Color {
+        scheme == .dark ? Color(red: 0.392, green: 0.710, blue: 1.0)
+                        : Color(red: 0.0, green: 0.349, blue: 0.698)
     }
-    @State private var showBankInfo: Bool = false
-    @State private var bankInfoMessage: String = ""
-    
-    var debtNotificationDateBinding: Binding<Date> {
-        Binding(
-            get: {
-                if debtNotificationTimeInterval > 0 {
-                    return Date(timeIntervalSince1970: debtNotificationTimeInterval)
-                }
-                return Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: Date())!
-            },
-            set: {
-                debtNotificationTimeInterval = $0.timeIntervalSince1970
-                updateDebtNotificationIfNeeded()
-            }
-        )
-    }
-    
-    var debtNotificationFrequencyBinding: Binding<String> {
-        Binding(
-            get: { debtNotificationFrequency },
-            set: {
-                debtNotificationFrequency = $0
-                updateDebtNotificationIfNeeded()
-            }
-        )
-    }
-    
-    private func updateDebtNotificationIfNeeded() {
-        let hasDebts = expenses.contains { $0.isDebt }
-        NotificationManager.shared.updateDebtNotification(hasDebts: hasDebts)
-    }
-    
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    NavigationLink(destination: appearanceView) {
-                        Label("Apariencia y Navegación", systemImage: "paintbrush.fill")
-                    }
-                    NavigationLink(destination: notificationsView) {
-                        Label("Notificaciones y Recordatorios", systemImage: "bell.badge.fill")
-                    }
-                    NavigationLink(destination: initialSyncView) {
-                        Label("Bancos y Sincronización Automática", systemImage: "building.columns.fill")
-                    }
-                    NavigationLink(destination: onlineConfigView) {
-                        Label("Respaldo y Funciones Online", systemImage: "cloud.fill")
-                    }
-                    NavigationLink(destination: advancedView) {
-                        Label("Gestión de Datos Avanzada", systemImage: "gearshape.2.fill")
-                    }
+            ScrollView {
+                VStack(spacing: 22) {
+                    if query.isEmpty {
+                        statusCard
 
-                    NavigationLink {
-                        RecurringManagementView()
-                    } label: {
-                        Label("Recurrentes y atajos", systemImage: "arrow.clockwise")
+                        moneySection
+                        captureSection
+                        appSection
+                        versionFooter
+                    } else {
+                        searchResults
                     }
                 }
-                
-                Section(header: Text("Acerca de")) {
-                    HStack {
-                        Text("Versión")
-                        Spacer()
-                        Text("1.0 (PoC)")
-                            .foregroundStyle(.secondary)
-                    }
-                }
+                .padding(.vertical, 16)
             }
+            .background(palette.background)
+            .searchable(text: $query, prompt: "Buscar en configuración")
             .navigationTitle("Configuración")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: { dismiss() }) {
+                    Button { dismiss() } label: {
                         Image(systemName: "xmark.circle.fill")
                             .symbolRenderingMode(.hierarchical)
                             .foregroundStyle(.secondary)
@@ -127,421 +79,288 @@ struct SettingsView: View {
                     }
                 }
             }
-            .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appAppearance()
             .appTextSize()
-            .alert("Borrar Reglas", isPresented: $showDeleteClassificationsConfirmation) {
-                Button("Borrar Categorías", role: .destructive) { deleteClassifications() }
-                Button("Cancelar", role: .cancel) {}
-            } message: {
-                Text("Se eliminarán tus configuraciones de comercios, pero los gastos se mantendrán como 'Sin Clasificar'.")
-            }
-            .alert("Borrar Gastos", isPresented: $showDeleteExpensesConfirmation) {
-                Button("Borrar Gastos", role: .destructive) { deleteExpenses() }
-                Button("Cancelar", role: .cancel) {}
-            } message: {
-                Text("Se eliminarán los gastos importados y la caché, pudiendo volver a descargarlos. Tus reglas de categorías se mantendrán.")
-            }
-            .alert("Recuperación de Gastos", isPresented: $showRecoveryAlert) {
-                Button("Sí, recuperar") {
-                    let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
-                    gmailSync.recoverExpenses(ids: recoveryIDs)
-                }
-                Button("No (Descartar)") {
-                    UserDefaults.standard.removeObject(forKey: "pendingRecoveryIDs")
-                    gmailSync.syncEmails(force: true)
-                }
-                Button("Cancelar", role: .cancel) {}
-            } message: {
-                Text("Has borrado elementos anteriores. ¿Quieres recuperarlos antes de continuar con la sincronización normal?")
-            }
         }
     }
-    
-    // MARK: - Submenús
-    
-    private var appearanceView: some View {
-        let currentTint = AppThemeColor(rawValue: appAccentColor)?.color ?? .purple
-        return Form {
-            Section(header: Text("Color de Acento")) {
-                Picker("Color del Tema", selection: $appAccentColor) {
-                    ForEach(AppThemeColor.allCases) { theme in
-                        HStack {
-                            Circle().fill(theme.color).frame(width: 12, height: 12)
-                            Text(theme.rawValue)
-                        }.tag(theme.rawValue)
-                    }
-                }
-            }
-            
-            Section {
-                Toggle("Modo Oscuro", isOn: $isDarkMode)
-                    .tint(currentTint)
 
-                Picker("Tamaño de letra", selection: $appTextSize) {
-                    ForEach(AppTextSize.allCases) { size in
-                        Text(size.rawValue).tag(size.rawValue)
-                    }
-                }
-            } header: {
-                Text("Visualización")
-            } footer: {
-                Text(appTextSize == AppTextSize.sistema.rawValue
-                     ? "Se usa el tamaño de letra que tengas configurado en iOS."
-                     : "Este tamaño manda sobre el que tengas configurado en iOS.")
-            }
-            
-            // El toggle "Sincronizar filtros entre pestañas" desaparece: ahora
-            // hay un solo periodo para toda la app, no hay nada que sincronizar.
-            
-            BudgetSettingsSection(tint: currentTint)
-        }
-        .navigationTitle("Apariencia y Navegación")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-    
-    private var notificationsView: some View {
-        let currentTint = AppThemeColor(rawValue: appAccentColor)?.color ?? .purple
-        return Form {
-            Section(header: Text("Notificaciones Generales")) {
-                Toggle("Notificaciones de Presupuesto", isOn: $notificationsEnabled)
-                    .tint(currentTint)
-            }
-            
-            Section(header: Text("Gastos Recurrentes"),
-                    footer: Text("Un aviso el día que hay gastos programados esperando confirmación.")) {
-                Toggle("Recordarme los pendientes", isOn: $remindRecurring)
-                    .tint(currentTint)
-            }
+    // MARK: - Estado
 
-            Section(header: Text("Recordatorios de Deuda")) {
-                DatePicker("Hora de recordatorio", selection: debtNotificationDateBinding, displayedComponents: .hourAndMinute)
-                
-                Picker("Frecuencia", selection: debtNotificationFrequencyBinding) {
-                    Text("Diario").tag("Diario")
-                    Text("Semanal").tag("Semanal")
-                    Text("Mensual").tag("Mensual")
-                }
-            }
-        }
-        .navigationTitle("Notificaciones")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-    
-    private var advancedView: some View {
-        Form {
-            Section(header: Text("Gestión de Datos"), footer: Text("Estas acciones son irreversibles y afectarán tu base de datos local.")) {
-                Button(role: .destructive, action: {
-                    showDeleteClassificationsConfirmation = true
-                }) {
-                    Label("Borrar configuraciones", systemImage: "tag.slash.fill")
-                }
-                
-                Button(role: .destructive, action: {
-                    showDeleteExpensesConfirmation = true
-                }) {
-                    Label("Borrar datos de gastos", systemImage: "trash.fill")
-                }
-                
-                Button(action: {
-                    gmailSync.resetSyncState()
-                }) {
-                    Label("Restaurar caché de sincronización", systemImage: "arrow.triangle.2.circlepath.doc.on.clipboard")
-                }
-                .foregroundStyle(.orange)
-            }
-            
-            Section(header: Text("Debug")) {
-                Button(action: {
-                    gmailSync.diagnosticBBVA()
-                }) {
-                    Label("Diagnóstico BBVA Pago", systemImage: "stethoscope")
-                }
-
-                #if DEBUG
-                // Antes esto era un botón azul dentro del modal de alta, con el
-                // mismo peso visual que la acción real.
-                Button(action: addRandomExpense) {
-                    Label("Añadir gasto de prueba", systemImage: "dice")
-                }
-                #endif
-            }.foregroundColor(.orange)
-        }
-        .navigationTitle("Avanzado")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-    
-    #if DEBUG
-    private func addRandomExpense() {
-        let options = [
-            ("Apple Store", "Entretenimiento"),
-            ("Starbucks", "Comida"),
-            ("Uber", "Transporte"),
-            ("Wong", "Supermercado"),
-            ("Netflix", "Entretenimiento"),
-            ("Oxxo 123", Accounting.unclassified)
-        ]
-        let selected = options.randomElement()!
-        let days = Int.random(in: 0...20)
-        let date = Period.calendar.date(byAdding: .day, value: -days, to: Date()) ?? Date()
-
-        let expense = Expense(
-            amount: Double.random(in: 10.0...150.0),
-            merchant: selected.0,
-            date: date,
-            category: selected.1,
-            isSubscription: selected.0 == "Netflix"
+    private var status: SettingsStatus {
+        SettingsStatus(
+            isConnected: gmailAuth.isAuthenticated,
+            account: gmailAuth.isAuthenticated ? "Sólo lectura del correo" : nil,
+            lastSync: gmailSync.lastSyncDate,
+            activeBankCount: BankSource.activeCount,
+            totalBankCount: BankSource.all.count,
+            expensesThisMonth: expensesThisMonth,
+            unclassifiedMerchants: unclassifiedMerchantCount,
+            pendingRecurring: 0
         )
-        modelContext.insert(expense)
-        try? modelContext.save()
     }
-    #endif
 
-    private var initialSyncView: some View {
+    private var expensesThisMonth: Int {
+        let period = Period(granularity: .mes, reference: Date())
+        return expenses.filter { period.contains($0.date) }.count
+    }
+
+    private var unclassifiedMerchantCount: Int {
+        Set(expenses.filter { $0.category == Accounting.unclassified }.map(\.merchant)).count
+    }
+
+    /// La tarjeta entera lleva a Gmail y bancos, pero sólo cuando hay cuenta:
+    /// sin conectar, el botón de dentro es la única acción y no debe quedar
+    /// tapado por un enlace.
+    @ViewBuilder
+    private var statusCard: some View {
+        if gmailAuth.isAuthenticated {
+            NavigationLink {
+                GmailBanksView()
+            } label: {
+                SettingsStatusCard(status: status, accent: accent.color) {}
+            }
+            .buttonStyle(.plain)
+        } else {
+            SettingsStatusCard(status: status, accent: accent.color) {
+                gmailAuth.signIn()
+            }
+        }
+    }
+
+    // MARK: - Secciones
+
+    private var moneySection: some View {
+        SettingsSection(title: "Tu dinero") {
+            SettingsRow(title: "Presupuesto", icon: "chart.bar.fill",
+                        tint: accent.color, value: budgetValue) {
+                BudgetScreen()
+            }
+            SettingsSeparator()
+            SettingsRow(title: "Recurrentes y atajos", icon: "arrow.clockwise",
+                        tint: accent.color, value: recurringValue) {
+                RecurringManagementView()
+            }
+            SettingsSeparator()
+            SettingsRow(title: "Categorías y reglas", icon: "tray.full.fill",
+                        tint: accent.color, value: rulesValue) {
+                CategoryRulesScreen()
+            }
+        }
+    }
+
+    private var captureSection: some View {
+        SettingsSection(title: "Captura automática") {
+            SettingsRow(title: "Gmail y bancos", icon: "building.columns.fill",
+                        tint: captureTint, value: gmailValue) {
+                GmailBanksView()
+            }
+            SettingsSeparator()
+            SettingsRow(title: "Leer un rango pasado", icon: "calendar",
+                        tint: captureTint, value: "Acción") {
+                RangeSyncView()
+            }
+        }
+    }
+
+    private var appSection: some View {
+        SettingsSection(title: "La app") {
+            SettingsRow(title: "Apariencia", icon: "paintbrush.fill",
+                        tint: .orange, value: appearance.rawValue, valueDot: accent.color) {
+                AppearanceSettingsView()
+            }
+            SettingsSeparator()
+            SettingsRow(title: "Notificaciones", icon: "bell.badge.fill",
+                        tint: .orange, value: notificationsValue) {
+                NotificationSettingsView()
+            }
+            SettingsSeparator()
+            SettingsRow(title: "Datos y respaldo", icon: "externaldrive.fill",
+                        tint: .gray, value: "\(expenses.count) gastos") {
+                DataBackupView()
+            }
+        }
+    }
+
+    // MARK: - Valores de cada fila
+    //
+    // Ninguno queda vacío: "Sin definir" y "Ninguna" también son información.
+
+    private var budgetValue: String {
+        guard BudgetStore.hasBudget(monthlyBudget: monthlyBudget, enabled: budgetEnabled) else {
+            return "Sin definir"
+        }
+        return Money.format(monthlyBudget)
+    }
+
+    private var recurringValue: String {
+        let active = recurringRules.filter { !$0.isPaused }.count
+        if active == 0 && quickExpenses.isEmpty { return "Ninguno" }
+        if active == 0 { return "\(quickExpenses.count) atajos" }
+        return active == 1 ? "1 activo" : "\(active) activos"
+    }
+
+    private var rulesValue: String {
+        let count = MerchantRules.all().count
+        if count == 0 { return "Ninguna" }
+        return count == 1 ? "1 regla" : "\(count) reglas"
+    }
+
+    private var gmailValue: String {
+        guard gmailAuth.isAuthenticated else { return "Sin conectar" }
+        return BankSource.summaryLabel
+    }
+
+    private var notificationsValue: String {
+        let count = NotificationSettings.activeCount()
+        if count == 0 { return "Ninguna" }
+        return count == 1 ? "1 activa" : "\(count) activas"
+    }
+
+    // MARK: - Búsqueda
+
+    @ViewBuilder
+    private var searchResults: some View {
+        let results = SettingsEntry.matching(query)
+
+        if results.isEmpty {
+            ContentUnavailableView("Nada coincide con «\(query)»",
+                                   systemImage: "magnifyingglass",
+                                   description: Text("Prueba con otra palabra."))
+                .padding(.top, 40)
+        } else {
+            VStack(spacing: 0) {
+                ForEach(Array(results.enumerated()), id: \.element.id) { index, entry in
+                    searchRow(entry)
+                    if index < results.count - 1 { SettingsSeparator() }
+                }
+            }
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(palette.hairline, lineWidth: 0.5)
+            )
+            .padding(.horizontal, 16)
+        }
+    }
+
+    @ViewBuilder
+    private func searchRow(_ entry: SettingsEntry) -> some View {
+        NavigationLink {
+            destination(for: entry.destination)
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.title)
+                        .foregroundStyle(palette.label)
+                    // De dónde viene: sin esto, el resultado no dice dónde vive.
+                    Text(entry.section)
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(palette.tertiaryLabel)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func destination(for id: String) -> some View {
+        switch id {
+        case "budget":        BudgetScreen()
+        case "recurring":     RecurringManagementView()
+        case "rules":         CategoryRulesScreen()
+        case "gmail":         GmailBanksView()
+        case "range":         RangeSyncView()
+        case "appearance":    AppearanceSettingsView()
+        case "notifications": NotificationSettingsView()
+        default:              DataBackupView()
+        }
+    }
+
+    // MARK: - Pie
+
+    private var versionFooter: some View {
+        Text("AgruPay 1.0 · PoC")
+            .font(.caption)
+            .foregroundStyle(palette.tertiaryLabel)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 8)
+    }
+}
+
+/// Presupuesto: aquí, en "Tu dinero", y no dentro de "Apariencia y Navegación",
+/// que es donde estaba un ajuste financiero.
+struct BudgetScreen: View {
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+
+    var body: some View {
         Form {
-            Section(header: Text("Conexión con el Banco")) {
-                if gmailAuth.isAuthenticated {
-                    if gmailSync.isSyncing {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Buscando nuevos gastos...")
-                                .font(.headline)
-                            
-                            ProgressView(value: Double(gmailSync.emailsProcessed), total: Double(max(1, gmailSync.totalEmailsToProcess)))
-                                .progressViewStyle(LinearProgressViewStyle())
-                                .animation(.easeInOut, value: gmailSync.emailsProcessed)
-                            
-                            Text("\(gmailSync.emailsProcessed) de \(gmailSync.totalEmailsToProcess) correos procesados")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            
-                            if !gmailSync.expensesFoundByBank.isEmpty {
-                                Divider()
-                                Text("Gastos identificados:")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                
-                                ForEach(Array(gmailSync.expensesFoundByBank.keys.sorted()), id: \.self) { bank in
-                                    HStack {
-                                        Text(bank)
-                                        Spacer()
-                                        Text("\(gmailSync.expensesFoundByBank[bank] ?? 0)")
-                                            .fontWeight(.bold)
-                                    }
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 8)
-                    } else {
-                        if gmailSync.isSyncing {
-                            HStack {
-                                ProgressView()
-                                    .padding(.trailing, 8)
-                                Text("Sincronizando... (\(gmailSync.emailsProcessed)/\(gmailSync.totalEmailsToProcess))")
-                                    .foregroundStyle(.secondary)
-                            }
-                        } else {
-                            DatePicker("Desde", selection: $syncStartDate,
-                                       in: ...syncEndDate, displayedComponents: .date)
-                            DatePicker("Hasta", selection: $syncEndDate,
-                                       in: syncStartDate...Date(), displayedComponents: .date)
-
-                            // Qué va a pasar exactamente, dicho antes de tocar
-                            // el botón: el rango se revisa entero y sólo entra
-                            // lo que falte.
-                            Text(rangeSyncExplanation)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            
-                            Button(action: {
-                                gmailSync.modelContext = modelContext
-                                let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
-                                if !recoveryIDs.isEmpty {
-                                    showRecoveryAlert = true
-                                } else {
-                                    gmailSync.syncEmails(force: true, startDate: syncStartDate, endDate: syncEndDate)
-                                }
-                            }) {
-                                Label("Sincronizar Correos", systemImage: "envelope.arrow.triangle.branch")
-                            }
-                        }
-                    }
-                    
-                    Button(role: .destructive, action: {
-                        gmailAuth.signOut()
-                    }) {
-                        Label("Desvincular Gmail", systemImage: "xmark.circle")
-                    }
-                } else {
-                    Button(action: {
-                        gmailAuth.signIn()
-                    }) {
-                        Label("Vincular Gmail (Lectura Automática)", systemImage: "envelope.badge")
-                    }
-                }
-            }
-            
-            Section(header: Text("Bancos a Sincronizar"), footer: Text("Selecciona de qué bancos quieres que la app lea notificaciones automáticamente.")) {
-                Toggle(isOn: $syncBBVA) {
-                    HStack {
-                        Text("BBVA (Activo)")
-                        Button(action: {
-                            bankInfoMessage = "Detecta: Plin, Pagos Automáticos, Pagos con tarjeta en físico (contactless) y Pagos con tarjeta de crédito en línea."
-                            showBankInfo = true
-                        }) {
-                            Image(systemName: "info.circle")
-                                .foregroundColor(.blue)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }.tint(.blue)
-                
-                Toggle(isOn: $syncBCP) {
-                    HStack {
-                        Text("BCP")
-                        Button(action: {
-                            bankInfoMessage = "Detecta: Pagos con tarjeta y transferencias convencionales."
-                            showBankInfo = true
-                        }) {
-                            Image(systemName: "info.circle")
-                                .foregroundColor(.orange)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }.tint(.orange)
-                
-                Toggle(isOn: $syncYape) {
-                    HStack {
-                        Text("Yape")
-                        Button(action: {
-                            bankInfoMessage = "Detecta: Yapeos convencionales recibidos y enviados."
-                            showBankInfo = true
-                        }) {
-                            Image(systemName: "info.circle")
-                                .foregroundColor(.purple)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }.tint(.purple)
-                
-                Toggle(isOn: $syncInterbank) {
-                    HStack {
-                        Text("Interbank")
-                        Button(action: {
-                            bankInfoMessage = "Detecta: Pagos con tarjeta y transferencias."
-                            showBankInfo = true
-                        }) {
-                            Image(systemName: "info.circle")
-                                .foregroundColor(.green)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }.tint(.green)
-                
-                Toggle(isOn: $syncScotiabank) {
-                    HStack {
-                        Text("Scotiabank")
-                        Button(action: {
-                            bankInfoMessage = "Detecta: Pagos con tarjeta y transferencias."
-                            showBankInfo = true
-                        }) {
-                            Image(systemName: "info.circle")
-                                .foregroundColor(.red)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }.tint(.red)
-            }
+            BudgetSettingsSection(tint: AppThemeColor(rawValue: appAccentColor)?.color ?? .purple)
         }
-        .navigationTitle("Sincronización Inicial")
+        .navigationTitle("Presupuesto")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("Información del Banco", isPresented: $showBankInfo) {
-            Button("OK", role: .cancel) { }
-        } message: {
-            Text(bankInfoMessage)
-        }
     }
-    
-    private var onlineConfigView: some View {
-        Form {
-            Section(header: Text("Datos Locales")) {
-                Button(action: {
-                    // TODO: Implement CSV Export
-                }) {
-                    Label("Exportar a CSV", systemImage: "square.and.arrow.up")
-                }
-                .foregroundStyle(.primary)
-            }
-            
-            Section(header: Text("Respaldo en la Nube (Supabase)"), footer: Text("Tus datos se guardarán de forma segura en nuestros servidores.")) {
-                Button(action: {
-                    Task { await SyncManager.shared.syncLocalExpensesToCloud(localExpenses: expenses) }
-                }) {
-                    Label(SyncManager.shared.isSyncing ? "Subiendo a la nube..." : "Forzar Backup Manual", systemImage: "arrow.triangle.2.circlepath")
-                }
-                .disabled(SyncManager.shared.isSyncing)
-            }
-            
-            Section(header: Text("Funciones IA y Sociales")) {
-                Toggle("Análisis Financiero con IA", isOn: $cloudAIAnalysis)
-                    .tint(.purple)
-                Toggle("Feed en vivo de amigos", isOn: $cloudSocialFeed)
-                    .tint(.blue)
-            }
-        }
-        .navigationTitle("Configuración Online")
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $gmailSync.showDiagnostic) {
-            NavigationStack {
-                ScrollView {
-                    Text(gmailSync.diagnosticResult)
-                        .padding()
-                        .font(.system(.body, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-                .navigationTitle("Diagnóstico")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Cerrar") {
-                            gmailSync.showDiagnostic = false
+}
+
+/// Las reglas de comercio, que antes sólo se podían borrar desde "Gestión de
+/// Datos Avanzada" y en bloque.
+struct CategoryRulesScreen: View {
+
+    @Environment(\.colorScheme) private var scheme
+    @State private var rules: [String: String] = [:]
+
+    private var palette: Palette { Palette(scheme) }
+
+    private var sorted: [(merchant: String, category: String)] {
+        rules.map { (merchant: $0.key, category: $0.value) }
+            .sorted { $0.merchant.localizedCaseInsensitiveCompare($1.merchant) == .orderedAscending }
+    }
+
+    var body: some View {
+        List {
+            if sorted.isEmpty {
+                Text("Todavía no has clasificado ningún comercio. Al asignarle una categoría a uno en la Bandeja, la regla aparece aquí.")
+                    .font(.footnote)
+                    .foregroundStyle(palette.secondaryLabel)
+            } else {
+                Section {
+                    ForEach(sorted, id: \.merchant) { rule in
+                        HStack {
+                            Text(Accounting.displayName(rule.merchant))
+                                .lineLimit(1)
+                            Spacer()
+                            Text(rule.category)
+                                .foregroundStyle(palette.secondaryLabel)
                         }
                     }
+                    .onDelete(perform: delete)
+                } footer: {
+                    Text("Cada regla clasifica sola los movimientos futuros de ese comercio. Desliza para borrar una.")
                 }
             }
         }
+        .navigationTitle("Categorías y reglas")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { rules = MerchantRules.all() }
     }
-    
-    // MARK: - Lógica
-    
-    private func deleteClassifications() {
-        UserDefaults.standard.removeObject(forKey: "merchantCategories")
-        do {
-            let descriptor = FetchDescriptor<Expense>()
-            let expenses = try modelContext.fetch(descriptor)
-            for expense in expenses {
-                expense.category = "Sin Clasificar"
-            }
-            try modelContext.save()
-        } catch {
-            print("Error resetting classifications: \(error)")
-        }
-    }
-    
-    private func deleteExpenses() {
-        gmailSync.resetSyncState()
-        do {
-            try modelContext.delete(model: Expense.self)
-            try modelContext.save()
-        } catch {
-            print("Error al borrar los datos: \(error)")
-        }
-    }
-    
 
+    private func delete(at offsets: IndexSet) {
+        for index in offsets {
+            MerchantRules.remove(sorted[index].merchant)
+        }
+        rules = MerchantRules.all()
+    }
 }
 
 #Preview {
     SettingsView()
-        .modelContainer(for: Expense.self, inMemory: true)
+        .modelContainer(for: [Expense.self, Income.self, RecurringExpense.self, QuickExpense.self],
+                        inMemory: true)
 }

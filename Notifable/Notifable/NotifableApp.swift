@@ -26,6 +26,12 @@ struct NotifableApp: App {
         // Traduce el `dashboardFilter` guardado por la versión anterior al
         // nuevo `Period` único y borra las claves que ya no existen.
         Period.migrateLegacyFilterIfNeeded()
+        // Conserva la elección previa de isDarkMode: quien tenía modo oscuro
+        // sigue en oscuro, no pasa a "Automático".
+        AppAppearance.migrateIfNeeded()
+        // La hora del recordatorio de deuda se guardaba como fecha completa y
+        // quedaba anclada al día en que se configuró.
+        NotificationSettings.migrateIfNeeded()
     }
 
     @Environment(\.scenePhase) private var scenePhase
@@ -36,6 +42,7 @@ struct NotifableApp: App {
             ContentView()
                 .tint(AppThemeColor(rawValue: appAccentColor)?.color ?? .purple)
                 .appTextSize()
+                .appAppearance()
         }
         .modelContainer(sharedModelContainer) // Inyecta la BD a todas las vistas
         .onChange(of: scenePhase) { oldPhase, newPhase in

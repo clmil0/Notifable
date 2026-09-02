@@ -103,7 +103,6 @@ struct RecurrenceSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("isDarkMode") private var isDarkMode = true
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
 
     @State private var working = RecurrenceDraft()
@@ -146,7 +145,7 @@ struct RecurrenceSheet: View {
                     }
                 }
             }
-            .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appAppearance()
             .appTextSize()
         }
         .presentationDetents([.fraction(0.75), .large])

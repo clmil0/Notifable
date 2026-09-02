@@ -12,7 +12,6 @@ struct PendingConfirmationView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("isDarkMode") private var isDarkMode = true
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
 
     @Query private var rules: [RecurringExpense]
@@ -65,7 +64,7 @@ struct PendingConfirmationView: View {
                     Button("Cerrar") { dismiss() }
                 }
             }
-            .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appAppearance()
             .appTextSize()
         }
     }

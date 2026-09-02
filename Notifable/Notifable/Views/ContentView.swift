@@ -35,7 +35,10 @@ struct ContentView: View {
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     @State private var showSettings = false
-    @AppStorage("isDarkMode") private var isDarkMode = true
+    /// El tema tiene tres estados; el botón de la cabecera alterna entre claro
+    /// y oscuro sobre el que se esté viendo, y "Automático" se elige en Ajustes.
+    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
+    @Environment(\.colorScheme) private var systemScheme
     @State private var selectedTransactionType: TransactionType? = nil
     @State private var showAddPicker = false
     @State private var showSplash = true
@@ -183,7 +186,7 @@ struct ContentView: View {
                         Text("AgruPay")
                             .font(.largeTitle)
                             .fontWeight(.bold)
-                            .foregroundStyle(isDarkMode ? .white : .black)
+                            .foregroundStyle(Color.primary)
                             .opacity(isPulsing ? 1.0 : 0.5)
                     }
                 }
@@ -202,7 +205,6 @@ struct ContentView: View {
                 }
             }
         }
-        .preferredColorScheme(isDarkMode ? .dark : .light)
     }
     
     // MARK: - Top Header
@@ -215,18 +217,18 @@ struct ContentView: View {
             Text("AgruPay")
                 .font(.title)
                 .fontWeight(.bold)
-                .foregroundStyle(isDarkMode ? .white : .black)
+                .foregroundStyle(Color.primary)
             
             Spacer()
             
             Button {
                 ThemeAnimator.animateThemeChange(from: themeButtonCenter) {
-                    isDarkMode.toggle()
+                    appearanceRaw = (systemScheme == .dark ? AppAppearance.light : .dark).rawValue
                 }
             } label: {
-                Image(systemName: isDarkMode ? "moon.fill" : "sun.max.fill")
+                Image(systemName: systemScheme == .dark ? "moon.fill" : "sun.max.fill")
                     .font(.title2)
-                    .foregroundStyle(isDarkMode ? .yellow : .orange)
+                    .foregroundStyle(systemScheme == .dark ? .yellow : .orange)
             }
             .background(
                 GeometryReader { geo in
@@ -303,7 +305,7 @@ struct ContentView: View {
             } label: {
                 Image(systemName: "plus")
                     .font(.title2.bold())
-                    .foregroundStyle(isDarkMode ? .white : .black)
+                    .foregroundStyle(Color.primary)
                     .frame(width: 56, height: 56)
                     .rotationEffect(.degrees(showAddPicker ? 45 : 0))
             }

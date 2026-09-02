@@ -13,7 +13,6 @@ struct ClassifyFlowView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("isDarkMode") private var isDarkMode = true
 
     @State private var index = 0
 
@@ -67,7 +66,7 @@ struct ClassifyFlowView: View {
                     Button("Cerrar") { dismiss() }
                 }
             }
-            .preferredColorScheme(isDarkMode ? .dark : .light)
+            .appAppearance()
             .appTextSize()
         }
     }
