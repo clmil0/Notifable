@@ -1109,23 +1109,12 @@ struct AddTransactionSheet: View {
     }
 
     private var standardButton: some View {
-        VStack(spacing: 6) {
-            Button(action: save) {
-                buttonLabel
-            }
-            .buttonStyle(.plain)
-            .disabled(!draft.validation.isReady || justSaved)
-            .accessibilityLabel(buttonAccessibilityLabel)
-
-            // Sobre `#E3E3E8` el texto del botón deshabilitado no llega a
-            // 4.5:1; en claro la razón se repite aquí abajo.
-            if scheme == .light, let reason = blockedReason {
-                Text(reason)
-                    .font(.caption)
-                    .foregroundStyle(palette.secondaryLabel)
-                    .multilineTextAlignment(.center)
-            }
+        Button(action: save) {
+            buttonLabel
         }
+        .buttonStyle(.plain)
+        .disabled(!draft.validation.isReady || justSaved)
+        .accessibilityLabel(buttonAccessibilityLabel)
         .padding(.horizontal, 16)
         .padding(.top, 10)
         .padding(.bottom, 8)
@@ -1144,6 +1133,18 @@ struct AddTransactionSheet: View {
         blockedReason ?? draft.actionTitle
     }
 
+    /// El texto del botón deshabilitado, legible sobre `palette.track`.
+    ///
+    /// La razón de que falte algo se decía dos veces —dentro del botón y en una
+    /// línea debajo— porque `tertiaryLabel` sobre `#E3E3E8` da 3.1:1 y no cumple
+    /// AA. Se arregla oscureciendo el texto (5.4:1) en vez de repetirlo: la
+    /// línea de abajo comía altura para no decir nada nuevo.
+    private var disabledTextColor: Color {
+        scheme == .dark
+            ? palette.secondaryLabel
+            : Color(red: 0.353, green: 0.353, blue: 0.369)   // #5A5A5E
+    }
+
     @ViewBuilder
     private var buttonLabel: some View {
         let ready = draft.validation.isReady
@@ -1158,7 +1159,7 @@ struct AddTransactionSheet: View {
                 .minimumScaleFactor(0.7)
         }
         .font(.headline)
-        .foregroundStyle(ready || justSaved ? Color.white : palette.tertiaryLabel)
+        .foregroundStyle(ready || justSaved ? Color.white : disabledTextColor)
         .frame(maxWidth: .infinity)
         .frame(height: 50)
         .background(ready || justSaved ? accentFill : palette.track)
