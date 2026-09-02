@@ -366,107 +366,119 @@ struct CategoriesView: View {
     
     private var donutChartView: some View {
         VStack {
-            HStack {
-                Text("Desglose")
-                    .font(.headline)
-                Spacer()
-                
-                if selectedChartCategory != nil {
-                    Button {
-                        withAnimation(.spring) {
-                            selectedChartCategory = nil
-                        }
-                    } label: {
-                        Text("Ver todo")
-                            .font(.caption)
-                            .foregroundStyle(themeColor)
-                    }
-                }
-                
-                Picker("Vista", selection: $showPercentages) {
-                    Text("Moneda").tag(false)
-                    Text("Porcentaje").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
-            }
-            .padding(.bottom, 8)
-            
-            let grandTotal = totals.spent
-            
-            Chart(chartTotals, id: \.category) { item in
-                SectorMark(
-                    angle: .value("Total", item.total),
-                    innerRadius: .ratio(0.6),
-                    angularInset: 2.0
-                )
-                .cornerRadius(4)
-                .foregroundStyle(chartColor(for: item.category))
-                .opacity(selectedChartCategory == nil || selectedChartCategory == item.category ? 1.0 : 0.3)
-                .annotation(position: .overlay) {
-                    // `percent` devuelve nil si el total es cero: nunca "nan%".
-                    let percentage = Money.percent(item.total, of: grandTotal) ?? 0
-                    if percentage > 6.0 {
-                        if showPercentages {
-                            Text(Money.formatPercent(item.total, of: grandTotal))
-                                .font(.caption2)
-                                .fontWeight(.heavy)
-                                .foregroundStyle(.white)
-                                .shadow(color: .black.opacity(0.6), radius: 1, x: 0, y: 1)
-                                .shadow(color: .black.opacity(0.3), radius: 3)
-                        } else {
-                            Text(Money.formatCompact(item.total))
-                                .font(.caption2)
-                                .fontWeight(.heavy)
-                                .foregroundStyle(.white)
-                                .shadow(color: .black.opacity(0.6), radius: 1, x: 0, y: 1)
-                                .shadow(color: .black.opacity(0.3), radius: 3)
-                        }
-                    }
-                }
-            }
-            .chartForegroundStyleScale(
-                domain: chartTotals.map { $0.category },
-                range: chartTotals.map { chartColor(for: $0.category) }
-            )
-            .chartLegend(position: .bottom, alignment: .center, spacing: 16)
-            .frame(height: 250)
-            .chartOverlay { proxy in
-                GeometryReader { geometry in
-                    Rectangle().fill(.clear).contentShape(Rectangle())
-                        .onTapGesture { location in
-                            let center = CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2)
-                            let dx = location.x - center.x
-                            let dy = location.y - center.y
-                            var angle = atan2(dy, dx)
-                            angle += .pi / 2
-                            if angle < 0 {
-                                angle += 2 * .pi
-                            }
-                            
-                            let valueAtAngle = (angle / (2 * .pi)) * totals.spent
-                            
-                            withAnimation(.spring) {
-                                let selected = findCategory(at: valueAtAngle)
-                                if selectedChartCategory == selected {
-                                    selectedChartCategory = nil
-                                } else {
-                                    selectedChartCategory = selected
-                                    if let cat = selected {
-                                        expandedCategories.insert(cat)
-                                    }
-                                }
-                            }
-                        }
-                }
-            }
+            donutHeader
+                .padding(.bottom, 8)
+
+            donutChart
         }
         .padding()
         .background(Color.primary.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .padding(.horizontal)
     }
-    
+
+    private var donutHeader: some View {
+        HStack {
+            Text("Desglose")
+                .font(.headline)
+            Spacer()
+
+            if selectedChartCategory != nil {
+                Button {
+                    withAnimation(.spring) { selectedChartCategory = nil }
+                } label: {
+                    Text("Ver todo")
+                        .font(.caption)
+                        .foregroundStyle(themeColor)
+                }
+            }
+
+            Picker("Vista", selection: $showPercentages) {
+                Text("Moneda").tag(false)
+                Text("Porcentaje").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .frame(width: 160)
+        }
+    }
+
+    private var donutChart: some View {
+        let grandTotal = totals.spent
+        let domain = chartTotals.map { $0.category }
+        let range = chartTotals.map { chartColor(for: $0.category) }
+
+        return Chart(chartTotals) { item in
+            SectorMark(
+                angle: .value("Total", item.total),
+                innerRadius: .ratio(0.6),
+                angularInset: 2.0
+            )
+            .cornerRadius(4)
+            .foregroundStyle(chartColor(for: item.category))
+            .opacity(sectorOpacity(for: item.category))
+            .annotation(position: .overlay) {
+                sectorLabel(for: item, of: grandTotal)
+            }
+        }
+        .chartForegroundStyleScale(domain: domain, range: range)
+        .chartLegend(position: .bottom, alignment: .center, spacing: 16)
+        .frame(height: 250)
+        .chartOverlay { _ in
+            GeometryReader { geometry in
+                Rectangle()
+                    .fill(.clear)
+                    .contentShape(Rectangle())
+                    .onTapGesture { location in
+                        selectCategory(at: location, in: geometry.size)
+                    }
+            }
+        }
+    }
+
+    private func sectorOpacity(for category: String) -> Double {
+        guard let selected = selectedChartCategory else { return 1.0 }
+        return selected == category ? 1.0 : 0.3
+    }
+
+    /// Etiqueta dentro del sector. `Money.percent` devuelve `nil` cuando el
+    /// total es cero, así que nunca sale "nan%" (ACCOUNTING.md §13).
+    @ViewBuilder
+    private func sectorLabel(for item: PeriodTotals.CategoryTotal, of grandTotal: Double) -> some View {
+        let percentage = Money.percent(item.total, of: grandTotal) ?? 0
+        if percentage > 6.0 {
+            Text(showPercentages
+                 ? Money.formatPercent(item.total, of: grandTotal)
+                 : Money.formatCompact(item.total))
+                .font(.caption2)
+                .fontWeight(.heavy)
+                .foregroundStyle(.white)
+                .shadow(color: .black.opacity(0.6), radius: 1, x: 0, y: 1)
+                .shadow(color: .black.opacity(0.3), radius: 3)
+        }
+    }
+
+    /// Traduce el punto tocado en la dona a la categoría de ese sector.
+    private func selectCategory(at location: CGPoint, in size: CGSize) {
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let dx = location.x - center.x
+        let dy = location.y - center.y
+        var angle = atan2(dy, dx) + .pi / 2
+        if angle < 0 { angle += 2 * .pi }
+
+        let valueAtAngle = (angle / (2 * .pi)) * totals.spent
+
+        withAnimation(.spring) {
+            let selected = findCategory(at: valueAtAngle)
+            if selectedChartCategory == selected {
+                selectedChartCategory = nil
+            } else {
+                selectedChartCategory = selected
+                if let selected { expandedCategories.insert(selected) }
+            }
+        }
+    }
+
+
     private func findCategory(at value: Double) -> String? {
         var accumulatedTotal = 0.0
         for item in chartTotals {
@@ -550,208 +562,241 @@ struct CategoriesView: View {
     }
     
 
-    /// Una fila de categoría. Extraída del cuerpo de la lista: SwiftUI compone
-    /// una única expresión gigante por vista, y pasado cierto tamaño el
-    /// comprobador de tipos se rinde. Cada `func` es un punto de corte.
-    @ViewBuilder
+    /// Una fila de categoría, partida en piezas por el mismo motivo que la
+    /// tarjeta de la Bandeja: el comprobador de tipos no termina una expresión
+    /// de este tamaño.
     private func categoryCard(for item: CategoryRow) -> some View {
-        VStack(spacing: 0) {
-            HStack {
-                ZStack {
-                    let baseColor = iconColor(for: item.category)
-                    Circle()
-                        .fill(colorScheme == .light ? baseColor : baseColor.opacity(0.2))
-                        .frame(width: 40, height: 40)
-                    Image(systemName: iconName(for: item.category))
-                        .foregroundStyle(colorScheme == .light ? .white : baseColor)
-                }
-                
-                Text(item.category)
-                    .font(.headline)
-                
-                Spacer()
-                
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(Money.format(item.total))
-                        .font(.subheadline)
-                        .bold()
-                        .foregroundStyle(.primary)
-                }
-                
-                Image(systemName: "chevron.down")
-                    .rotationEffect(.degrees(expandedCategories.contains(item.category) ? 180 : 0))
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 8)
-            }
-            .padding()
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.spring) {
-                    if expandedCategories.contains(item.category) {
-                        expandedCategories.remove(item.category)
-                    } else {
-                        expandedCategories.insert(item.category)
-                    }
-                }
-            }
-            .onLongPressGesture(minimumDuration: 0.5) {
-                withAnimation(.spring) {
-                    if expandedCategories.contains(item.category) {
-                        expandedCategories.remove(item.category)
-                    } else {
-                        expandedCategories.insert(item.category)
-                    }
-                }
-            }
-            .opacity(Money.isZero(item.total) ? 0.4 : 1.0)
-            
-            if expandedCategories.contains(item.category) {
-                VStack(spacing: 8) {
-                    Divider().background(Color.primary.opacity(0.1))
-                    
-                    ForEach(item.merchants, id: \.merchant) { merchantItem in
-                        HStack {
-                            Text(Accounting.displayName(merchantItem.merchant))
-                                .font(.caption)
-                                .foregroundStyle(.primary)
-                            
-                            Spacer()
-                            
-                            Text(Money.format(merchantItem.total))
-                                .font(.caption).bold()
-                                .padding(.trailing, 8)
-                            
-                            Button(action: {
-                                selectedMerchantToUncategorize = (merchant: merchantItem.merchant, category: item.category)
-                            }) {
-                                Image(systemName: "xmark")
-                                    .font(.caption2)
-                                    .bold()
-                                    .foregroundStyle(.white)
-                                    .padding(6)
-                                    .background(Color.red)
-                                    .clipShape(Circle())
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.bottom)
+        let isExpanded = expandedCategories.contains(item.category)
+        let background: Color = highlightedID == item.category
+            ? themeColor.opacity(0.15)
+            : Color.primary.opacity(0.05)
+
+        return VStack(spacing: 0) {
+            categoryHeader(for: item, isExpanded: isExpanded)
+
+            if isExpanded {
+                categoryMerchants(for: item)
             }
         }
-        .background(highlightedID == item.category ? themeColor.opacity(0.15) : Color.primary.opacity(0.05))
+        .background(background)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .padding(.horizontal)
         .id(item.category)
     }
 
-    /// Una tarjeta de comercio de la Bandeja.
-    private func inboxCard(for group: InboxGroup) -> some View {
-        let isWallet = group.merchant.hasPrefix("PLIN - ") || group.merchant.hasPrefix("YAPE - ")
-        let circleFill: Color = isWallet ? Color.primary.opacity(0.1) : Color.gray.opacity(0.15)
-        let circleShadow: Color = isWallet ? Color.primary.opacity(0.05) : Color.clear
-        
-        return VStack(spacing: 0) {
-            HStack {
-                ZStack {
-                    Circle()
-                        .fill(circleFill)
-                        .frame(width: 40, height: 40)
-                        .shadow(color: circleShadow, radius: 2)
-                    
-                    if group.merchant.hasPrefix("PLIN - ") {
-                        Image("plin_icon")
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 26, height: 26)
-                            .clipShape(Circle())
-                    } else if group.merchant.hasPrefix("YAPE - ") {
-                        Image("yape_icon")
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 26, height: 26)
-                            .clipShape(Circle())
-                    } else {
-                        Image(systemName: "tray.fill")
-                            .foregroundStyle(.gray)
-                    }
-                }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(Accounting.displayName(group.merchant))
-                        .font(.headline)
-                    Text("\(group.expenses.count) transac.")
+    private func categoryHeader(for item: CategoryRow, isExpanded: Bool) -> some View {
+        let baseColor = iconColor(for: item.category)
+        let isLight = colorScheme == .light
+        let circleFill: Color = isLight ? baseColor : baseColor.opacity(0.2)
+        let iconTint: Color = isLight ? Color.white : baseColor
+
+        return HStack {
+            ZStack {
+                Circle()
+                    .fill(circleFill)
+                    .frame(width: 40, height: 40)
+                Image(systemName: iconName(for: item.category))
+                    .foregroundStyle(iconTint)
+            }
+
+            Text(item.category)
+                .font(.headline)
+
+            Spacer()
+
+            Text(Money.format(item.total))
+                .font(.subheadline)
+                .bold()
+                .foregroundStyle(.primary)
+
+            Image(systemName: "chevron.down")
+                .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                .foregroundStyle(.secondary)
+                .padding(.leading, 8)
+        }
+        .padding()
+        .contentShape(Rectangle())
+        .onTapGesture { toggleCategory(item.category) }
+        .onLongPressGesture(minimumDuration: 0.5) { toggleCategory(item.category) }
+        .opacity(Money.isZero(item.total) ? 0.4 : 1.0)
+    }
+
+    private func categoryMerchants(for item: CategoryRow) -> some View {
+        VStack(spacing: 8) {
+            Divider().background(Color.primary.opacity(0.1))
+
+            ForEach(item.merchants) { merchantItem in
+                HStack {
+                    Text(Accounting.displayName(merchantItem.merchant))
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                
-                Spacer()
-                
-                // Right Side Grouping
-                VStack(alignment: .trailing, spacing: 8) {
-                    HStack(spacing: 6) {
-                        Text(Money.format(group.total))
-                            .font(.subheadline).bold()
-                        
-                        Image(systemName: "chevron.down")
-                            .rotationEffect(.degrees(expandedMerchants.contains(group.merchant) ? 180 : 0))
-                            .foregroundStyle(.secondary)
-                    }
-                    
+                        .foregroundStyle(.primary)
+
+                    Spacer()
+
+                    Text(Money.format(merchantItem.total))
+                        .font(.caption).bold()
+                        .padding(.trailing, 8)
+
                     Button {
-                        selectedMerchantToCategorize = MerchantWrapper(id: group.merchant)
+                        selectedMerchantToUncategorize = (merchant: merchantItem.merchant, category: item.category)
                     } label: {
-                        Text("Asignar")
-                            .font(.caption).bold()
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color.blue)
+                        Image(systemName: "xmark")
+                            .font(.caption2)
+                            .bold()
                             .foregroundStyle(.white)
-                            .clipShape(Capsule())
+                            .padding(6)
+                            .background(Color.red)
+                            .clipShape(Circle())
                     }
                 }
+                .padding(.vertical, 4)
             }
-            .padding(.vertical, 16)
-            .padding(.horizontal, 10)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                withAnimation(.spring) {
-                    if expandedMerchants.contains(group.merchant) {
-                        expandedMerchants.remove(group.merchant)
-                    } else {
-                        expandedMerchants.insert(group.merchant)
-                    }
-                }
+        }
+        .padding(.horizontal)
+        .padding(.bottom)
+    }
+
+    private func toggleCategory(_ category: String) {
+        withAnimation(.spring) {
+            if expandedCategories.contains(category) {
+                expandedCategories.remove(category)
+            } else {
+                expandedCategories.insert(category)
             }
-            
-            if expandedMerchants.contains(group.merchant) {
-                VStack(spacing: 8) {
-                    Divider().background(Color.primary.opacity(0.1))
-                    
-                    ForEach(group.expenses) { expense in
-                        HStack {
-                            Text(expense.date, style: .date)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Text(Money.format(expense.amount, currency: expense.currency))
-                                .font(.caption).bold()
-                                .foregroundStyle(expense.currency == "PEN" ? .primary : .green)
-                        }
-                        .padding(.vertical, 4)
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.bottom)
+        }
+    }
+
+
+    /// Una tarjeta de comercio de la Bandeja.
+    ///
+    /// Partida en cuatro funciones a propósito. SwiftUI compone toda una vista
+    /// en una sola expresión, y con este número de modificadores y ternarios el
+    /// comprobador de tipos abandona antes de terminar. Cada `func` con un tipo
+    /// de retorno declarado corta la inferencia en seco.
+    private func inboxCard(for group: InboxGroup) -> some View {
+        let isExpanded = expandedMerchants.contains(group.merchant)
+        let background: Color = highlightedID == group.merchant
+            ? themeColor.opacity(0.15)
+            : Color.primary.opacity(0.05)
+
+        return VStack(spacing: 0) {
+            inboxHeader(for: group, isExpanded: isExpanded)
+
+            if isExpanded {
+                inboxExpenses(for: group)
             }
         }
         .padding()
-        .background(highlightedID == group.merchant ? themeColor.opacity(0.15) : Color.primary.opacity(0.05))
+        .background(background)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .padding(.horizontal)
         .id(group.merchant)
     }
+
+    /// Logo del canal (Yape / Plin) o icono genérico.
+    @ViewBuilder
+    private func inboxIcon(for group: InboxGroup) -> some View {
+        let isWallet = group.merchant.hasPrefix("PLIN - ") || group.merchant.hasPrefix("YAPE - ")
+        let circleFill: Color = isWallet ? Color.primary.opacity(0.1) : Color.gray.opacity(0.15)
+        let circleShadow: Color = isWallet ? Color.primary.opacity(0.05) : Color.clear
+
+        ZStack {
+            Circle()
+                .fill(circleFill)
+                .frame(width: 40, height: 40)
+                .shadow(color: circleShadow, radius: 2)
+
+            if group.merchant.hasPrefix("PLIN - ") {
+                walletLogo("plin_icon")
+            } else if group.merchant.hasPrefix("YAPE - ") {
+                walletLogo("yape_icon")
+            } else {
+                Image(systemName: "tray.fill")
+                    .foregroundStyle(.gray)
+            }
+        }
+    }
+
+    private func walletLogo(_ name: String) -> some View {
+        Image(name)
+            .resizable()
+            .scaledToFill()
+            .frame(width: 26, height: 26)
+            .clipShape(Circle())
+    }
+
+    private func inboxHeader(for group: InboxGroup, isExpanded: Bool) -> some View {
+        HStack {
+            inboxIcon(for: group)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(Accounting.displayName(group.merchant))
+                    .font(.headline)
+                Text("\(group.expenses.count) transac.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 8) {
+                HStack(spacing: 6) {
+                    Text(Money.format(group.total))
+                        .font(.subheadline).bold()
+
+                    Image(systemName: "chevron.down")
+                        .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                        .foregroundStyle(.secondary)
+                }
+
+                Button {
+                    selectedMerchantToCategorize = MerchantWrapper(id: group.merchant)
+                } label: {
+                    Text("Asignar")
+                        .font(.caption).bold()
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.blue)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                }
+            }
+        }
+        .padding(.vertical, 16)
+        .padding(.horizontal, 10)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.spring) {
+                if expandedMerchants.contains(group.merchant) {
+                    expandedMerchants.remove(group.merchant)
+                } else {
+                    expandedMerchants.insert(group.merchant)
+                }
+            }
+        }
+    }
+
+    private func inboxExpenses(for group: InboxGroup) -> some View {
+        VStack(spacing: 8) {
+            Divider().background(Color.primary.opacity(0.1))
+
+            ForEach(group.expenses) { expense in
+                HStack {
+                    Text(expense.date, style: .date)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(Money.format(expense.amount, currency: expense.currency))
+                        .font(.caption).bold()
+                        .foregroundStyle(expense.currency == "PEN" ? Color.primary : Color.green)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom)
+    }
+
 
     // MARK: - Helpers
     private func iconName(for category: String) -> String {
