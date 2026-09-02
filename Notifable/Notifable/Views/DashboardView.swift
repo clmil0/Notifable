@@ -350,156 +350,210 @@ struct DashboardView: View {
         }
     }
     
+    /// Una fila de movimiento. Partida en piezas: los ternarios de color dentro
+    /// de `.fill()` y `.background()` obligan al comprobador de tipos a probar
+    /// todas las sobrecargas de ShapeStyle, y en una expresión larga se rinde.
     private func expenseCard(for expense: Expense) -> some View {
         HStack(spacing: 16) {
-            ZStack(alignment: .topTrailing) {
-                let baseColor = iconColor(for: expense)
-                
-                ZStack {
-                    Circle()
-                        .fill(colorScheme == .light ? baseColor : baseColor.opacity(0.15))
-                        .frame(width: 48, height: 48)
-                    
-                    let icon = iconName(for: expense)
-                    if icon == "plin_icon" || icon == "yape_icon" {
-                        Image(icon)
-                            .resizable()
-                            .scaledToFill()
-                            .frame(width: 28, height: 28)
-                            .clipShape(Circle())
-                    } else {
-                        Image(systemName: icon)
-                            .foregroundStyle(colorScheme == .light ? .white : baseColor)
-                    }
-                }
-                
-                if expense.isDebt {
-                    ZStack {
-                        Circle()
-                            .fill(Color.orange)
-                        
-                        Image(systemName: "exclamationmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 16, height: 16)
-                    .offset(x: 2, y: -2)
-                } else if !(expense.payments ?? []).isEmpty {
-                    ZStack {
-                        Circle()
-                            .fill(Color.green)
-                        
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                    .frame(width: 16, height: 16)
-                    .offset(x: 2, y: -2)
-                }
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    let displayName = Accounting.displayName(expense.merchant)
-                    
-                    Button {
-                        withAnimation {
-                            searchText = displayName
-                        }
-                    } label: {
-                        Text(displayName)
-                            .font(.headline)
-                            .lineLimit(1)
-                            .foregroundColor(.primary)
-                    }
-                    .buttonStyle(.plain)
-                    
-                    if expense.isSubscription {
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.caption2)
-                            .foregroundStyle(themeColor)
-                    }
-                }
-                
-                HStack(spacing: 6) {
-                    Text(expense.category)
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(colorScheme == .light ? iconColor(for: expense) : iconColor(for: expense).opacity(0.2))
-                        .foregroundStyle(colorScheme == .light ? .white : iconColor(for: expense))
-                        .clipShape(Capsule())
-                    
-                    Text(expense.date.formatted(.dateTime.day().month().hour().minute()))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .layoutPriority(1)
-                }
-            }
-            
+            expenseIcon(for: expense)
+            expenseInfo(for: expense)
+
             Spacer()
-            
-            // Lo gastado es `amount`. Lo que aún debes es otra cifra y se
-            // muestra aparte, en vez de restarse del gasto (ACCOUNTING.md §2).
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("- " + Money.format(expense.amount, currency: expense.currency))
-                    .font(.title3)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.primary)
-                
-                if expense.isDebt {
-                    let pending = Accounting.outstanding(of: expense)
-                    Text("debes " + Money.format(pending, currency: expense.currency))
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
-            }
+
+            expenseAmount(for: expense)
+
+            // El menú de la fila, siempre visible: las mismas acciones que
+            // antes vivían en el context menu, que no se anuncia en ninguna
+            // parte y por eso nadie encontraba.
+            expenseMenu(for: expense)
         }
         .surfaceCard(radius: 16)
         .padding(.horizontal)
-        .contextMenu {
-            Button {
-                withAnimation {
-                    expense.isDebt.toggle()
-                    try? modelContext.save()
-                    
-                    // Actualizar las notificaciones de deudas
-                    let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.isDebt == true })
-                    let hasDebts = (try? modelContext.fetchCount(descriptor)) ?? 0 > 0
-                    NotificationManager.shared.updateDebtNotification(hasDebts: hasDebts)
-                    NotificationManager.shared.requestPermission()
+        .contentShape(Rectangle())
+        .onTapGesture { selectedExpenseForDetails = expense }
+    }
+
+    @ViewBuilder
+    private func expenseIcon(for expense: Expense) -> some View {
+        let baseColor = iconColor(for: expense)
+        let circleFill: Color = colorScheme == .light ? baseColor : baseColor.opacity(0.15)
+        let symbolTint: Color = colorScheme == .light ? Color.white : baseColor
+        let icon = iconName(for: expense)
+
+        ZStack(alignment: .topTrailing) {
+            ZStack {
+                Circle()
+                    .fill(circleFill)
+                    .frame(width: 48, height: 48)
+
+                if icon == "plin_icon" || icon == "yape_icon" {
+                    Image(icon)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 28, height: 28)
+                        .clipShape(Circle())
+                } else {
+                    Image(systemName: icon)
+                        .foregroundStyle(symbolTint)
                 }
-            } label: {
-                Label(expense.isDebt ? "Desmarcar deuda" : "Marcar como deuda", systemImage: expense.isDebt ? "xmark.circle" : "exclamationmark.circle")
             }
-            
+
+            if expense.isDebt {
+                badge(systemName: "exclamationmark", tint: .orange)
+            } else if !(expense.payments ?? []).isEmpty {
+                badge(systemName: "checkmark", tint: .green)
+            }
+        }
+    }
+
+    private func badge(systemName: String, tint: Color) -> some View {
+        ZStack {
+            Circle().fill(tint)
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 16, height: 16)
+        .offset(x: 2, y: -2)
+    }
+
+    private func expenseInfo(for expense: Expense) -> some View {
+        let baseColor = iconColor(for: expense)
+        let tagBackground: Color = colorScheme == .light ? baseColor : baseColor.opacity(0.2)
+        let tagForeground: Color = colorScheme == .light ? Color.white : baseColor
+        let displayName = Accounting.displayName(expense.merchant)
+
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Button {
+                    withAnimation { searchText = displayName }
+                } label: {
+                    Text(displayName)
+                        .font(.headline)
+                        .lineLimit(1)
+                        .foregroundStyle(palette.label)
+                }
+                .buttonStyle(.plain)
+
+                if expense.isSubscription {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.caption2)
+                        .foregroundStyle(themeColor)
+                }
+            }
+
+            HStack(spacing: 6) {
+                Text(expense.category)
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(tagBackground)
+                    .foregroundStyle(tagForeground)
+                    .clipShape(Capsule())
+
+                Text(expense.date.formatted(.dateTime.day().month().hour().minute()))
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+            }
+        }
+    }
+
+    /// Lo gastado es `amount`. Lo que aún debes es otra cifra y se muestra
+    /// aparte, en vez de restarse del gasto (ACCOUNTING.md §2).
+    private func expenseAmount(for expense: Expense) -> some View {
+        VStack(alignment: .trailing, spacing: 2) {
+            Text("- " + Money.format(expense.amount, currency: expense.currency))
+                .font(.title3)
+                .fontWeight(.bold)
+                .foregroundStyle(palette.label)
+
+            if expense.isDebt {
+                Text("debes " + Money.format(Accounting.outstanding(of: expense), currency: expense.currency))
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+        }
+    }
+
+    
+    /// Menú de una fila de gasto. Botón `ellipsis` de 28 pt, siempre visible.
+    private func expenseMenu(for expense: Expense) -> some View {
+        Menu {
             Button {
                 selectedExpenseForDetails = expense
             } label: {
                 Label("Detalles", systemImage: "info.circle")
             }
-            
+
+            Button {
+                toggleDebt(expense)
+            } label: {
+                Label(expense.isDebt ? "Desmarcar deuda" : "Marcar deuda",
+                      systemImage: expense.isDebt ? "xmark.circle" : "exclamationmark.circle")
+            }
+
             Button(role: .destructive) {
-                withAnimation {
-                    if let emailID = expense.emailID {
-                        var recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
-                        if !recoveryIDs.contains(emailID) {
-                            recoveryIDs.append(emailID)
-                            UserDefaults.standard.set(recoveryIDs, forKey: "pendingRecoveryIDs")
-                        }
-                    }
-                    modelContext.delete(expense)
-                }
+                delete(expense)
             } label: {
                 Label("Eliminar", systemImage: "trash")
             }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(palette.secondaryLabel)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Acciones del movimiento")
+    }
+
+    private func incomeMenu(for income: Income) -> some View {
+        Menu {
+            Button(role: .destructive) {
+                withAnimation { modelContext.delete(income) }
+            } label: {
+                Label("Eliminar", systemImage: "trash")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(palette.secondaryLabel)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("Acciones del ingreso")
+    }
+
+    private func toggleDebt(_ expense: Expense) {
+        withAnimation {
+            expense.isDebt.toggle()
+            try? modelContext.save()
+
+            let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.isDebt == true })
+            let hasDebts = ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
+            NotificationManager.shared.updateDebtNotification(hasDebts: hasDebts)
+            NotificationManager.shared.requestPermission()
         }
     }
-    
+
+    private func delete(_ expense: Expense) {
+        withAnimation {
+            if let emailID = expense.emailID {
+                var recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
+                if !recoveryIDs.contains(emailID) {
+                    recoveryIDs.append(emailID)
+                    UserDefaults.standard.set(recoveryIDs, forKey: "pendingRecoveryIDs")
+                }
+            }
+            modelContext.delete(expense)
+        }
+    }
+
     private func incomeCard(for income: Income) -> some View {
         HStack(spacing: 16) {
             ZStack {
@@ -569,18 +623,11 @@ struct DashboardView: View {
                 .font(.title3)
                 .fontWeight(.bold)
                 .foregroundStyle(isDebtPayment ? Color.orange : .green)
+
+            incomeMenu(for: income)
         }
         .surfaceCard(radius: 16)
         .padding(.horizontal)
-        .contextMenu {
-            Button(role: .destructive) {
-                withAnimation {
-                    modelContext.delete(income)
-                }
-            } label: {
-                Label("Eliminar", systemImage: "trash")
-            }
-        }
     }
     
     // MARK: - Helpers
