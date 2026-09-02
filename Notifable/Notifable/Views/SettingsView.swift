@@ -33,6 +33,19 @@ struct SettingsView: View {
     
     @State private var syncStartDate: Date = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
     @State private var syncEndDate: Date = Date()
+
+    /// Lo que hará la sincronización con el rango elegido.
+    private var rangeSyncExplanation: String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_PE")
+        f.dateFormat = "d MMM"
+        let range = f.string(from: syncStartDate) + " – " + f.string(from: syncEndDate)
+        var text = "Se revisa " + range + " completo. Los gastos que ya tienes no se duplican; sólo se añade lo que falte."
+        if !GmailSyncService.reachesNow(syncEndDate) {
+            text += " La sincronización automática seguirá cubriendo desde ahí hasta hoy."
+        }
+        return text
+    }
     @State private var showBankInfo: Bool = false
     @State private var bankInfoMessage: String = ""
     
@@ -328,8 +341,17 @@ struct SettingsView: View {
                                     .foregroundStyle(.secondary)
                             }
                         } else {
-                            DatePicker("Desde", selection: $syncStartDate, displayedComponents: .date)
-                            DatePicker("Hasta", selection: $syncEndDate, displayedComponents: .date)
+                            DatePicker("Desde", selection: $syncStartDate,
+                                       in: ...syncEndDate, displayedComponents: .date)
+                            DatePicker("Hasta", selection: $syncEndDate,
+                                       in: syncStartDate...Date(), displayedComponents: .date)
+
+                            // Qué va a pasar exactamente, dicho antes de tocar
+                            // el botón: el rango se revisa entero y sólo entra
+                            // lo que falte.
+                            Text(rangeSyncExplanation)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                             
                             Button(action: {
                                 gmailSync.modelContext = modelContext

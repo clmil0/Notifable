@@ -68,7 +68,9 @@ class GmailSyncService: ObservableObject {
         fetchMessageList(token: token, startDate: startDate, endDate: endDate) { [weak self] result in
             switch result {
             case .success(let messages):
-                self?.processMessages(messages, token: token)
+                self?.processMessages(messages, token: token,
+                                      isRangeSync: startDate != nil || endDate != nil,
+                                      coversNow: Self.reachesNow(endDate))
             case .failure(let error):
                 // Token might be expired, try to refresh
                 print("Failed to fetch messages: \(error). Trying to refresh token...")
@@ -77,7 +79,9 @@ class GmailSyncService: ObservableObject {
                         self?.fetchMessageList(token: newToken, startDate: startDate, endDate: endDate) { result in
                             switch result {
                             case .success(let msgs):
-                                self?.processMessages(msgs, token: newToken)
+                                self?.processMessages(msgs, token: newToken,
+                                                      isRangeSync: startDate != nil || endDate != nil,
+                                                      coversNow: Self.reachesNow(endDate))
                             case .failure(let err):
                                 DispatchQueue.main.async {
                                     self?.isSyncing = false
@@ -122,15 +126,32 @@ class GmailSyncService: ObservableObject {
         }
         
         guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return }
-        
-        let urlString = "\(baseURL)/messages?q=\(encodedQuery)&maxResults=500"
-        guard let url = URL(string: urlString) else { return }
-        
+
+        // Gmail pagina: sin seguir `nextPageToken`, un rango largo se cortaba en
+        // 500 correos y el resto se perdía en silencio. Cinco meses de dos
+        // bancos pasan de 500 sin dificultad.
+        fetchMessagePage(token: token, encodedQuery: encodedQuery, pageToken: nil,
+                         accumulated: [], completion: completion)
+    }
+
+    private func fetchMessagePage(token: String,
+                                  encodedQuery: String,
+                                  pageToken: String?,
+                                  accumulated: [[String: Any]],
+                                  completion: @escaping (Result<[[String: Any]], Error>) -> Void) {
+
+        var urlString = "\(baseURL)/messages?q=\(encodedQuery)&maxResults=500"
+        if let pageToken { urlString += "&pageToken=\(pageToken)" }
+        guard let url = URL(string: urlString) else {
+            completion(.success(accumulated))
+            return
+        }
+
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        
-        URLSession.shared.dataTask(with: request) { data, response, error in
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             if let error = error {
                 completion(.failure(error))
                 return
@@ -139,14 +160,23 @@ class GmailSyncService: ObservableObject {
                 completion(.failure(NSError(domain: "Auth", code: 401, userInfo: nil)))
                 return
             }
-            guard let data = data else { return }
-            
+            guard let data = data else {
+                completion(.success(accumulated))
+                return
+            }
+
             do {
-                if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-                   let messages = json["messages"] as? [[String: Any]] {
-                    completion(.success(messages))
+                let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+                let messages = json?["messages"] as? [[String: Any]] ?? []
+                let total = accumulated + messages
+
+                // Tope de cordura: 20 páginas son 10 000 correos.
+                if let next = json?["nextPageToken"] as? String, total.count < 10_000 {
+                    self?.fetchMessagePage(token: token, encodedQuery: encodedQuery,
+                                           pageToken: next, accumulated: total,
+                                           completion: completion)
                 } else {
-                    completion(.success([]))
+                    completion(.success(total))
                 }
             } catch {
                 completion(.failure(error))
@@ -154,11 +184,41 @@ class GmailSyncService: ObservableObject {
         }.resume()
     }
     
-    private func processMessages(_ messages: [[String: Any]], token: String) {
+    /// `true` si la sincronización llega hasta ahora. Una sincronización
+    /// histórica acotada no puede decir "ya está todo al día".
+    static func reachesNow(_ endDate: Date?) -> Bool {
+        guard let endDate else { return true }
+        return Calendar.current.startOfDay(for: endDate) >= Calendar.current.startOfDay(for: Date())
+    }
+
+    /// Correos que la app ya convirtió en un gasto que sigue en la base.
+    ///
+    /// La deduplicación no puede depender sólo de `processedEmailIDs`: esa lista
+    /// vive en `UserDefaults` y se borra al restablecer la sincronización o al
+    /// reinstalar, y entonces el mismo rango se importaba dos veces.
+    private func existingEmailIDs() -> Set<String> {
+        guard let context = modelContext else { return [] }
+        let expenses = (try? context.fetch(FetchDescriptor<Expense>())) ?? []
+        return Set(expenses.compactMap { $0.emailID })
+    }
+
+    private func processMessages(_ messages: [[String: Any]],
+                                 token: String,
+                                 isRangeSync: Bool = false,
+                                 coversNow: Bool = true) {
         let processedIDs = UserDefaults.standard.stringArray(forKey: "processedEmailIDs") ?? []
+        // Borrados a propósito: no se resucitan solos. Para recuperarlos está
+        // "Recuperación de Gastos" en Ajustes.
+        let deletedIDs = Set(UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? [])
+
         let newMessages = messages.filter { msg in
             guard let id = msg["id"] as? String else { return false }
-            return !processedIDs.contains(id)
+            if deletedIDs.contains(id) { return false }
+            // En una sincronización con rango explícito no se salta lo ya
+            // procesado: se vuelve a mirar para rellenar lo que falte —un correo
+            // que falló, un parser arreglado después—, y la comprobación contra
+            // la base impide duplicar.
+            return isRangeSync || !processedIDs.contains(id)
         }
         
         DispatchQueue.main.async {
@@ -176,7 +236,12 @@ class GmailSyncService: ObservableObject {
         let group = DispatchGroup()
         var newExpensesFound = 0
         let semaphore = DispatchSemaphore(value: 5) // Maximum 5 concurrent requests
-        
+
+        // Se siembra con lo que ya está en la base y se va ampliando: dos
+        // correos de la misma tanda no pueden crear el mismo gasto dos veces.
+        var knownIDs: Set<String> = []
+        DispatchQueue.main.sync { knownIDs = self.existingEmailIDs() }
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             for message in newMessages {
                 guard let id = message["id"] as? String else { continue }
@@ -192,7 +257,9 @@ class GmailSyncService: ObservableObject {
                     var foundBankName: String? = nil
                     
                     if let body = body {
-                        if let expenseData = self?.parseEmailBody(body) {
+                        let alreadyImported = queue.sync { knownIDs.contains(id) }
+
+                        if !alreadyImported, let expenseData = self?.parseEmailBody(body) {
                             foundBankName = expenseData.bankName
                             DispatchQueue.main.sync {
                                 if let context = self?.modelContext {
@@ -202,6 +269,7 @@ class GmailSyncService: ObservableObject {
                                     newExpensesFound += 1
                                 }
                             }
+                            queue.sync { knownIDs.insert(id) }
                         }
                         // Only add to processed if we successfully fetched it (prevents skipping on network failure)
                         queue.async {
@@ -225,9 +293,14 @@ class GmailSyncService: ObservableObject {
                 queue.sync {
                     UserDefaults.standard.set(newIDs, forKey: "processedEmailIDs")
                 }
-                self?.lastSyncDate = Date()
+                // Una sincronización histórica acotada no marca "al día": si lo
+                // hiciera, la automática miraría sólo desde hace una hora y el
+                // tramo entre esa fecha final y hoy no se descargaría nunca.
+                if coversNow {
+                    self?.lastSyncDate = Date()
+                }
                 self?.isSyncing = false
-                print("Sync complete. Found \(newExpensesFound) new expenses.")
+                print("Sync complete. Found \(newExpensesFound) new expenses of \(newMessages.count) checked.")
             }
         }
     }
@@ -248,7 +321,11 @@ class GmailSyncService: ObservableObject {
         let group = DispatchGroup()
         let semaphore = DispatchSemaphore(value: 5)
         var newExpensesFound = 0
-        
+
+        // Recuperar dos veces tampoco puede duplicar.
+        var knownIDs: Set<String> = []
+        DispatchQueue.main.sync { knownIDs = self.existingEmailIDs() }
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             for id in ids {
                 semaphore.wait()
@@ -261,7 +338,9 @@ class GmailSyncService: ObservableObject {
                     
                     var foundBankName: String? = nil
                     if let body = body {
-                        if let expenseData = self?.parseEmailBody(body) {
+                        let alreadyImported = queue.sync { knownIDs.contains(id) }
+
+                        if !alreadyImported, let expenseData = self?.parseEmailBody(body) {
                             foundBankName = expenseData.bankName
                             DispatchQueue.main.sync {
                                 if let context = self?.modelContext {
@@ -271,6 +350,7 @@ class GmailSyncService: ObservableObject {
                                     newExpensesFound += 1
                                 }
                             }
+                            queue.sync { knownIDs.insert(id) }
                         }
                         
                         queue.async {
