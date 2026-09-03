@@ -190,9 +190,11 @@ struct UnifiedCategoryRow: View {
     var onRemoveMerchant: (String) -> Void
     var onEditLimit: () -> Void
     var onIsolate: () -> Void
+    var onDeleteCategory: () -> Void
 
+    @State private var confirmingDelete = false
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
@@ -343,10 +345,27 @@ struct UnifiedCategoryRow: View {
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
+
+                Button { confirmingDelete = true } label: {
+                    Text("Eliminar")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.negative)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(palette.negative.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
             }
             .padding(.top, 2)
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 13)
+        .alert("¿Eliminar categoría?", isPresented: $confirmingDelete) {
+            Button("Cancelar", role: .cancel) { }
+            Button("Eliminar", role: .destructive, action: onDeleteCategory)
+        } message: {
+            Text("Todos los gastos dentro de esta categoría en todos los periodos de tiempo se desclasificarán y se irán a pendientes.")
+        }
     }
 }

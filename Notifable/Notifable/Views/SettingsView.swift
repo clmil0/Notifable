@@ -21,7 +21,7 @@ struct SettingsView: View {
     @StateObject private var gmailAuth = GmailAuthService.shared
     @StateObject private var gmailSync = GmailSyncService.shared
 
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
     @AppStorage(BudgetStore.monthlyBudgetKey) private var monthlyBudget: Double = 0
     @AppStorage(BudgetStore.enabledKey) private var budgetEnabled = true
@@ -298,7 +298,7 @@ struct SettingsView: View {
 /// Presupuesto: aquí, en "Tu dinero", y no dentro de "Apariencia y Navegación",
 /// que es donde estaba un ajuste financiero.
 struct BudgetScreen: View {
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     var body: some View {
         Form {

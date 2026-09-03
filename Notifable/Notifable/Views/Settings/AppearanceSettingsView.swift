@@ -7,7 +7,7 @@ import SwiftUI
 struct AppearanceSettingsView: View {
 
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
     @AppStorage(AppTextSize.storageKey) private var appTextSize = AppTextSize.sistema.rawValue
 

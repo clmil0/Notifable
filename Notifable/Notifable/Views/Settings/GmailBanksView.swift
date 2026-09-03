@@ -8,7 +8,7 @@ struct GmailBanksView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     @StateObject private var gmailAuth = GmailAuthService.shared
     @StateObject private var gmailSync = GmailSyncService.shared

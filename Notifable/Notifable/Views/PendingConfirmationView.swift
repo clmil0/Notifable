@@ -12,7 +12,7 @@ struct PendingConfirmationView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     @Query private var rules: [RecurringExpense]
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]

@@ -17,7 +17,7 @@ struct BudgetHeroCard: View {
     var onDefineBudget: () -> Void
 
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage(BudgetStore.enabledKey) private var budgetEnabled = true
     @AppStorage(BudgetStore.monthlyBudgetKey) private var monthlyBudget: Double = 0
 

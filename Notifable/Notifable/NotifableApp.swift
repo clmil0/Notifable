@@ -32,10 +32,12 @@ struct NotifableApp: App {
         // La hora del recordatorio de deuda se guardaba como fecha completa y
         // quedaba anclada al día en que se configuró.
         NotificationSettings.migrateIfNeeded()
+        // Rebrand: el tema pasa a "Azul" (el azul del ícono), una sola vez.
+        AppThemeColor.migrateToBrandBlueIfNeeded()
     }
 
     @Environment(\.scenePhase) private var scenePhase
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     var body: some Scene {
         WindowGroup {

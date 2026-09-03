@@ -12,6 +12,7 @@ struct BBVAParser: BankEmailParser {
     
     func parse(cleanText: String) -> Expense? {
         if let expense = parsePlinSent(cleanText) { return expense }
+        if let expense = parseBBVATransfer(cleanText) { return expense }
         if let expense = parseBBVAAutomaticPayment(cleanText) { return expense }
         if let expense = parseBBVAStandard(cleanText) { return expense }
         return nil
@@ -57,6 +58,67 @@ struct BBVAParser: BankEmailParser {
         }
         
         return Expense(amount: amount, merchant: merchant, date: expenseDate, category: "Sin Clasificar", currency: currency)
+    }
+    
+    private func parseBBVATransfer(_ cleanText: String) -> Expense? {
+        guard cleanText.contains("Transferir a terceros BBVA") || cleanText.contains("TRANSF. A CTAS. TERCEROS") else {
+            return nil
+        }
+        
+        var amount: Double = 0
+        let amountPattern = "Importe cargado\\s*S/\\s*([0-9.,]+)"
+        if let amountRegex = try? NSRegularExpression(pattern: amountPattern, options: []),
+           let amtMatch = amountRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)),
+           let range = Range(amtMatch.range(at: 1), in: cleanText) {
+            let amountStr = String(cleanText[range]).replacingOccurrences(of: ",", with: "")
+            amount = Double(amountStr) ?? 0
+        } else {
+            let altAmountPattern = "Importe transferido\\s*S/\\s*([0-9.,]+)"
+            if let altRegex = try? NSRegularExpression(pattern: altAmountPattern, options: []),
+               let amtMatch = altRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)),
+               let range = Range(amtMatch.range(at: 1), in: cleanText) {
+                let amountStr = String(cleanText[range]).replacingOccurrences(of: ",", with: "")
+                amount = Double(amountStr) ?? 0
+            } else {
+                return nil
+            }
+        }
+        
+        var merchant = "BBVA - Transferencia a terceros"
+        let merchantPattern = "Nombre del beneficiario\\s*(.*?)\\s*Concepto"
+        if let merchantRegex = try? NSRegularExpression(pattern: merchantPattern, options: []),
+           let match = merchantRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)),
+           let range = Range(match.range(at: 1), in: cleanText) {
+            let extracted = String(cleanText[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            merchant = "BBVA - \(extracted)"
+        }
+        
+        var expenseDate = Date()
+        let datePattern = "Fecha y hora de la operaci[oó]n\\s*([0-9]{1,2}\\s+[a-zA-Z]+,\\s*[0-9]{4}\\s+[0-9]{2}:[0-9]{2})"
+        if let dateRegex = try? NSRegularExpression(pattern: datePattern, options: []),
+           let dateMatch = dateRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)),
+           let dateRange = Range(dateMatch.range(at: 1), in: cleanText) {
+            
+            var dateStr = String(cleanText[dateRange])
+            dateStr = dateStr.lowercased().replacingOccurrences(of: "setiembre", with: "septiembre")
+            
+            let formatter = DateFormatter()
+            formatter.dateFormat = "dd MMMM, yyyy HH:mm"
+            formatter.locale = Locale(identifier: "es_PE")
+            if let parsed = formatter.date(from: dateStr) {
+                expenseDate = parsed
+            }
+        }
+        
+        var cardLastDigits: String? = nil
+        let cardPattern = "Cuenta de origen\\s*(?:•\\s*)?([0-9]{4})"
+        if let cardRegex = try? NSRegularExpression(pattern: cardPattern, options: []),
+           let cMatch = cardRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)),
+           let range = Range(cMatch.range(at: 1), in: cleanText) {
+            cardLastDigits = String(cleanText[range])
+        }
+        
+        return Expense(amount: amount, merchant: merchant, date: expenseDate, category: "Sin Clasificar", currency: "PEN", cardLastDigits: cardLastDigits)
     }
     
     private func parseBBVAStandard(_ cleanText: String) -> Expense? {

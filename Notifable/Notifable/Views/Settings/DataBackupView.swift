@@ -8,12 +8,15 @@ struct DataBackupView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     @Query private var expenses: [Expense]
     @StateObject private var gmailSync = GmailSyncService.shared
 
     @State private var pendingAction: DestructiveAction?
+    @State private var showDateRangeSheet = false
+    @State private var startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
+    @State private var endDate = Date()
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
@@ -52,6 +55,9 @@ struct DataBackupView: View {
             Button("Cancelar", role: .cancel) { pendingAction = nil }
         } message: {
             Text(pendingAction.map(consequence) ?? "")
+        }
+        .sheet(isPresented: $showDateRangeSheet) {
+            dateRangeSheet
         }
         .sheet(isPresented: $gmailSync.showDiagnostic) {
             NavigationStack {
@@ -186,6 +192,12 @@ struct DataBackupView: View {
                 dangerRow(.expenses, title: "Borrar todos los gastos",
                           icon: "trash.fill", tint: palette.negative)
                 Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 16)
+                
+                customDangerRow(title: "Borrar rango de fechas", subtitle: "Elimina los gastos de un periodo para volver a descargarlos.", icon: "calendar.badge.minus", tint: palette.negative) {
+                    showDateRangeSheet = true
+                }
+                Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 16)
+                
                 // Naranja y no rojo: vaciar la caché no borra datos.
                 dangerRow(.cache, title: "Vaciar caché de correos",
                           icon: "arrow.triangle.2.circlepath", tint: palette.warning)
@@ -212,6 +224,32 @@ struct DataBackupView: View {
                         .foregroundStyle(tint)
                     // La consecuencia con la cifra real, antes de tocar nada.
                     Text(consequence(action))
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryLabel)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func customDangerRow(title: String, subtitle: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .foregroundStyle(tint)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .foregroundStyle(tint)
+                    Text(subtitle)
                         .font(.caption)
                         .foregroundStyle(palette.secondaryLabel)
                         .fixedSize(horizontal: false, vertical: true)
@@ -356,5 +394,70 @@ struct DataBackupView: View {
         } catch {
             print("Error al borrar los datos: \(error)")
         }
+    }
+
+    private func deleteExpenses(from startDate: Date, to endDate: Date) {
+        let startOfDay = Calendar.current.startOfDay(for: startDate)
+        let endOfDay = Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
+        
+        do {
+            let allExpenses = try modelContext.fetch(FetchDescriptor<Expense>())
+            let expensesToDelete = allExpenses.filter { $0.date >= startOfDay && $0.date <= endOfDay }
+            
+            var emailIDsToRemove = Set<String>()
+            
+            for expense in expensesToDelete {
+                if let emailID = expense.emailID {
+                    emailIDsToRemove.insert(emailID)
+                }
+                modelContext.delete(expense)
+            }
+            
+            try modelContext.save()
+            
+            if !emailIDsToRemove.isEmpty {
+                var processedIDs = UserDefaults.standard.stringArray(forKey: "processedEmailIDs") ?? []
+                processedIDs.removeAll { emailIDsToRemove.contains($0) }
+                UserDefaults.standard.set(processedIDs, forKey: "processedEmailIDs")
+                
+                var pendingRecoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
+                pendingRecoveryIDs.removeAll { emailIDsToRemove.contains($0) }
+                UserDefaults.standard.set(pendingRecoveryIDs, forKey: "pendingRecoveryIDs")
+            }
+            
+        } catch {
+            print("Error al borrar los datos por rango: \(error)")
+        }
+    }
+
+    private var dateRangeSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    DatePicker("Desde", selection: $startDate, displayedComponents: .date)
+                    DatePicker("Hasta", selection: $endDate, displayedComponents: .date)
+                } header: {
+                    Text("Rango de tiempo")
+                } footer: {
+                    Text("Se eliminarán los gastos dentro de este rango y sus correos asociados podrán ser descargados nuevamente en la próxima sincronización.")
+                }
+                
+                Button(role: .destructive) {
+                    deleteExpenses(from: startDate, to: endDate)
+                    showDateRangeSheet = false
+                } label: {
+                    Text("Borrar gastos del rango")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+            .navigationTitle("Borrar por fechas")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { showDateRangeSheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }

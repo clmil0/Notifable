@@ -21,7 +21,7 @@ struct CategorySettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage("period") private var period = Period()
 
     @StateObject private var budgets = CategoryBudgetStore.shared
@@ -98,9 +98,13 @@ struct CategorySettingsView: View {
     private var referenceDate: Date { CategoryLimits.referenceDate(for: period) }
     private var snapshots: [ExpenseSnapshot] { history.map(\.accountingSnapshot) }
 
+    private var activeName: String {
+        isNew ? name : currentName
+    }
+
     private var color: Color {
         CategoryPalette.color(for: colorID)
-            ?? CategoryStyle.defaultColor(for: currentName, accent: accent.color)
+            ?? CategoryStyle.defaultColor(for: activeName, accent: accent.color)
     }
 
     private var status: CategoryLimitStatus {
@@ -133,7 +137,7 @@ struct CategorySettingsView: View {
                 .fill(color.opacity(0.22))
                 .frame(width: 56, height: 56)
                 .overlay(
-                    Image(systemName: icon ?? CategoryStyle.defaultIcon(for: currentName))
+                    Image(systemName: icon ?? CategoryStyle.defaultIcon(for: activeName))
                         .font(.title2)
                         .foregroundStyle(color)
                 )
@@ -142,7 +146,7 @@ struct CategorySettingsView: View {
                 TextField("Nombre", text: $name)
                     .font(.title.bold())
                     .foregroundStyle(palette.label)
-                    .disabled(CategoryCatalog.isSystem(currentName))
+                    .disabled(!isNew && CategoryCatalog.isSystem(currentName))
                     .onSubmit(renameIfNeeded)
 
                 colorRow

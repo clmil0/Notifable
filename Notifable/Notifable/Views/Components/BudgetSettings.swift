@@ -67,7 +67,7 @@ struct BudgetSettingsSection: View {
 struct BudgetSheet: View {
 
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     private var tint: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
 

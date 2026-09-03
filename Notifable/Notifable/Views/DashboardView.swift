@@ -41,7 +41,7 @@ struct DashboardView: View {
     /// `categoriesFilter` + `syncFilters` + tres `referenceDate` independientes.
     @AppStorage("period") private var period = Period()
     
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
 
@@ -499,7 +499,7 @@ struct DashboardView: View {
                     .fill(circleFill)
                     .frame(width: 48, height: 48)
 
-                if icon == "plin_icon" || icon == "yape_icon" {
+                if icon == "plin_icon" || icon == "yape_icon" || icon == "bbva_icon" {
                     Image(icon)
                         .resizable()
                         .scaledToFill()
@@ -603,7 +603,7 @@ struct DashboardView: View {
                     .fill(colorScheme == .light ? baseColor : baseColor.opacity(0.15))
                     .frame(width: 48, height: 48)
                 
-                if icon == "plin_icon" || icon == "yape_icon" {
+                if icon == "plin_icon" || icon == "yape_icon" || icon == "bbva_icon" {
                     Image(icon)
                         .resizable()
                         .scaledToFill()
@@ -672,10 +672,10 @@ struct DashboardView: View {
     
     // MARK: - Helpers
     private func iconName(for expense: Expense) -> String {
-        if expense.category == "Sin Clasificar" {
-            if expense.merchant.hasPrefix("PLIN - ") { return "plin_icon" }
-            if expense.merchant.hasPrefix("YAPE - ") { return "yape_icon" }
-        }
+        if expense.merchant.hasPrefix("PLIN - ") { return "plin_icon" }
+        if expense.merchant.hasPrefix("YAPE - ") { return "yape_icon" }
+        if expense.merchant.hasPrefix("BBVA - ") { return "bbva_icon" }
+        
         switch expense.category {
         case "Comida": return "fork.knife"
         case "Transporte": return "car.fill"
@@ -685,10 +685,10 @@ struct DashboardView: View {
     }
     
     private func iconColor(for expense: Expense) -> Color {
-        if expense.category == "Sin Clasificar" {
-            if expense.merchant.hasPrefix("PLIN - ") { return Color(red: 0, green: 0.7, blue: 0.9) } // Celeste Plin
-            if expense.merchant.hasPrefix("YAPE - ") { return Color(red: 0.5, green: 0, blue: 0.5) } // Magenta/Purple
-        }
+        if expense.merchant.hasPrefix("PLIN - ") { return Color(red: 0, green: 0.7, blue: 0.9) } // Celeste Plin
+        if expense.merchant.hasPrefix("YAPE - ") { return Color(red: 0.5, green: 0, blue: 0.5) } // Magenta/Purple
+        if expense.merchant.hasPrefix("BBVA - ") { return Color(red: 0.0, green: 0.27, blue: 0.51) } // Azul BBVA
+        
         switch expense.category {
         case "Comida": return .orange
         case "Transporte": return .blue
@@ -703,6 +703,8 @@ struct DashboardView: View {
             return (Color(red: 0, green: 0.7, blue: 0.9), "plin_icon")
         case "Yape":
             return (Color(red: 0.5, green: 0, blue: 0.5), "yape_icon")
+        case "BBVA":
+            return (Color(red: 0.0, green: 0.27, blue: 0.51), "bbva_icon")
         case "Efectivo":
             return (.yellow, "banknote.fill")
         default:

@@ -13,7 +13,7 @@ struct PeriodBar: View {
     @Binding var period: Period
 
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     @State private var showRangePicker = false
     @State private var draftStart = Date()

@@ -18,7 +18,7 @@ struct RhythmView: View {
 
     @StateObject private var exchangeRateService = ExchangeRateService.shared
     @AppStorage("period") private var period = Period()
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(colorScheme) }

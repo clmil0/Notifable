@@ -72,7 +72,7 @@ struct AssignCategorySheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage("period") private var period = Period()
 
     @StateObject private var budgets = CategoryBudgetStore.shared

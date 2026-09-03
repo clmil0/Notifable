@@ -8,7 +8,7 @@ struct InboxProgressCard: View {
     var onClassifyAll: () -> Void
 
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
@@ -151,7 +151,7 @@ struct InboxMerchantCard: View {
     var onOther: () -> Void
 
     @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
@@ -270,6 +270,7 @@ struct InboxMerchantCard: View {
     private var channelName: String? {
         if group.merchant.hasPrefix("YAPE - ") { return "Yape" }
         if group.merchant.hasPrefix("PLIN - ") { return "Plin" }
+        if group.merchant.hasPrefix("BBVA - ") { return "BBVA" }
         return nil
     }
 
@@ -284,6 +285,8 @@ struct InboxMerchantCard: View {
                 assetLogo("plin_icon")
             } else if group.merchant.hasPrefix("YAPE - ") {
                 assetLogo("yape_icon")
+            } else if group.merchant.hasPrefix("BBVA - ") {
+                assetLogo("bbva_icon")
             } else {
                 Image(systemName: "bag.fill")
                     .foregroundStyle(palette.secondaryLabel)

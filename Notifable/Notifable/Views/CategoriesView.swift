@@ -15,7 +15,7 @@ enum CategoryTab: String, CaseIterable, Identifiable {
 /// de abajo sólo mostraba el periodo filtrado: el mismo comercio "faltante"
 /// aparecía con números distintos según dónde se mirara. La franja de alcance
 /// hace explícita la diferencia en vez de escondrla.
-enum PendingScope { case period, all }
+enum PendingScope: Equatable { case period, all }
 
 /// Un comercio de Pendientes con sus gastos sin clasificar.
 ///
@@ -68,7 +68,7 @@ struct CategoriesView: View {
     /// El mismo `Period` que Resumen y Ritmo.
     @AppStorage("period") private var period = Period()
 
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
 
@@ -82,6 +82,10 @@ struct CategoriesView: View {
     @AppStorage("categoriesSegment") private var selectedTab: CategoryTab = .misCategorias
 
     @State private var pendingScope: PendingScope = .period
+
+    /// Pendientes pagina de 20 en 20 — con muchos comercios sin clasificar,
+    /// renderizar la lista entera de una es lo que hacía lento el desplegable.
+    @State private var visiblePendingCount = 20
     @State private var selectedMerchantToCategorize: MerchantWrapper?
     @State private var selectedMerchantToUncategorize: (merchant: String, category: String)?
     @State private var expandedMerchants: Set<String> = []
@@ -204,6 +208,30 @@ struct CategoriesView: View {
         let base = pendingScope == .period ? inboxGroups : pendingGroups
         guard !searchText.isEmpty else { return base }
         return base.filter { $0.merchant.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    /// Sólo lo visible: el resto se agrega en `loadMorePendingIfNeeded`.
+    private var pagedPendingGroups: [InboxGroup] {
+        Array(visiblePendingGroups.prefix(visiblePendingCount))
+    }
+
+    /// Dispara la siguiente página al acercarse a las últimas tarjetas
+    /// renderizadas, antes de que el usuario llegue del todo al final.
+    private func loadMorePendingIfNeeded(currentGroup: InboxGroup) {
+        guard let index = pagedPendingGroups.firstIndex(where: { $0.merchant == currentGroup.merchant }) else { return }
+        if index >= pagedPendingGroups.count - 5, visiblePendingCount < visiblePendingGroups.count {
+            visiblePendingCount += 20
+        }
+    }
+
+    /// Asegura que un comercio esté renderizado antes de hacer scroll hacia
+    /// él (toast "enviado a Pendientes"): si cayó fuera de la página actual,
+    /// agranda la página lo justo para incluirlo.
+    private func revealPendingMerchant(_ merchant: String) {
+        guard let index = visiblePendingGroups.firstIndex(where: { $0.merchant == merchant }) else { return }
+        if index >= visiblePendingCount {
+            visiblePendingCount = index + 20
+        }
     }
 
     /// Comercios pendientes que quedan fuera del periodo filtrado — lo que
@@ -655,6 +683,7 @@ struct CategoriesView: View {
 
                             // Esperar a que cambie la pestaña y hacer scroll
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                if targetTab == .inbox { revealPendingMerchant(targetID) }
                                 withAnimation(.easeInOut(duration: 0.5)) {
                                     proxy.scrollTo(targetID, anchor: .top)
                                 }
@@ -720,6 +749,8 @@ struct CategoriesView: View {
         .onChange(of: selectedTab) { _, newTab in
             if newTab != .inbox { clearSelection() }
         }
+        .onChange(of: pendingScope) { _, _ in visiblePendingCount = 20 }
+        .onChange(of: searchText) { _, _ in visiblePendingCount = 20 }
         .overlay(alignment: .bottom) {
             Group {
                 if pendingUndo != nil {
@@ -964,6 +995,10 @@ struct CategoriesView: View {
                                            onEditLimit: { editingCategory = CategoryWrapper(id: row.category) },
                                            onIsolate: {
                                                withAnimation(.spring) { focusedCategory = row.category }
+                                           },
+                                           onDeleteCategory: {
+                                               CategoryEditor.delete(row.category, in: expenses)
+                                               try? modelContext.save()
                                            })
                         .id(row.category)
                     }
@@ -1115,8 +1150,9 @@ struct CategoriesView: View {
                     if visiblePendingGroups.isEmpty {
                         ContentUnavailableView("No se encontraron resultados", systemImage: "magnifyingglass", description: Text("Prueba con otro término de búsqueda."))
                     } else {
-                        ForEach(visiblePendingGroups) { group in
+                        ForEach(pagedPendingGroups) { group in
                             merchantCard(for: group)
+                                .onAppear { loadMorePendingIfNeeded(currentGroup: group) }
                         }
                     }
 

@@ -31,7 +31,7 @@ struct ContentView: View {
     @State private var didResolveRecurring = false
     @State private var selectedTab: AppTab = .home
     @State private var scrollOffset: CGFloat = 0
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.purple.rawValue
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     @State private var showSettings = false
@@ -42,7 +42,6 @@ struct ContentView: View {
     @State private var selectedTransactionType: TransactionType? = nil
     @State private var showAddPicker = false
     @State private var showSplash = true
-    @State private var isPulsing = false
     @State private var tabWidth: CGFloat = 0
     @State private var scrollToTopTrigger: Bool = false
     @State private var themeButtonCenter: CGPoint = CGPoint(x: UIScreen.main.bounds.width - 80, y: 60)
@@ -171,38 +170,15 @@ struct ContentView: View {
             }
 
             
-            // Splash Screen Overlay
+            // Splash Screen Overlay: la gota a gota de "Icono y Splash" (handoff
+            // de identidad) — reemplaza el placeholder de la campanita.
             if showSplash {
-                ZStack {
-                    Color(.systemBackground).ignoresSafeArea()
-                    
-                    VStack(spacing: 24) {
-                        Image(systemName: "bell.badge.fill")
-                            .font(.system(size: 80))
-                            .foregroundStyle(themeColor)
-                            .scaleEffect(isPulsing ? 1.1 : 0.9)
-                            .opacity(isPulsing ? 1.0 : 0.5)
-                        
-                        Text("AgruPay")
-                            .font(.largeTitle)
-                            .fontWeight(.bold)
-                            .foregroundStyle(Color.primary)
-                            .opacity(isPulsing ? 1.0 : 0.5)
+                SplashView {
+                    withAnimation(.easeOut(duration: 0.4)) {
+                        showSplash = false
                     }
                 }
                 .transition(.opacity)
-                .onAppear {
-                    withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                        isPulsing = true
-                    }
-                    
-                    // Ocultar el splash después de 2 segundos
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                        withAnimation(.easeOut(duration: 0.5)) {
-                            showSplash = false
-                        }
-                    }
-                }
             }
         }
     }
@@ -210,10 +186,8 @@ struct ContentView: View {
     // MARK: - Top Header
     private var topHeader: some View {
         HStack {
-            Image(systemName: "bell.badge.fill")
-                .font(.title)
-                .foregroundStyle(themeColor)
-            
+            AppIconTile(size: 34, coinFace: .white, detail: false)
+
             Text("AgruPay")
                 .font(.title)
                 .fontWeight(.bold)

@@ -35,9 +35,14 @@ struct ClassifyFlowView: View {
                         group: current,
                         suggestion: hint,
                         frequentCategories: frequentCategories(hint),
+                        isSelected: false,
+                        selectedMovementIDs: [],
                         isExpanded: true,
                         isHighlighted: false,
-                        onToggle: {},
+                        isOutOfPeriod: false,
+                        onToggleSelect: {},
+                        onToggleExpand: {},
+                        onToggleMovement: { _ in },
                         onPick: { category in
                             onPick(current, category)
                             advance()
