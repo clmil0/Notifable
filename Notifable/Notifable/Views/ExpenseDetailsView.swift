@@ -62,15 +62,22 @@ struct ExpenseDetailsView: View {
                 }
             }
             .sheet(isPresented: $showingCategoryPicker) {
-                AssignCategoryView(merchant: expense.merchant, existingCategories: allCategories) { newCategory in
-                    // Se guarda también la regla: si no, el siguiente correo del
-                    // mismo comercio volvería a caer sin clasificar.
-                    MerchantRules.apply(newCategory, to: expense.merchant, in: allExpenses)
+                // `6a`: el mismo componente que la Bandeja y el modal de alta.
+                AssignCategorySheet(context: .expense(expense),
+                                    history: allExpenses) { newCategory, createRule in
+                    if createRule {
+                        // La regla vale para el pasado y para lo que llegue: si
+                        // no, el siguiente correo del mismo comercio volvería a
+                        // caer sin clasificar.
+                        MerchantRules.apply(newCategory, to: expense.merchant, in: allExpenses)
+                    } else {
+                        expense.category = newCategory
+                    }
                     try? modelContext.save()
                 }
-                .presentationDetents([.fraction(0.8)])
+                .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
-                .presentationCornerRadius(32)
+                .presentationCornerRadius(28)
             }
             .sheet(isPresented: $showingEditor) {
                 EditExpenseSheet(expense: expense)

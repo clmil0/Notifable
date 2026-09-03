@@ -1240,36 +1240,27 @@ struct AddTransactionSheet: View {
         .presentationDragIndicator(.visible)
     }
 
+    /// El chip "…" abre `6a`, el mismo sheet que la Bandeja y el detalle: aquí
+    /// también hace falta ver el saldo del límite antes de elegir, y aquí
+    /// también conviene poder crear la regla del comercio de una vez.
+    ///
+    /// El gasto todavía no existe, así que la cabecera muestra el borrador y el
+    /// interruptor de regla sólo aparece si ya hay comercio escrito.
     private var categoryListSheet: some View {
-        NavigationStack {
-            List(selectableCategories, id: \.self) { category in
-                Button {
-                    draft.category = category
-                    showAllCategories = false
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: CategoryStyle.icon(for: category))
-                            .foregroundStyle(CategoryStyle.color(for: category, accent: themeAccent.color))
-                            .frame(width: 24)
-                        Text(category)
-                            .foregroundStyle(palette.label)
-                        Spacer()
-                        if draft.category == category {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(accentText)
-                        }
-                    }
-                }
+        AssignCategorySheet(context: .draft(merchant: draft.merchant,
+                                            amount: draft.amount,
+                                            currency: draft.currency,
+                                            current: draft.category),
+                            history: history) { category, createRule in
+            draft.category = category
+            if createRule {
+                MerchantRules.set(category, for: draft.merchant.trimmed)
             }
-            .navigationTitle("Categoría")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cerrar") { showAllCategories = false }
-                }
-            }
+            showAllCategories = false
         }
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(28)
     }
 
     private var debtPickerSheet: some View {

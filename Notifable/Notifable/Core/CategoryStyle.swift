@@ -5,9 +5,18 @@ import SwiftUI
 /// Antes cada pantalla tenía su propia copia de este `switch` —Resumen,
 /// Categorías, el detalle— y ya habían empezado a divergir: Supermercado era
 /// teal en la dona y verde en las filas.
+///
+/// Desde `6b` el usuario puede elegir color e icono: `CategoryCatalog` manda
+/// sobre este `switch`, que queda como el valor por defecto de las categorías
+/// que nadie ha tocado.
 enum CategoryStyle {
 
     static func icon(for category: String) -> String {
+        if let custom = CategoryCatalog.shared.icon(for: category) { return custom }
+        return defaultIcon(for: category)
+    }
+
+    static func defaultIcon(for category: String) -> String {
         switch category {
         case "Comida": return "fork.knife"
         case "Transporte": return "car.fill"
@@ -22,6 +31,11 @@ enum CategoryStyle {
     }
 
     static func color(for category: String, accent: Color) -> Color {
+        if let custom = CategoryCatalog.shared.color(for: category) { return custom }
+        return defaultColor(for: category, accent: accent)
+    }
+
+    static func defaultColor(for category: String, accent: Color) -> Color {
         switch category {
         case "Comida": return .orange
         case "Transporte": return .blue
@@ -45,16 +59,26 @@ enum CategoryStyle {
     static let defaults = ["Comida", "Transporte", "Entretenimiento", "Supermercado", "Otros"]
 
     /// Todas las categorías elegibles, con las más usadas por delante.
+    ///
+    /// Incluye las del catálogo aunque no tengan ni un gasto: una categoría
+    /// recién creada en `6a` tiene que sobrevivir a cerrar la pantalla.
     static func selectable(history: [Expense]) -> [String] {
         var counts: [String: Int] = [:]
         for expense in history where expense.category != Accounting.unclassified {
             counts[expense.category, default: 0] += 1
         }
-        let known = Set(counts.keys).union(defaults)
+        let known = Set(counts.keys)
+            .union(defaults)
+            .union(CategoryCatalog.shared.names)
         return known.sorted { lhs, rhs in
             let l = counts[lhs] ?? 0
             let r = counts[rhs] ?? 0
             return l == r ? lhs < rhs : l > r
         }
+    }
+
+    /// Alfabéticas, para las listas donde la posición debe ser estable.
+    static func alphabetical(history: [Expense]) -> [String] {
+        selectable(history: history).sorted()
     }
 }

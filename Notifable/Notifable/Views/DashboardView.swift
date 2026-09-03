@@ -64,6 +64,11 @@ struct DashboardView: View {
     @State private var incomeToActOn: Income?
     /// La tira de ingresos filtra la actividad reciente a sólo ingresos.
     @State private var showsIncomesOnly = false
+
+    /// Actividad Reciente pagina de 50 en 50 — cargar todo de una para un
+    /// historial largo se siente lento y no aporta nada hasta que el usuario
+    /// llega ahí abajo.
+    @State private var visibleTransactionCount = 50
     @AppStorage(BudgetStore.tracksIncomeKey) private var tracksIncome = true
     @AppStorage("categoriesSegment") private var categoriesSegment = CategoryTab.misCategorias
     
@@ -123,6 +128,21 @@ struct DashboardView: View {
                 let hasCategoryMatch = "Ingreso".localizedCaseInsensitiveContains(searchText)
                 return hasSourceMatch || hasNotesMatch || hasCategoryMatch
             }
+        }
+    }
+
+    /// Sólo lo visible: el resto se agrega en `loadMoreIfNeeded`, no de una.
+    var pagedTransactions: [TransactionItem] {
+        Array(searchedTransactions.prefix(visibleTransactionCount))
+    }
+
+    /// Dispara la siguiente página cuando la fila que aparece está entre las
+    /// últimas 10 visibles — antes de que el usuario llegue al final a secas,
+    /// para que no note el salto.
+    private func loadMoreIfNeeded(currentItem: TransactionItem) {
+        guard let index = pagedTransactions.firstIndex(where: { $0.id == currentItem.id }) else { return }
+        if index >= pagedTransactions.count - 10, visibleTransactionCount < searchedTransactions.count {
+            visibleTransactionCount += 50
         }
     }
 
@@ -221,8 +241,9 @@ struct DashboardView: View {
                                     .padding(.top, 10)
                                     .frame(maxWidth: .infinity, alignment: .center)
                             } else {
-                                ForEach(searchedTransactions) { item in
+                                ForEach(pagedTransactions) { item in
                                     transactionCard(for: item)
+                                        .onAppear { loadMoreIfNeeded(currentItem: item) }
                                 }
                             }
                             
@@ -238,6 +259,9 @@ struct DashboardView: View {
                 }
             }
         }
+        .onChange(of: searchText) { _, _ in visibleTransactionCount = 50 }
+        .onChange(of: period) { _, _ in visibleTransactionCount = 50 }
+        .onChange(of: showsIncomesOnly) { _, _ in visibleTransactionCount = 50 }
         .sheet(item: $selectedExpenseForDetails) { expense in
             ExpenseDetailsView(expense: expense)
         }

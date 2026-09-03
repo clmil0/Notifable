@@ -14,6 +14,7 @@ struct NotificationSettingsView: View {
     @AppStorage(NotificationSettings.debtHourKey) private var debtHour = 10
     @AppStorage(NotificationSettings.debtMinuteKey) private var debtMinute = 0
     @AppStorage("debtNotificationFrequency") private var debtFrequency = "Diario"
+    @AppStorage(NotificationManager.categoryLimitEnabledKey) private var limitAlertsEnabled = true
 
     private var tint: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
 
@@ -26,6 +27,13 @@ struct NotificationSettingsView: View {
                 Text("Avisos")
             } footer: {
                 Text("Cuando pases el 80% de tu meta o el ritmo esperado.")
+            }
+
+            Section {
+                Toggle("Límites por categoría", isOn: $limitAlertsEnabled)
+                    .tint(tint)
+            } footer: {
+                Text("Una vez por ciclo: al llegar al umbral que pusiste en cada categoría y al pasarte de su límite.")
             }
 
             Section {

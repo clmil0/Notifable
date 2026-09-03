@@ -224,6 +224,19 @@ struct Period: Equatable, Hashable {
         }
     }
 
+    /// Nombre del mes en español, con mayúscula inicial — "Septiembre".
+    ///
+    /// `Date.formatted(.dateTime.month(.wide))` usa el locale del sistema, que
+    /// en un iPhone configurado en inglés devuelve "September": la app habla
+    /// siempre en español, así que el mes no puede depender de eso.
+    static func spanishMonthName(for date: Date, abbreviated: Bool = false) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_PE")
+        f.calendar = Period.calendar
+        f.dateFormat = abbreviated ? "MMM" : "MMMM"
+        return f.string(from: date).capitalizedFirst
+    }
+
     /// Etiqueta corta para chips y encabezados de tarjeta.
     var shortTitle: String {
         switch granularity {
