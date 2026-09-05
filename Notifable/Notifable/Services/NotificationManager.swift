@@ -27,8 +27,8 @@ class NotificationManager {
         
         if hasDebts {
             let content = UNMutableNotificationContent()
-            content.title = "Deuda Pendiente"
-            content.body = "Tienes deudas pendientes por cancelar. ¡Revisa tu resumen!"
+            content.title = "Tienes cobros pendientes"
+            content.body = "Hay dinero que aún no te devuelven. ¡Revisa tu resumen!"
             content.sound = .default
             
             // Hora y minuto, no una fecha completa: antes se guardaba un

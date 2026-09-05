@@ -1,6 +1,11 @@
 import SwiftUI
 
 // MARK: - Sync Manager (Supabase REST API)
+/// `@MainActor`: sólo lo usa `SocialView`, y su estado (`socialFeed`,
+/// `isSyncing`) se lee desde la vista. Aislarlo al actor principal quita el
+/// aviso de capturar un tipo no-Sendable en un cierre `@Sendable` sin tener
+/// que envolver cada asignación.
+@MainActor
 @Observable
 class SyncManager {
     static let shared = SyncManager()
@@ -34,9 +39,7 @@ class SyncManager {
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 {
                 let decoder = JSONDecoder()
                 let expenses = try decoder.decode([SocialExpense].self, from: data)
-                DispatchQueue.main.async {
-                    self.socialFeed = expenses
-                }
+                self.socialFeed = expenses
             } else {
                 print("Error fetching from Supabase. Did you create the table?")
             }
@@ -45,48 +48,12 @@ class SyncManager {
         }
     }
     
-    func syncLocalExpensesToCloud(localExpenses: [Expense]) async {
-        guard !localExpenses.isEmpty else { return }
-        DispatchQueue.main.async { self.isSyncing = true }
-        defer { DispatchQueue.main.async { self.isSyncing = false } }
-        
-        guard let url = URL(string: "\(projectURL)/rest/v1/expenses") else { return }
-        
-        // Convert local models to JSON for Supabase
-        let payloads = localExpenses.map { exp -> [String: Any] in
-            return [
-                "id": exp.id.uuidString,
-                "user_id": "Usuario_PoC", // Dummy user ID for now
-                "amount": exp.amount,
-                "merchant": exp.merchant,
-                "category": exp.category
-            ]
-        }
-        
-        guard let body = try? JSONSerialization.data(withJSONObject: payloads) else { return }
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.addValue(apiKey, forHTTPHeaderField: "apikey")
-        request.addValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        // Upsert to avoid duplicate key errors if already synced
-        request.addValue("return=minimal", forHTTPHeaderField: "Prefer")
-        request.addValue("id", forHTTPHeaderField: "on_conflict") 
-        
-        request.httpBody = body
-        
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) {
-                print("Sync exitoso a Supabase")
-            } else {
-                print("Error en el Sync. Status: \((response as? HTTPURLResponse)?.statusCode ?? 0)")
-            }
-        } catch {
-            print("Network error during sync: \(error)")
-        }
-    }
+    // `syncLocalExpensesToCloud` se eliminó: subía TODOS los gastos del usuario
+    // a la tabla pública `expenses` con el user_id fijo "Usuario_PoC", cada 30
+    // minutos y sin que nadie lo pidiera. Lo único que sube ahora a la nube es
+    // la configuración (ver ConfigBackupManager); los gastos se quedan en el
+    // teléfono y se rearman releyendo el correo.
+
 }
 
 // MARK: - Social View

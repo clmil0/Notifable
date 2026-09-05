@@ -19,7 +19,7 @@ struct CategoryBudget: Codable, Equatable, Identifiable {
     var category: String
 
     /// Monto base del ciclo, normalizado a céntimos por `Money`.
-    var amount: Double
+    @MoneyCoded var amount: Double
 
     var cycle: Cycle = .mes
 
@@ -81,7 +81,7 @@ struct CategoryBudget: Codable, Equatable, Identifiable {
         /// 1…12. Con `year == nil` se repite cada año.
         var month: Int
         var year: Int?
-        var amount: Double
+        @MoneyCoded var amount: Double
         var repeatsYearly: Bool { year == nil }
     }
 
@@ -435,6 +435,13 @@ final class CategoryBudgetStore: ObservableObject {
 
     func remove(_ category: String) {
         budgets[category] = nil
+        persist()
+    }
+
+    /// Empezar de cero (Configuración › Borrar datos): todos los límites de
+    /// una vez, no uno por uno.
+    func removeAll() {
+        budgets = [:]
         persist()
     }
 

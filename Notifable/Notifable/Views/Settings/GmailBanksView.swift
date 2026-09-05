@@ -9,11 +9,18 @@ struct GmailBanksView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    /// Recuerda el último periodo elegido para que "Leer" no vuelva a "1 mes"
+    /// cada vez que se abre la pantalla.
+    @AppStorage("readPeriodMonths") private var readPeriodMonths = 1
 
     @StateObject private var gmailAuth = GmailAuthService.shared
     @StateObject private var gmailSync = GmailSyncService.shared
 
     @State private var showUnlinkDialog = false
+    @State private var showRecoveryAlert = false
+    /// El chip "Personalizado" abre el stepper; no cambia `readPeriodMonths`
+    /// por sí solo, así que el valor puede seguir siendo uno de los estándar.
+    @State private var showCustomStepper = false
     /// Se guarda aquí para que los `Toggle` redibujen: `BankSource.isEnabled`
     /// escribe en `UserDefaults` y no publica cambios por sí solo.
     @State private var bankStates: [String: Bool] = [:]
@@ -21,23 +28,24 @@ struct GmailBanksView: View {
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
 
+    private static let standardPeriods = [1, 3, 6, 12]
+
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
                 accountCard
                 banksSection
                 captureLimitsCard
-
-                if gmailAuth.isAuthenticated {
-                    unlinkRow
-                }
             }
             .padding(.vertical, 16)
         }
         .background(palette.background)
         .navigationTitle("Gmail y bancos")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: loadBankStates)
+        .onAppear {
+            loadBankStates()
+            showCustomStepper = !Self.standardPeriods.contains(readPeriodMonths)
+        }
         .confirmationDialog("¿Desvincular Gmail?",
                             isPresented: $showUnlinkDialog,
                             titleVisibility: .visible) {
@@ -45,6 +53,19 @@ struct GmailBanksView: View {
             Button("Cancelar", role: .cancel) {}
         } message: {
             Text("Los gastos ya registrados se conservan. Dejarán de entrar nuevos.")
+        }
+        .alert("Recuperación de Gastos", isPresented: $showRecoveryAlert) {
+            Button("Sí, recuperar") {
+                let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
+                gmailSync.recoverExpenses(ids: recoveryIDs)
+            }
+            Button("No (Descartar)") {
+                UserDefaults.standard.removeObject(forKey: "pendingRecoveryIDs")
+                startSync()
+            }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Has borrado elementos anteriores. ¿Quieres recuperarlos antes de continuar con la lectura?")
         }
     }
 
@@ -74,7 +95,23 @@ struct GmailBanksView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
 
-                Spacer(minLength: 0)
+                Spacer(minLength: 8)
+
+                // Desvincular vive aquí y no en una fila al final: es una
+                // acción sobre esta cuenta, y al pie parecía aplicar a toda la
+                // pantalla (bancos y periodo incluidos).
+                if gmailAuth.isAuthenticated {
+                    Button { showUnlinkDialog = true } label: {
+                        Text("Desvincular")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(palette.negative)
+                            .padding(.horizontal, 10)
+                            .frame(height: 30)
+                            .background(palette.negative.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(16)
 
@@ -111,34 +148,166 @@ struct GmailBanksView: View {
         .padding(.horizontal, 16)
     }
 
+    // MARK: - Selector de periodo de lectura
+
+    /// Reemplaza al único botón "Leer ahora": aquí se elige desde cuándo leer,
+    /// no sólo se dispara una lectura con el rango que ya traía por defecto.
     private var lastReadRow: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Última lectura")
-                    .font(.caption)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                (Text("Última lectura · ")
                     .foregroundStyle(palette.secondaryLabel)
-                Text(lastSyncLabel)
-                    .font(.subheadline.weight(.semibold))
+                 + Text(lastSyncLabel)
                     .foregroundStyle(palette.label)
+                    .fontWeight(.semibold))
+                    .font(.caption)
+                Spacer()
+                Text("\(cachedEmailCount) en caché")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(palette.tertiaryLabel)
             }
 
-            Spacer()
+            VStack(alignment: .leading, spacing: 8) {
+                Text("DESDE")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(palette.tertiaryLabel)
+
+                HStack(spacing: 8) {
+                    ForEach(Self.standardPeriods, id: \.self) { months in
+                        periodChip(label: periodChipLabel(months), isActive: !showCustomStepper && readPeriodMonths == months) {
+                            showCustomStepper = false
+                            readPeriodMonths = months
+                        }
+                    }
+                    periodChip(label: "Otro", isActive: showCustomStepper) {
+                        showCustomStepper = true
+                    }
+                }
+            }
+
+            if showCustomStepper {
+                HStack {
+                    Text("Cuánto atrás")
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryLabel)
+                    Spacer()
+                    HStack(spacing: 0) {
+                        // "−" se aleja en el tiempo (suma un mes hacia atrás);
+                        // "+" acerca el inicio del rango a hoy.
+                        stepperButton(systemName: "minus") {
+                            readPeriodMonths = min(36, readPeriodMonths + 1)
+                        }
+                        Text("\(readPeriodMonths)")
+                            .font(.subheadline.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(palette.label)
+                            .frame(minWidth: 28)
+                        stepperButton(systemName: "plus") {
+                            readPeriodMonths = max(1, readPeriodMonths - 1)
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                    .background(palette.track)
+                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+            }
+
+            (Text(rangeLabel + " ")
+                .foregroundStyle(palette.label)
+             + Text("· sin duplicar lo que ya tienes")
+                .foregroundStyle(palette.secondaryLabel))
+                .font(.caption)
 
             Button {
                 gmailSync.modelContext = modelContext
-                gmailSync.syncEmails(force: true)
+                let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
+                if !recoveryIDs.isEmpty {
+                    showRecoveryAlert = true
+                } else {
+                    startSync()
+                }
             } label: {
-                Text("Leer ahora")
-                    .font(.caption.weight(.bold))
+                Text("Leer " + periodLabel(readPeriodMonths))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 40)
                     .background(accent.color)
-                    .clipShape(Capsule())
+                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
             }
             .buttonStyle(.plain)
         }
         .padding(16)
+    }
+
+    private func periodChip(label: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isActive ? .white : palette.label)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+                .frame(height: 30)
+                .background(isActive ? accent.color : palette.track)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func stepperButton(systemName: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(palette.label)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func startSync() {
+        let start = Calendar.current.startOfDay(
+            for: Calendar.current.date(byAdding: .month, value: -readPeriodMonths, to: Date()) ?? Date())
+        gmailSync.syncEmails(force: true, startDate: start, endDate: Date())
+    }
+
+    /// Abreviado para los chips: cinco opciones tienen que caber en una fila.
+    /// "3 meses" y "Personalizado" desbordaban y la fila se veía rota. El botón
+    /// de abajo sí dice el periodo completo, que es donde importa.
+    private func periodChipLabel(_ months: Int) -> String {
+        if months > 0, months % 12 == 0 { return "\(months / 12) A" }
+        return "\(months) M"
+    }
+
+    /// "1 mes" / "3 meses" / "1 año" / "2 años" / "N meses" para el resto.
+    private func periodLabel(_ months: Int) -> String {
+        if months == 12 { return "1 año" }
+        if months > 0, months % 12 == 0 { return "\(months / 12) años" }
+        return months == 1 ? "1 mes" : "\(months) meses"
+    }
+
+    private var rangeStartDate: Date {
+        Calendar.current.startOfDay(
+            for: Calendar.current.date(byAdding: .month, value: -readPeriodMonths, to: Date()) ?? Date())
+    }
+
+    private func formatted(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_PE")
+        f.dateFormat = "d MMM"
+        var text = f.string(from: date)
+        let cal = Calendar.current
+        if cal.component(.year, from: date) != cal.component(.year, from: Date()) {
+            text += ", " + String(cal.component(.year, from: date))
+        }
+        return text
+    }
+
+    private var rangeLabel: String {
+        "\(formatted(rangeStartDate)) → hoy, \(formatted(Date()))"
+    }
+
+    private var cachedEmailCount: Int {
+        (UserDefaults.standard.stringArray(forKey: "processedEmailIDs") ?? []).count
     }
 
     private var lastSyncLabel: String {
@@ -299,27 +468,6 @@ struct GmailBanksView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Desvincular
-
-    private var unlinkRow: some View {
-        Button { showUnlinkDialog = true } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "xmark.circle")
-                Text("Desvincular Gmail")
-                Spacer()
-            }
-            .font(.body)
-            .foregroundStyle(palette.negative)
-            .padding(.horizontal, 16)
-            .frame(height: 52)
-            .background(palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(palette.negative.opacity(0.35), lineWidth: 0.5)
-            )
-            .padding(.horizontal, 16)
-        }
-        .buttonStyle(.plain)
-    }
+    // El botón de desvincular vive dentro de `accountCard`, en la misma fila
+    // que "Gmail vinculado".
 }

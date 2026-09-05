@@ -112,6 +112,13 @@ final class CategoryCatalog: ObservableObject {
         persist()
     }
 
+    /// Empezar de cero (Configuración › Borrar datos): todas las categorías
+    /// personalizadas de una vez, no una por una.
+    func removeAll() {
+        entries = [:]
+        persist()
+    }
+
     func rename(_ name: String, to newName: String) {
         guard name != newName else { return }
         var moved = entries[name] ?? CustomCategory(name: name)

@@ -95,13 +95,13 @@ struct TransactionDraft {
         }
         if type == .ingreso, isDebtPayment {
             guard let debt = selectedDebt else {
-                return .blocked("Elige la deuda a abonar")
+                return .blocked("Elige qué te están devolviendo")
             }
             guard debt.currency == currency else {
-                return .invalid("La deuda está en \(debt.currency). Cambia la moneda del abono.")
+                return .invalid("Lo que te deben está en \(debt.currency). Cambia la moneda del cobro.")
             }
             if let excess = excessOverDebt {
-                return .invalid("Supera el saldo de la deuda en " + Money.format(excess, currency: currency))
+                return .invalid("Supera lo que te deben en " + Money.format(excess, currency: currency))
             }
         }
         if date > Date().addingTimeInterval(60 * 60 * 24) {
@@ -115,8 +115,8 @@ struct TransactionDraft {
         let formatted = Money.format(amount, currency: currency)
         switch (type, isDebtPayment, cancelsDebt) {
         case (.gasto, _, _):        return "Añadir gasto de " + formatted
-        case (.ingreso, true, true): return "Abonar " + formatted + " y cancelar deuda"
-        case (.ingreso, true, false): return "Abonar " + formatted
+        case (.ingreso, true, true): return "Registrar " + formatted + " y saldar el cobro"
+        case (.ingreso, true, false): return "Registrar cobro de " + formatted
         case (.ingreso, false, _):  return "Añadir ingreso de " + formatted
         }
     }

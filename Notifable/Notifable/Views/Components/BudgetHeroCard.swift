@@ -13,8 +13,6 @@ struct BudgetHeroCard: View {
 
     let period: Period
     let totals: PeriodTotals
-    /// Abre los ajustes de presupuesto cuando aún no hay ninguno definido.
-    var onDefineBudget: () -> Void
 
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
@@ -47,8 +45,6 @@ struct BudgetHeroCard: View {
                 paceBanner(pace)
                 Divider().background(palette.separator)
                 footer(pace)
-            } else {
-                defineBudgetButton
             }
         }
         .padding(20)
@@ -216,21 +212,4 @@ struct BudgetHeroCard: View {
         .padding(.leading, 12)
     }
 
-    /// Sin presupuesto no se inventa una meta: se ofrece definirla.
-    private var defineBudgetButton: some View {
-        Button(action: onDefineBudget) {
-            Text("Definir presupuesto mensual")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(accent.onSurface(scheme))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
-                .background(accent.softFill(scheme))
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(accent.color.opacity(0.5), lineWidth: 0.5)
-                )
-        }
-        .buttonStyle(.plain)
-    }
 }

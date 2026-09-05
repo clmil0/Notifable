@@ -5,12 +5,14 @@ enum AppTab: Int, CaseIterable {
     case home = 0
     case categories = 1
     case trends = 2
+    case amigos = 3
     
     var icon: String {
         switch self {
         case .home: return "house.fill"
         case .categories: return "tray.full.fill"
         case .trends: return "chart.bar.fill"
+        case .amigos: return "person.2.fill"
         }
     }
     
@@ -19,6 +21,7 @@ enum AppTab: Int, CaseIterable {
         case .home: return "Resumen"
         case .categories: return "Categorías"
         case .trends: return "Ritmo"
+        case .amigos: return "Amigos"
         }
     }
 }
@@ -46,7 +49,6 @@ struct ContentView: View {
     @State private var scrollToTopTrigger: Bool = false
     @State private var themeButtonCenter: CGPoint = CGPoint(x: UIScreen.main.bounds.width - 80, y: 60)
     
-    let syncTimer = Timer.publish(every: 1800, on: .main, in: .common).autoconnect()
     
     /// Aplica las reglas con `autoConfirm` y programa el aviso de las que
     /// esperan confirmación. Una vez por sesión.
@@ -108,6 +110,8 @@ struct ContentView: View {
                             CategoriesView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
                         case .trends:
                             RhythmView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
+                        case .amigos:
+                            AmigosHubView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -119,11 +123,6 @@ struct ContentView: View {
             .background(Color(.systemBackground).ignoresSafeArea())
             .ignoresSafeArea(.keyboard)
             .onAppear(perform: resolveRecurring)
-            .onReceive(syncTimer) { _ in
-                Task {
-                    await SyncManager.shared.syncLocalExpensesToCloud(localExpenses: expenses)
-                }
-            }
             .fullScreenCover(isPresented: $showSettings) {
                 SettingsView()
             }
@@ -186,7 +185,7 @@ struct ContentView: View {
     // MARK: - Top Header
     private var topHeader: some View {
         HStack {
-            AppIconTile(size: 34, coinFace: .white, detail: false)
+            AppIconTile(size: 34, accent: themeColor, coinFace: .white, detail: false)
 
             Text("AgruPay")
                 .font(.title)

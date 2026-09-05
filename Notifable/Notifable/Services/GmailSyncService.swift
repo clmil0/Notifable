@@ -32,7 +32,8 @@ class GmailSyncService: ObservableObject {
         BCPParser(),
         YapeParser(),
         InterbankParser(),
-        ScotiabankParser()
+        ScotiabankParser(),
+        AppleParser()
     ]
     
     // Configura el ModelContext desde el lugar donde se llame
@@ -263,13 +264,13 @@ class GmailSyncService: ObservableObject {
                             foundBankName = expenseData.bankName
                             DispatchQueue.main.sync {
                                 if let context = self?.modelContext {
-                                    expenseData.expense.emailID = id
-                                    context.insert(expenseData.expense)
-                                    try? context.save()
-                                    newExpensesFound += 1
+                                    let inserted = self?.handleExpenseInsertion(expenseData: expenseData, emailID: id, context: context) == true
+                                    if inserted {
+                                        newExpensesFound += 1
+                                    }
                                 }
                             }
-                            queue.sync { knownIDs.insert(id) }
+                            queue.sync { _ = knownIDs.insert(id) }
                         }
                         // Only add to processed if we successfully fetched it (prevents skipping on network failure)
                         queue.async {
@@ -300,6 +301,12 @@ class GmailSyncService: ObservableObject {
                     self?.lastSyncDate = Date()
                 }
                 self?.isSyncing = false
+                // Los gastos acaban de rearmarse desde el correo, así que ahora
+                // sí existen los que estaban esperando su marca de deuda o su
+                // categoría restaurada. Ver ConfigBackupManager.
+                if let context = self?.modelContext {
+                    ConfigBackupManager.reapplyPendingDecisions(modelContext: context)
+                }
                 print("Sync complete. Found \(newExpensesFound) new expenses of \(newMessages.count) checked.")
             }
         }
@@ -344,13 +351,13 @@ class GmailSyncService: ObservableObject {
                             foundBankName = expenseData.bankName
                             DispatchQueue.main.sync {
                                 if let context = self?.modelContext {
-                                    expenseData.expense.emailID = id
-                                    context.insert(expenseData.expense)
-                                    try? context.save()
-                                    newExpensesFound += 1
+                                    let inserted = self?.handleExpenseInsertion(expenseData: expenseData, emailID: id, context: context) == true
+                                    if inserted {
+                                        newExpensesFound += 1
+                                    }
                                 }
                             }
-                            queue.sync { knownIDs.insert(id) }
+                            queue.sync { _ = knownIDs.insert(id) }
                         }
                         
                         queue.async {
@@ -377,6 +384,9 @@ class GmailSyncService: ObservableObject {
                     UserDefaults.standard.removeObject(forKey: "pendingRecoveryIDs")
                 }
                 self?.isSyncing = false
+                if let context = self?.modelContext {
+                    ConfigBackupManager.reapplyPendingDecisions(modelContext: context)
+                }
                 print("Recovery complete. Restored \(newExpensesFound) expenses.")
             }
         }
@@ -420,6 +430,36 @@ class GmailSyncService: ObservableObject {
         }.resume()
     }
     
+    func diagnosticBBVATransfer() {
+        guard let token = GmailAuthService.shared.getAccessToken() else {
+            DispatchQueue.main.async { self.diagnosticResult = "No token"; self.showDiagnostic = true }
+            return
+        }
+        DispatchQueue.main.async { self.diagnosticResult = "Buscando..."; self.showDiagnostic = true }
+        
+        let query = "from:procesos@bbva.com.pe terceros"
+        guard let url = URL(string: "\(baseURL)/messages?q=\(query)&maxResults=1") else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            guard let data = data else { return }
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let messages = json["messages"] as? [[String: Any]],
+                   let firstMessage = messages.first,
+                   let id = firstMessage["id"] as? String {
+                    self.fetchDiagnosticDetails(id: id, token: token)
+                } else {
+                    let raw = String(data: data, encoding: .utf8) ?? ""
+                    DispatchQueue.main.async { self.diagnosticResult = "No se encontraron transferencias BBVA. \n\n\(raw)" }
+                }
+            } catch {}
+        }.resume()
+    }
+    
     private func fetchDiagnosticDetails(id: String, token: String) {
         guard let url = URL(string: "\(baseURL)/messages/\(id)?format=full") else { return }
         var request = URLRequest(url: url)
@@ -431,9 +471,42 @@ class GmailSyncService: ObservableObject {
             do {
                 if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
                     let bodyText = self.extractFullText(from: json)
-                    let parser = YapeParser()
-                    let result = parser.parse(cleanText: bodyText)
+                    let parser = YapeParser() // Por defecto
+                    let appleParser = AppleParser()
+                    let bbvaParser = BBVAParser()
                     
+                    var result: Expense? = nil
+                    var parserUsed = ""
+                    
+                    if let appleRes = appleParser.parse(cleanText: bodyText) {
+                        result = appleRes
+                        parserUsed = "AppleParser"
+                    } else if let bbvaRes = bbvaParser.parse(cleanText: bodyText) {
+                        result = bbvaRes
+                        parserUsed = "BBVAParser"
+                    } else if let yapeRes = parser.parse(cleanText: bodyText) {
+                        result = yapeRes
+                        parserUsed = "YapeParser"
+                    }
+                    
+                    // Fecha en dos formatos: ISO con offset (para no dejar dudas
+                    // de zona horaria) y como la vería el usuario en la app — así el
+                    // diagnóstico permite comparar directo contra "Fecha y hora de la
+                    // operación" del correo sin adivinar.
+                    var fechaDebug = "NIL"
+                    if let parsedDate = result?.date {
+                        let iso = ISO8601DateFormatter()
+                        iso.timeZone = TimeZone.current
+                        iso.formatOptions = [.withInternetDateTime]
+                        let display = DateFormatter()
+                        display.locale = Locale(identifier: "es_PE")
+                        display.dateFormat = "EEEE d 'de' MMMM, yyyy HH:mm"
+                        fechaDebug = "\(display.string(from: parsedDate))  (\(iso.string(from: parsedDate)))"
+                        if abs(parsedDate.timeIntervalSinceNow) < 5 {
+                            fechaDebug += "  ⚠️ igual a \"ahora\": el patrón de fecha del parser no matcheó y quedó el valor por defecto"
+                        }
+                    }
+
                     let finalStr = """
                     --- RAW JSON ---
                     Snippet: \(json["snippet"] as? String ?? "")
@@ -441,11 +514,42 @@ class GmailSyncService: ObservableObject {
                     --- TEXTO EXTRAÍDO ---
                     \(bodyText)
                     
-                    --- RESULTADO PARSER ---
+                    --- RESULTADO \(parserUsed) ---
                     Monto: \(result != nil ? String(result!.amount) : "NIL")
                     Merchant: \(result != nil ? result!.merchant : "NIL")
+                    Fecha: \(fechaDebug)
                     """
                     DispatchQueue.main.async { self.diagnosticResult = finalStr }
+                }
+            } catch {}
+        }.resume()
+    }
+    
+    func diagnosticApple() {
+        guard let token = GmailAuthService.shared.getAccessToken() else {
+            DispatchQueue.main.async { self.diagnosticResult = "No token"; self.showDiagnostic = true }
+            return
+        }
+        DispatchQueue.main.async { self.diagnosticResult = "Buscando..."; self.showDiagnostic = true }
+        
+        let query = "from:no_reply@email.apple.com Factura"
+        guard let url = URL(string: "\(baseURL)/messages?q=\(query)&maxResults=1") else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            guard let data = data else { return }
+            do {
+                if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
+                   let messages = json["messages"] as? [[String: Any]],
+                   let firstMessage = messages.first,
+                   let id = firstMessage["id"] as? String {
+                    self.fetchDiagnosticDetails(id: id, token: token)
+                } else {
+                    let raw = String(data: data, encoding: .utf8) ?? ""
+                    DispatchQueue.main.async { self.diagnosticResult = "No se encontraron recibos de Apple. \n\n\(raw)" }
                 }
             } catch {}
         }.resume()
@@ -621,5 +725,64 @@ class GmailSyncService: ObservableObject {
         }
         
         return String(data: outputData, encoding: encoding) ?? String(data: outputData, encoding: .utf8) ?? processed
+    }
+    
+    private func handleExpenseInsertion(expenseData: (expense: Expense, bankName: String), emailID: String, context: ModelContext) -> Bool {
+        let newExpense = expenseData.expense
+        
+        let isAppleReceipt = expenseData.bankName == "Apple"
+        let isAppleBankBill = !isAppleReceipt && newExpense.merchant.lowercased().contains("apple")
+        
+        if isAppleReceipt || isAppleBankBill {
+            let amount = newExpense.amount
+            let date = newExpense.date
+            
+            let allExpenses = (try? context.fetch(FetchDescriptor<Expense>())) ?? []
+            
+            if let match = allExpenses.first(where: {
+                $0.id != newExpense.id &&
+                $0.relatedEmailID == nil &&
+                $0.amount == amount &&
+                abs($0.date.timeIntervalSince(date)) <= 48 * 3600 &&
+                ($0.merchant.lowercased().contains("apple") || $0.merchant == "Apple")
+            }) {
+                if isAppleReceipt {
+                    // Overwrite match (Bank Expense) with Apple Receipt details
+                    match.merchant = newExpense.merchant == "Apple" ? match.merchant : "Apple: \(newExpense.merchant)"
+                    if let notes = newExpense.notes { match.notes = notes }
+                    match.isSubscription = newExpense.isSubscription
+                    match.category = newExpense.category
+                    match.relatedEmailID = emailID
+                } else {
+                    // Llega el cargo del banco, pero el recibo de Apple ya
+                    // había creado el gasto (llegó primero). La factura de
+                    // Apple sólo trae el día — sin hora, queda en 00:00 — así
+                    // que la hora real hay que tomarla del correo del banco,
+                    // que sí la tiene.
+                    match.date = date
+                    if let card = newExpense.cardLastDigits { match.cardLastDigits = card }
+                    match.relatedEmailID = emailID
+                }
+                try? context.save()
+                return true
+            }
+        }
+        
+        if isAppleReceipt {
+            // No se encontró el cargo del banco todavía para vincularlo (puede
+            // llegar después, o nunca si el usuario no sincroniza ese correo).
+            // Si no le ponemos ya el prefijo "Apple:", este gasto se guarda con
+            // el nombre de la app/plan ("Claude by Anthropic...") sin la
+            // palabra "apple" en ningún lado — y cuando el cargo del banco
+            // llegue después, la búsqueda por merchant.contains("apple") no lo
+            // va a encontrar y el gasto se duplica. Poniéndolo desde ya, la
+            // vinculación funciona sin importar en qué orden lleguen los correos.
+            newExpense.merchant = newExpense.merchant == "Apple" ? newExpense.merchant : "Apple: \(newExpense.merchant)"
+        }
+        
+        newExpense.emailID = emailID
+        context.insert(newExpense)
+        try? context.save()
+        return true
     }
 }

@@ -857,9 +857,9 @@ struct AddTransactionSheet: View {
                 .foregroundStyle(palette.warning)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text("¿Es abono a una deuda?")
+                Text("¿Te están devolviendo algo?")
                     .foregroundStyle(palette.label)
-                Text(activeDebts.count == 1 ? "Tienes 1 deuda activa" : "Tienes \(activeDebts.count) deudas activas")
+                Text(activeDebts.count == 1 ? "Tienes 1 cobro pendiente" : "Tienes \(activeDebts.count) cobros pendientes")
                     .font(.caption)
                     .foregroundStyle(palette.secondaryLabel)
             }
@@ -901,7 +901,7 @@ struct AddTransactionSheet: View {
     /// La distinción que ACCOUNTING.md §3 y §4 exigen y que ninguna pantalla
     /// explicaba: por qué un abono no aparece en el balance.
     private var explanationNote: some View {
-        Text("Un ingreso normal cuenta en tu balance. Un abono a deuda no: sólo reduce lo que debes.")
+        Text("Un ingreso normal cuenta en tu balance. Un cobro no: sólo reduce lo que te deben.")
             .font(.footnote)
             .foregroundStyle(palette.secondaryLabel)
             .fixedSize(horizontal: false, vertical: true)
@@ -955,7 +955,7 @@ struct AddTransactionSheet: View {
                     Image(systemName: "exclamationmark.circle")
                         .font(.system(size: 19))
                         .foregroundStyle(palette.warning)
-                    Text("Elige la deuda")
+                    Text("Elige qué te están devolviendo")
                         .foregroundStyle(palette.label)
                 }
 
@@ -987,7 +987,7 @@ struct AddTransactionSheet: View {
         let f = DateFormatter()
         f.locale = Locale(identifier: "es_PE")
         f.dateFormat = "d MMM"
-        return "Deuda del " + f.string(from: debt.date) + " · "
+        return "Por cobrar del " + f.string(from: debt.date) + " · "
             + Money.format(debt.amount, currency: debt.currency) + " original"
     }
 
@@ -999,7 +999,7 @@ struct AddTransactionSheet: View {
 
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Saldo actual")
+                Text("Te deben")
                     .font(.caption)
                     .foregroundStyle(palette.secondaryLabel)
                 Text(Money.format(draft.debtOutstanding ?? 0, currency: currency))
@@ -1060,8 +1060,8 @@ struct AddTransactionSheet: View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(palette.positive)
-            Text("Este abono cancela la deuda. " + Accounting.displayName(debt.merchant)
-                 + " dejará de contar como deuda activa.")
+            Text("Con esto queda saldado. " + Accounting.displayName(debt.merchant)
+                 + " deja de estar por cobrar.")
                 .font(.footnote)
                 .foregroundStyle(palette.label)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1209,10 +1209,19 @@ struct AddTransactionSheet: View {
         } else {
             guard let income = draft.makeIncome() else { return }
             modelContext.insert(income)
+            // El vínculo se anota por la huella del gasto, no sólo por la
+            // relación de SwiftData: esa relación se rompe cada vez que el
+            // gasto se rearma desde el correo.
+            if let debt = draft.selectedDebt, draft.isDebtPayment {
+                IncomeLinkStore.record(income: income, expense: debt, isFinal: draft.cancelsDebt)
+            }
             // `isFinalDebtPayment` se deduce del saldo, no de un toggle: el
             // anterior permitía cerrar una deuda con un abono parcial.
             if draft.cancelsDebt, let debt = draft.selectedDebt {
                 debt.isDebt = false
+                // Saldarlo es una decisión del usuario sobre un gasto del
+                // correo: sin anotarla, la relectura lo devuelve a "por cobrar".
+                ExpenseEditStore.record(debt, isDebt: false)
             }
         }
         try? modelContext.save()
@@ -1287,7 +1296,7 @@ struct AddTransactionSheet: View {
                     }
                 }
             }
-            .navigationTitle("Deudas activas")
+            .navigationTitle("Pendientes de cobro")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -90,7 +90,6 @@ struct RhythmView: View {
 
                 Spacer(minLength: 100)
             }
-            .padding(.top, 4)
         }
     }
 

@@ -55,6 +55,18 @@ struct AssignCategoryContext: Equatable, Identifiable {
             current: current
         )
     }
+
+    /// Desde la selección múltiple de Pendientes ("bolita").
+    static func selection(title: String, amount: Double) -> AssignCategoryContext {
+        AssignCategoryContext(
+            merchant: nil,
+            title: title,
+            subtitle: Money.format(amount) + " en total",
+            amount: amount > 0 ? amount : nil,
+            currency: "PEN",
+            current: nil
+        )
+    }
 }
 
 /// `6a` — Asignar categoría, con el saldo del límite a la vista.

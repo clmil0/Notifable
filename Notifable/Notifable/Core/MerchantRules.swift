@@ -106,6 +106,9 @@ extension MerchantRules {
         for expense in expenses where ids.contains(expense.id) {
             previous[expense.id] = expense.category
             expense.category = category
+            // Sin regla de comercio, la decisión sólo existe en este gasto: se
+            // anota para que sobreviva a la próxima relectura del correo.
+            ExpenseEditStore.record(expense, category: category)
         }
         return previous
     }

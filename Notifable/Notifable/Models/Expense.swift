@@ -14,6 +14,7 @@ final class Expense {
     var isSubscription: Bool
     var currency: String = "PEN"
     var emailID: String?
+    var relatedEmailID: String?
     var isDebt: Bool = false
     var cardLastDigits: String?
 
@@ -26,7 +27,12 @@ final class Expense {
     /// caso `Accounting` usa el tipo actual como respaldo.
     var fxRateAtCapture: Double?
     
-    @Relationship(deleteRule: .cascade, inverse: \Income.debtReference) var payments: [Income]?
+    /// `.nullify`, no `.cascade`: en cascada, "Volver a leer el correo desde
+    /// cero" —que borra los gastos para rearmarlos— se llevaba por delante los
+    /// cobros que el usuario había registrado a mano, y ésos no están en
+    /// ningún correo. Al anular, el cobro sobrevive y `IncomeLinkStore` lo
+    /// vuelve a atar cuando el gasto reaparece.
+    @Relationship(deleteRule: .nullify, inverse: \Income.debtReference) var payments: [Income]?
 
     /// - Warning: mezcla monedas (resta un abono de $ 40 como 40 soles) y además
     ///   no es "lo gastado" sino "lo que aún debes", dos cifras que las vistas

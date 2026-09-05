@@ -44,7 +44,7 @@ struct NotificationSettingsView: View {
             }
 
             Section {
-                Toggle("Recordatorio de deuda", isOn: $debtReminderEnabled)
+                Toggle("Recordatorio de cobros", isOn: $debtReminderEnabled)
                     .tint(tint)
 
                 if debtReminderEnabled {
@@ -61,8 +61,8 @@ struct NotificationSettingsView: View {
                 }
             } footer: {
                 Text(debtReminderEnabled
-                     ? "A las \(NotificationSettings.timeLabel(hour: debtHour, minute: debtMinute)), mientras tengas deudas activas."
-                     : "Sin aviso de deudas pendientes.")
+                     ? "A las \(NotificationSettings.timeLabel(hour: debtHour, minute: debtMinute)), mientras tengas cobros pendientes."
+                     : "Sin aviso de cobros pendientes.")
             }
         }
         .navigationTitle("Notificaciones")

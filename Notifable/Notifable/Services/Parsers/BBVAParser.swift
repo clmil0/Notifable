@@ -47,11 +47,18 @@ struct BBVAParser: BankEmailParser {
         if let dateRegex = try? NSRegularExpression(pattern: plinDatePattern, options: []),
            let dateMatch = dateRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)) {
             if let dateRange = Range(dateMatch.range(at: 1), in: cleanText) {
-                let dateStr = String(cleanText[dateRange])
+                // Convertir a números a mano en vez de dejarle el nombre del mes a
+                // DateFormatter (ver nota en parseBBVATransfer): evita depender de
+                // que ICU reconozca "septiembre" con esa ortografía exacta.
+                var dStr = String(cleanText[dateRange]).lowercased()
+                let months = ["enero": "01", "febrero": "02", "marzo": "03", "abril": "04", "mayo": "05", "junio": "06", "julio": "07", "agosto": "08", "septiembre": "09", "setiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"]
+                for (name, num) in months { dStr = dStr.replacingOccurrences(of: name, with: num) }
+                dStr = dStr.replacingOccurrences(of: " de ", with: " ")
+                dStr = dStr.replacingOccurrences(of: ",", with: "")
                 let formatter = DateFormatter()
-                formatter.dateFormat = "dd 'de' MMMM, yyyy HH:mm"
-                formatter.locale = Locale(identifier: "es_PE")
-                if let parsed = formatter.date(from: dateStr.lowercased()) {
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.dateFormat = "dd MM yyyy HH:mm"
+                if let parsed = formatter.date(from: dStr) {
                     expenseDate = parsed
                 }
             }
@@ -94,17 +101,41 @@ struct BBVAParser: BankEmailParser {
         }
         
         var expenseDate = Date()
-        let datePattern = "Fecha y hora de la operaci[oó]n\\s*([0-9]{1,2}\\s+[a-zA-Z]+,\\s*[0-9]{4}\\s+[0-9]{2}:[0-9]{2})"
+        let datePattern = "Fecha y hora de la operaci[oó]n.*?([0-9]{1,2})\\s*(?:de\\s*)?([a-zA-Z]+)(?:,\\s*|\\s+de\\s+|\\s+)([0-9]{4})\\s*(?:-|a\\s+las)?\\s*([0-9]{2}:[0-9]{2}(?::[0-9]{2})?)"
         if let dateRegex = try? NSRegularExpression(pattern: datePattern, options: []),
-           let dateMatch = dateRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)),
-           let dateRange = Range(dateMatch.range(at: 1), in: cleanText) {
+           let dateMatch = dateRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)) {
             
-            var dateStr = String(cleanText[dateRange])
-            dateStr = dateStr.lowercased().replacingOccurrences(of: "setiembre", with: "septiembre")
+            let dayRange = Range(dateMatch.range(at: 1), in: cleanText)!
+            let monthRange = Range(dateMatch.range(at: 2), in: cleanText)!
+            let yearRange = Range(dateMatch.range(at: 3), in: cleanText)!
+            let timeRange = Range(dateMatch.range(at: 4), in: cleanText)!
+            
+            let day = String(cleanText[dayRange])
+            let monthWord = String(cleanText[monthRange]).lowercased()
+            let year = String(cleanText[yearRange])
+            let time = String(cleanText[timeRange])
+            
+            // Antes esto convertía "setiembre" a "septiembre" y se lo pasaba a
+            // DateFormatter con locale es_PE esperando que MMMM lo reconociera —
+            // pero el nombre oficial del mes en es_PE es justo "setiembre", así
+            // que la conversión rompía el parseo de setiembre para atrás:
+            // `formatter.date(from:)` devolvía nil y la fecha quedaba en "ahora".
+            // Con un diccionario propio a números no depende de qué ortografía
+            // tenga ICU para el mes (mismo enfoque que BCPParser/YapeParser).
+            let months = ["enero": "01", "febrero": "02", "marzo": "03", "abril": "04", "mayo": "05", "junio": "06", "julio": "07", "agosto": "08", "septiembre": "09", "setiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"]
+            let month = months[monthWord] ?? monthWord
             
             let formatter = DateFormatter()
-            formatter.dateFormat = "dd MMMM, yyyy HH:mm"
-            formatter.locale = Locale(identifier: "es_PE")
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            
+            // Si la hora tiene segundos
+            if time.count > 5 {
+                formatter.dateFormat = "dd MM yyyy HH:mm:ss"
+            } else {
+                formatter.dateFormat = "dd MM yyyy HH:mm"
+            }
+            
+            let dateStr = "\(day) \(month) \(year) \(time)"
             if let parsed = formatter.date(from: dateStr) {
                 expenseDate = parsed
             }
@@ -231,10 +262,16 @@ struct BBVAParser: BankEmailParser {
                 dateStr = regexSpace.stringByReplacingMatches(in: dateStr, options: [], range: NSRange(location: 0, length: dateStr.utf16.count), withTemplate: " ")
             }
             
+            // Mismo motivo que en parseBBVATransfer: nombre de mes a número a
+            // mano, sin depender del MMMM+locale de DateFormatter.
+            dateStr = dateStr.lowercased()
+            let months = ["enero": "01", "febrero": "02", "marzo": "03", "abril": "04", "mayo": "05", "junio": "06", "julio": "07", "agosto": "08", "septiembre": "09", "setiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"]
+            for (name, num) in months { dateStr = dateStr.replacingOccurrences(of: name, with: num) }
+            
             let formatter = DateFormatter()
-            formatter.dateFormat = "dd MMMM yyyy HH:mm"
-            formatter.locale = Locale(identifier: "es_PE")
-            if let parsedDate = formatter.date(from: dateStr.lowercased()) {
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "dd MM yyyy HH:mm"
+            if let parsedDate = formatter.date(from: dateStr) {
                 expenseDate = parsedDate
             }
         }

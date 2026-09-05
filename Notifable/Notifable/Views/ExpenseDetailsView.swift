@@ -72,6 +72,10 @@ struct ExpenseDetailsView: View {
                         MerchantRules.apply(newCategory, to: expense.merchant, in: allExpenses)
                     } else {
                         expense.category = newCategory
+                        // Sin regla detrás, esto sólo vive aquí: si no se anota,
+                        // la próxima relectura del correo lo devuelve a su
+                        // categoría original y el cambio se pierde.
+                        ExpenseEditStore.record(expense, category: newCategory)
                     }
                     try? modelContext.save()
                 }
@@ -152,7 +156,7 @@ struct ExpenseDetailsView: View {
 
     private var actionRow: some View {
         HStack(spacing: 12) {
-            actionButton(title: expense.isDebt ? "Saldada" : "Es deuda",
+            actionButton(title: expense.isDebt ? "Saldada" : "Por cobrar",
                          icon: expense.isDebt ? "checkmark.circle" : "exclamationmark.circle",
                          tint: palette.warning) {
                 toggleDebt()
@@ -198,7 +202,7 @@ struct ExpenseDetailsView: View {
     @ViewBuilder
     private var foreignPaymentsWarning: some View {
         if Accounting.hasForeignPayments(expense) {
-            Label("Hay abonos en otra moneda. El saldo no se puede calcular con ellos, así que quedan fuera de esta cuenta.",
+            Label("Hay devoluciones en otra moneda. El saldo no se puede calcular con ellas, así que quedan fuera de esta cuenta.",
                   systemImage: "exclamationmark.triangle.fill")
                 .font(.footnote)
                 .foregroundStyle(palette.warning)
@@ -276,6 +280,7 @@ struct ExpenseDetailsView: View {
             get: { expense.isSubscription },
             set: { newValue in
                 expense.isSubscription = newValue
+                ExpenseEditStore.record(expense, isSubscription: newValue)
                 try? modelContext.save()
             }
         )
@@ -316,12 +321,12 @@ struct ExpenseDetailsView: View {
         let ratio = min(Money.ratio(paid, to: expense.amount) ?? 0, 1.0)
 
         VStack(alignment: .leading, spacing: 12) {
-            Text("Estado de la deuda")
+            Text("Estado del cobro")
                 .font(.headline)
                 .foregroundStyle(palette.label)
 
             HStack {
-                Text(Money.format(paid, currency: expense.currency) + " pagado")
+                Text(Money.format(paid, currency: expense.currency) + " devuelto")
                     .font(.subheadline)
                     .foregroundStyle(palette.positive)
                 Spacer()
@@ -433,6 +438,7 @@ struct ExpenseDetailsView: View {
     private func toggleDebt() {
         withAnimation {
             expense.isDebt.toggle()
+            ExpenseEditStore.record(expense, isDebt: expense.isDebt)
             try? modelContext.save()
 
             let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.isDebt == true })
@@ -518,6 +524,10 @@ struct EditExpenseSheet: View {
         }
         expense.merchant = merchant.trimmingCharacters(in: .whitespaces)
         expense.date = date
+        ExpenseEditStore.record(expense,
+                                merchant: expense.merchant,
+                                amount: expense.amount,
+                                occurredAt: expense.date)
         try? modelContext.save()
         dismiss()
     }

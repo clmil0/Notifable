@@ -12,7 +12,10 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
     private let redirectURI = "com.googleusercontent.apps.565627106864-cd3nnm389bdf9cfdqo015d7tbm052bdr:/oauth2callback"
     private let authURL = "https://accounts.google.com/o/oauth2/v2/auth"
     private let tokenURL = "https://oauth2.googleapis.com/token"
-    private let scope = "https://www.googleapis.com/auth/gmail.readonly"
+    /// `openid email` va además de Gmail: con ellos Google devuelve un
+    /// `id_token` que `BackupAccount` canjea en Supabase, así el respaldo se
+    /// amarra a la cuenta del usuario sin pedirle un segundo login.
+    private let scope = "openid%20email%20https://www.googleapis.com/auth/gmail.readonly"
     
     private var authSession: ASWebAuthenticationSession?
     
@@ -58,6 +61,8 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
     func signOut() {
         UserDefaults.standard.removeObject(forKey: "GmailAccessToken")
         UserDefaults.standard.removeObject(forKey: "GmailRefreshToken")
+        UserDefaults.standard.removeObject(forKey: Self.idTokenKey)
+        UserDefaults.standard.removeObject(forKey: Self.accountEmailKey)
         DispatchQueue.main.async {
             self.isAuthenticated = false
         }
@@ -83,6 +88,7 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
                     if let refreshToken = json["refresh_token"] as? String {
                         self.saveRefreshToken(refreshToken)
                     }
+                    self.saveIdentity(from: json)
                     DispatchQueue.main.async {
                         self.checkAuthStatus()
                     }
@@ -115,6 +121,7 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
                 if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                    let newAccessToken = json["access_token"] as? String {
                     self.saveAccessToken(newAccessToken)
+                    self.saveIdentity(from: json)
                     completion(newAccessToken)
                 } else {
                     completion(nil)
@@ -125,6 +132,61 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
         }.resume()
     }
     
+    // MARK: - Identidad (para la sincronización con cuenta)
+
+    static let idTokenKey = "GmailIDToken"
+    static let accountEmailKey = "GmailAccountEmail"
+
+    /// Correo de la cuenta de Google conectada, leído del `id_token`.
+    var accountEmail: String? { UserDefaults.standard.string(forKey: Self.accountEmailKey) }
+
+    /// `false` para quien conectó Gmail antes de que se pidiera `openid email`:
+    /// su `refresh_token` no da `id_token`, así que tiene que volver a conectar
+    /// el correo (o quedarse con el código de respaldo).
+    var hasIdentityToken: Bool {
+        (UserDefaults.standard.string(forKey: Self.idTokenKey)?.isEmpty == false)
+    }
+
+    /// `id_token` con vida por delante. Supabase lo valida contra `exp`, así que
+    /// uno guardado hace horas no sirve: si le queda poco se refresca primero.
+    func freshIdentityToken() async -> String? {
+        let stored = UserDefaults.standard.string(forKey: Self.idTokenKey)
+        if let stored, Self.expiry(of: stored)?.timeIntervalSinceNow ?? 0 > 120 { return stored }
+        guard getRefreshToken() != nil else { return stored }
+        return await withCheckedContinuation { continuation in
+            self.refreshAccessToken { _ in
+                continuation.resume(returning: UserDefaults.standard.string(forKey: Self.idTokenKey))
+            }
+        }
+    }
+
+    private func saveIdentity(from json: [String: Any]) {
+        guard let idToken = json["id_token"] as? String else { return }
+        UserDefaults.standard.set(idToken, forKey: Self.idTokenKey)
+        if let email = Self.claim("email", of: idToken) as? String {
+            UserDefaults.standard.set(email, forKey: Self.accountEmailKey)
+        }
+    }
+
+    private static func expiry(of jwt: String) -> Date? {
+        guard let exp = claim("exp", of: jwt) as? Double else { return nil }
+        return Date(timeIntervalSince1970: exp)
+    }
+
+    /// Lee un campo del cuerpo del JWT. No valida la firma —no hace falta: el
+    /// token viene de Google por HTTPS y quien lo valida de verdad es Supabase.
+    private static func claim(_ name: String, of jwt: String) -> Any? {
+        let parts = jwt.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var base64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 { base64 += "=" }
+        guard let data = Data(base64Encoded: base64),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return json[name]
+    }
+
     // For simplicity, using UserDefaults, but Keychain is recommended for production
     private func saveAccessToken(_ token: String) {
         UserDefaults.standard.set(token, forKey: "GmailAccessToken")

@@ -159,9 +159,7 @@ struct DashboardView: View {
                         
                         // Tarjeta principal: el monto leído contra el
                         // presupuesto, con la marca de ritmo.
-                        BudgetHeroCard(period: period, totals: totals) {
-                            showBudgetSheet = true
-                        }
+                        BudgetHeroCard(period: period, totals: totals)
                         
                         // Banner de recurrentes pendientes. Va antes que el de
                         // Bandeja porque afecta a las cifras del mes.
@@ -578,15 +576,39 @@ struct DashboardView: View {
 
     /// Lo gastado es `amount`. Lo que aún debes es otra cifra y se muestra
     /// aparte, en vez de restarse del gasto (ACCOUNTING.md §2).
+    /// En un gasto normal el número es lo que gastaste. En uno marcado "por
+    /// cobrar" es **lo que falta que te devuelvan**: si prestaste 100 y ya te
+    /// devolvieron 50, la fila dice 50, no 100. El original sigue visible
+    /// debajo para no perder de dónde salió.
+    ///
+    /// (El total del mes sigue contando el gasto completo: lo que cambia aquí
+    /// es qué cifra encabeza la fila, no la contabilidad.)
+    @ViewBuilder
     private func expenseAmount(for expense: Expense) -> some View {
+        let isReceivable = expense.isDebt
+        let outstanding = Accounting.outstanding(of: expense)
+        let paid = Accounting.paid(of: expense)
+        let settled = isReceivable && Money.cents(outstanding) == 0
+
         VStack(alignment: .trailing, spacing: 2) {
-            Text("- " + Money.format(expense.amount, currency: expense.currency))
+            Text("- " + Money.format(isReceivable ? outstanding : expense.amount,
+                                     currency: expense.currency))
                 .font(.title3)
                 .fontWeight(.bold)
-                .foregroundStyle(palette.label)
+                .foregroundStyle(settled ? palette.secondaryLabel : palette.label)
+                .strikethrough(settled, color: palette.secondaryLabel)
 
-            if expense.isDebt {
-                Text("debes " + Money.format(Accounting.outstanding(of: expense), currency: expense.currency))
+            if settled {
+                Text("Saldada")
+                    .font(.caption2)
+                    .foregroundStyle(palette.positive)
+            } else if isReceivable, Money.cents(paid) > 0 {
+                Text("de " + Money.format(expense.amount, currency: expense.currency)
+                     + " · te devolvieron " + Money.format(paid, currency: expense.currency))
+                    .font(.caption2)
+                    .foregroundStyle(palette.secondaryLabel)
+            } else if isReceivable {
+                Text("Por cobrar")
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
@@ -635,7 +657,7 @@ struct DashboardView: View {
                     let isDebtPayment = income.isDebtPayment
                     let (baseColor, _) = incomeIconAndColor(for: income)
                     let tagColor = isDebtPayment ? Color.orange : baseColor
-                    let tagText = isDebtPayment ? "Deuda" : income.source
+                    let tagText = isDebtPayment ? "Cobro" : income.source
                     
                     Text(tagText)
                         .font(.caption2)
@@ -675,26 +697,26 @@ struct DashboardView: View {
         if expense.merchant.hasPrefix("PLIN - ") { return "plin_icon" }
         if expense.merchant.hasPrefix("YAPE - ") { return "yape_icon" }
         if expense.merchant.hasPrefix("BBVA - ") { return "bbva_icon" }
-        
-        switch expense.category {
-        case "Comida": return "fork.knife"
-        case "Transporte": return "car.fill"
-        case "Entretenimiento": return "play.tv.fill"
-        default: return "bag.fill"
-        }
+        // Cubre las tres formas en que puede llegar: el recibo de Apple ya
+        // vinculado ("Apple: <app>"), sin vincular todavía ("Apple: <app>",
+        // ver handleExpenseInsertion) y el cargo suelto del banco antes de
+        // que se una ("APPLE.COM/BILL" y similares).
+        if expense.merchant.lowercased().contains("apple") { return "applelogo" }
+
+        // Antes había aquí un `switch` con cuatro categorías fijas, así que
+        // cambiar un gasto a una categoría propia —o cambiarle el icono en el
+        // catálogo— no se reflejaba en esta lista aunque sí en el resto de la
+        // app. `CategoryStyle` es el único que sabe de `CategoryCatalog`.
+        return CategoryStyle.icon(for: expense.category)
     }
     
     private func iconColor(for expense: Expense) -> Color {
         if expense.merchant.hasPrefix("PLIN - ") { return Color(red: 0, green: 0.7, blue: 0.9) } // Celeste Plin
         if expense.merchant.hasPrefix("YAPE - ") { return Color(red: 0.5, green: 0, blue: 0.5) } // Magenta/Purple
         if expense.merchant.hasPrefix("BBVA - ") { return Color(red: 0.0, green: 0.27, blue: 0.51) } // Azul BBVA
-        
-        switch expense.category {
-        case "Comida": return .orange
-        case "Transporte": return .blue
-        case "Entretenimiento": return themeColor
-        default: return .green
-        }
+        if expense.merchant.lowercased().contains("apple") { return colorScheme == .dark ? .white : .black }
+
+        return CategoryStyle.color(for: expense.category, accent: themeColor)
     }
     
     private func incomeIconAndColor(for income: Income) -> (Color, String) {

@@ -12,19 +12,14 @@ struct DataBackupView: View {
 
     @Query private var expenses: [Expense]
     @StateObject private var gmailSync = GmailSyncService.shared
-
-    @State private var pendingAction: DestructiveAction?
-    @State private var showDateRangeSheet = false
-    @State private var startDate = Calendar.current.date(byAdding: .month, value: -1, to: Date()) ?? Date()
-    @State private var endDate = Date()
+    @State private var syncManager = ConfigBackupManager.shared
+    @State private var summary = BackupSummary()
+    @State private var showBackupDetail = false
+    @State private var showEnableSyncHint = false
+    @State private var isBackingUp = false
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
-
-    enum DestructiveAction: String, Identifiable {
-        case rules, expenses, cache
-        var id: String { rawValue }
-    }
 
     private var ruleCount: Int { MerchantRules.all().count }
     private var cachedEmailCount: Int {
@@ -36,7 +31,8 @@ struct DataBackupView: View {
             VStack(spacing: 22) {
                 backupCard
                 inventory
-                dangerZone
+                configBackupRow
+                deleteDataRow
                 debugSection
             }
             .padding(.vertical, 16)
@@ -44,21 +40,6 @@ struct DataBackupView: View {
         .background(palette.background)
         .navigationTitle("Datos y respaldo")
         .navigationBarTitleDisplayMode(.inline)
-        .confirmationDialog(dialogTitle,
-                            isPresented: dialogBinding,
-                            titleVisibility: .visible) {
-            if let pendingAction {
-                Button(confirmLabel(pendingAction), role: pendingAction == .cache ? .none : .destructive) {
-                    perform(pendingAction)
-                }
-            }
-            Button("Cancelar", role: .cancel) { pendingAction = nil }
-        } message: {
-            Text(pendingAction.map(consequence) ?? "")
-        }
-        .sheet(isPresented: $showDateRangeSheet) {
-            dateRangeSheet
-        }
         .sheet(isPresented: $gmailSync.showDiagnostic) {
             NavigationStack {
                 ScrollView {
@@ -78,8 +59,12 @@ struct DataBackupView: View {
         }
     }
 
-    // MARK: - Respaldo
+    // MARK: - Qué se guarda
 
+    /// Antes decía "412 gastos en este dispositivo" junto a un botón que los
+    /// subía a la nube. Los gastos ya no se suben —se rearman releyendo el
+    /// correo— así que ese número prometía justo lo contrario de lo que pasa.
+    /// Ahora cuenta lo que sí viaja: ajustes, deudas y lo anotado a mano.
     private var backupCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
@@ -91,23 +76,74 @@ struct DataBackupView: View {
                         .foregroundStyle(accent.onSurface(scheme))
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Respaldo en la nube")
+                    Text("Lo que se guarda")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(palette.label)
-                    Text("\(expenses.count) gastos en este dispositivo")
+                    Text(summaryLine)
                         .font(.caption)
                         .foregroundStyle(palette.secondaryLabel)
                 }
                 Spacer(minLength: 0)
+                Button {
+                    withAnimation(.snappy) { showBackupDetail.toggle() }
+                } label: {
+                    Image(systemName: showBackupDetail ? "info.circle.fill" : "info.circle")
+                        .font(.system(size: 17))
+                        .foregroundStyle(showBackupDetail ? accent.onSurface(scheme) : palette.tertiaryLabel)
+                }
+                .buttonStyle(.plain)
+            }
+
+            if showBackupDetail {
+                VStack(spacing: 0) {
+                    ForEach(summary.rows) { row in
+                        HStack(spacing: 10) {
+                            Image(systemName: row.icon)
+                                .font(.caption)
+                                .frame(width: 18)
+                                .foregroundStyle(accent.onSurface(scheme))
+                            Text(row.title)
+                                .font(.caption)
+                                .foregroundStyle(palette.secondaryLabel)
+                            Spacer(minLength: 8)
+                            Text("\(row.count)")
+                                .font(.caption.weight(.semibold).monospacedDigit())
+                                .foregroundStyle(palette.label)
+                        }
+                        .frame(height: 30)
+                    }
+                    Text("Tus gastos e ingresos del correo no se suben: se vuelven a leer solos.")
+                        .font(.caption2)
+                        .foregroundStyle(palette.tertiaryLabel)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 6)
+                }
+                .transition(.opacity)
             }
 
             HStack(spacing: 10) {
-                secondaryButton("Respaldar ahora", icon: "arrow.triangle.2.circlepath") {
-                    Task { await SyncManager.shared.syncLocalExpensesToCloud(localExpenses: expenses) }
+                secondaryButton(isBackingUp ? "Guardando…" : "Respaldar ahora",
+                                icon: "arrow.triangle.2.circlepath") {
+                    guard syncManager.isEnabled else {
+                        showEnableSyncHint = true
+                        return
+                    }
+                    Task {
+                        isBackingUp = true
+                        _ = await syncManager.syncNow()
+                        summary = syncManager.localSummary()
+                        isBackingUp = false
+                    }
                 }
                 secondaryButton("Exportar CSV", icon: "square.and.arrow.up") {
                     // TODO: Implement CSV Export
                 }
+            }
+
+            if showEnableSyncHint {
+                Text("Primero activa la sincronización aquí abajo: sin ella no hay dónde guardarlo.")
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
             }
         }
         .padding(16)
@@ -118,6 +154,16 @@ struct DataBackupView: View {
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
         .padding(.horizontal, 16)
+        .task { summary = syncManager.localSummary() }
+        .onChange(of: syncManager.lastSyncedAt) { _, _ in
+            summary = syncManager.localSummary()
+        }
+    }
+
+    private var summaryLine: String {
+        let total = summary.total
+        guard total > 0 else { return "Todavía no has configurado nada que guardar." }
+        return "\(total) cosas: ajustes, cobros y lo anotado a mano"
     }
 
     private func secondaryButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
@@ -176,134 +222,121 @@ struct DataBackupView: View {
         .frame(height: 46)
     }
 
-    // MARK: - Acciones irreversibles
+    // MARK: - Sincronización
 
-    private var dangerZone: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("ACCIONES IRREVERSIBLES")
-                .font(.caption)
-                .foregroundStyle(palette.negative)
-                .padding(.horizontal, 20)
+    /// El estado vive en el subtítulo de la fila: entrar a la pantalla sólo
+    /// para comprobar que todo va bien es un viaje que no debería hacer falta.
+    private var syncIcon: String {
+        if syncManager.lastErrorMessage != nil { return "exclamationmark.icloud.fill" }
+        if syncManager.isSyncing { return "arrow.triangle.2.circlepath.icloud" }
+        if syncManager.isEnabled { return "checkmark.icloud.fill" }
+        return syncManager.isPausedAfterWipe ? "pause.circle.fill" : "icloud.slash"
+    }
 
-            VStack(spacing: 0) {
-                dangerRow(.rules, title: "Borrar reglas de categoría",
-                          icon: "tag.slash.fill", tint: palette.negative)
-                Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 16)
-                dangerRow(.expenses, title: "Borrar todos los gastos",
-                          icon: "trash.fill", tint: palette.negative)
-                Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 16)
-                
-                customDangerRow(title: "Borrar rango de fechas", subtitle: "Elimina los gastos de un periodo para volver a descargarlos.", icon: "calendar.badge.minus", tint: palette.negative) {
-                    showDateRangeSheet = true
+    private var syncTint: Color {
+        if syncManager.lastErrorMessage != nil { return palette.negative }
+        if !syncManager.isEnabled { return palette.secondaryLabel }
+        return accent.onSurface(scheme)
+    }
+
+    private var syncSubtitle: String {
+        if let error = syncManager.lastErrorMessage { return error }
+        if syncManager.isSyncing { return "Sincronizando…" }
+        if syncManager.isEnabled {
+            guard let last = syncManager.lastSyncedAt else { return "Activada" }
+            let ago = Self.relative.localizedString(for: last, relativeTo: Date())
+            return "Activada · \(ago)"
+        }
+        return syncManager.isPausedAfterWipe ? "Pausada" : "Desactivada"
+    }
+
+    private static let relative: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f
+    }()
+
+    // MARK: - Respaldo de configuración
+
+    /// Reglas, categorías (con sus renombrados), presupuestos, bancos
+    /// activos, notificaciones, apariencia, atajos y gastos recurrentes —
+    /// todo lo que sobra si formateas el celular y no lo puedes recuperar
+    /// releyendo el correo.
+    private var configBackupRow: some View {
+        NavigationLink {
+            ConfigBackupView()
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(syncTint.opacity(0.18))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: syncIcon)
+                        .foregroundStyle(syncTint)
                 }
-                Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 16)
-                
-                // Naranja y no rojo: vaciar la caché no borra datos.
-                dangerRow(.cache, title: "Vaciar caché de correos",
-                          icon: "arrow.triangle.2.circlepath", tint: palette.warning)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sincronización")
+                        .foregroundStyle(palette.label)
+                    Text(syncSubtitle)
+                        .font(.caption)
+                        .foregroundStyle(syncManager.lastErrorMessage == nil ? palette.secondaryLabel : palette.negative)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(palette.tertiaryLabel)
             }
+            .padding(16)
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(palette.hairline, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+    }
+
+    // MARK: - Borrar datos
+
+    /// Ya no hay una lista plana de acciones irreversibles aquí: la elección
+    /// por intención (qué quieres conseguir) vive en DeleteDataView.
+    private var deleteDataRow: some View {
+        NavigationLink {
+            DeleteDataView()
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(palette.negative.opacity(0.14))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "trash.fill")
+                        .foregroundStyle(palette.negative)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Borrar datos")
+                        .foregroundStyle(palette.negative)
+                    Text("Elige qué borrar por grupos.")
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(palette.tertiaryLabel)
+            }
+            .padding(16)
             .background(palette.surface)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .stroke(palette.negative.opacity(0.35), lineWidth: 1)
             )
-            .padding(.horizontal, 16)
-        }
-    }
-
-    private func dangerRow(_ action: DestructiveAction, title: String, icon: String, tint: Color) -> some View {
-        Button { pendingAction = action } label: {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .foregroundStyle(tint)
-                    .frame(width: 24)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .foregroundStyle(tint)
-                    // La consecuencia con la cifra real, antes de tocar nada.
-                    Text(consequence(action))
-                        .font(.caption)
-                        .foregroundStyle(palette.secondaryLabel)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .multilineTextAlignment(.leading)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    private func customDangerRow(title: String, subtitle: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .foregroundStyle(tint)
-                    .frame(width: 24)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .foregroundStyle(tint)
-                    Text(subtitle)
-                        .font(.caption)
-                        .foregroundStyle(palette.secondaryLabel)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .multilineTextAlignment(.leading)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func consequence(_ action: DestructiveAction) -> String {
-        switch action {
-        case .rules:
-            return "Los \(expenses.count) gastos pasan a \(Accounting.unclassified)."
-        case .expenses:
-            return "Se pueden volver a leer del correo. Las reglas se conservan."
-        case .cache:
-            return "La próxima lectura revisará todo de nuevo. No borra gastos."
-        }
-    }
-
-    private func confirmLabel(_ action: DestructiveAction) -> String {
-        switch action {
-        case .rules: return "Borrar reglas"
-        case .expenses: return "Borrar gastos"
-        case .cache: return "Vaciar caché"
-        }
-    }
-
-    private var dialogTitle: String {
-        switch pendingAction {
-        case .rules: return "¿Borrar las reglas de categoría?"
-        case .expenses: return "¿Borrar todos los gastos?"
-        case .cache: return "¿Vaciar la caché de correos?"
-        case .none: return ""
-        }
-    }
-
-    private var dialogBinding: Binding<Bool> {
-        Binding(get: { pendingAction != nil }, set: { if !$0 { pendingAction = nil } })
-    }
-
-    private func perform(_ action: DestructiveAction) {
-        switch action {
-        case .rules: deleteClassifications()
-        case .expenses: deleteExpenses()
-        case .cache: gmailSync.resetSyncState()
-        }
-        pendingAction = nil
+        .padding(.horizontal, 16)
     }
 
     // MARK: - Debug
@@ -318,7 +351,11 @@ struct DataBackupView: View {
                 .padding(.horizontal, 20)
 
             VStack(spacing: 0) {
-                debugRow("Diagnóstico BBVA", icon: "stethoscope") { gmailSync.diagnosticBBVA() }
+                debugRow("Diagnóstico BBVA Pago", icon: "stethoscope") { gmailSync.diagnosticBBVA() }
+                Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 16)
+                debugRow("Diagnóstico BBVA Transf", icon: "arrow.left.arrow.right") { gmailSync.diagnosticBBVATransfer() }
+                Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 16)
+                debugRow("Diagnóstico Apple", icon: "apple.logo") { gmailSync.diagnosticApple() }
                 Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 16)
                 debugRow("Añadir gasto de prueba", icon: "dice", action: addRandomExpense)
             }
@@ -369,95 +406,4 @@ struct DataBackupView: View {
         try? modelContext.save()
     }
     #endif
-
-    // MARK: - Lógica
-
-    private func deleteClassifications() {
-        UserDefaults.standard.removeObject(forKey: MerchantRules.key)
-        do {
-            let all = try modelContext.fetch(FetchDescriptor<Expense>())
-            for expense in all {
-                // Una sola fuente de verdad para esta cadena.
-                expense.category = Accounting.unclassified
-            }
-            try modelContext.save()
-        } catch {
-            print("Error resetting classifications: \(error)")
-        }
-    }
-
-    private func deleteExpenses() {
-        gmailSync.resetSyncState()
-        do {
-            try modelContext.delete(model: Expense.self)
-            try modelContext.save()
-        } catch {
-            print("Error al borrar los datos: \(error)")
-        }
-    }
-
-    private func deleteExpenses(from startDate: Date, to endDate: Date) {
-        let startOfDay = Calendar.current.startOfDay(for: startDate)
-        let endOfDay = Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: endDate) ?? endDate
-        
-        do {
-            let allExpenses = try modelContext.fetch(FetchDescriptor<Expense>())
-            let expensesToDelete = allExpenses.filter { $0.date >= startOfDay && $0.date <= endOfDay }
-            
-            var emailIDsToRemove = Set<String>()
-            
-            for expense in expensesToDelete {
-                if let emailID = expense.emailID {
-                    emailIDsToRemove.insert(emailID)
-                }
-                modelContext.delete(expense)
-            }
-            
-            try modelContext.save()
-            
-            if !emailIDsToRemove.isEmpty {
-                var processedIDs = UserDefaults.standard.stringArray(forKey: "processedEmailIDs") ?? []
-                processedIDs.removeAll { emailIDsToRemove.contains($0) }
-                UserDefaults.standard.set(processedIDs, forKey: "processedEmailIDs")
-                
-                var pendingRecoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
-                pendingRecoveryIDs.removeAll { emailIDsToRemove.contains($0) }
-                UserDefaults.standard.set(pendingRecoveryIDs, forKey: "pendingRecoveryIDs")
-            }
-            
-        } catch {
-            print("Error al borrar los datos por rango: \(error)")
-        }
-    }
-
-    private var dateRangeSheet: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    DatePicker("Desde", selection: $startDate, displayedComponents: .date)
-                    DatePicker("Hasta", selection: $endDate, displayedComponents: .date)
-                } header: {
-                    Text("Rango de tiempo")
-                } footer: {
-                    Text("Se eliminarán los gastos dentro de este rango y sus correos asociados podrán ser descargados nuevamente en la próxima sincronización.")
-                }
-                
-                Button(role: .destructive) {
-                    deleteExpenses(from: startDate, to: endDate)
-                    showDateRangeSheet = false
-                } label: {
-                    Text("Borrar gastos del rango")
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-            }
-            .navigationTitle("Borrar por fechas")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancelar") { showDateRangeSheet = false }
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
 }

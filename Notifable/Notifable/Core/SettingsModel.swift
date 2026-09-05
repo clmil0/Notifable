@@ -199,7 +199,7 @@ struct SettingsEntry: Identifiable, Hashable {
                       keywords: ["tema", "oscuro", "claro", "color", "acento", "texto", "tamaño"],
                       section: "La app", destination: "appearance"),
         SettingsEntry(id: "notifications", title: "Notificaciones",
-                      keywords: ["aviso", "recordatorio", "deuda", "presupuesto"],
+                      keywords: ["aviso", "recordatorio", "deuda", "cobro", "presupuesto"],
                       section: "La app", destination: "notifications"),
         SettingsEntry(id: "data", title: "Datos y respaldo",
                       keywords: ["csv", "exportar", "backup", "nube", "borrar", "caché"],
