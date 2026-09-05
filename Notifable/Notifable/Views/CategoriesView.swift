@@ -109,6 +109,24 @@ struct CategoriesView: View {
     /// convertirlo en un obstáculo; se dice después, junto al "Deshacer".
     @State private var limitNote: String?
     @State private var editingCategory: CategoryWrapper?
+    
+    // Caches to prevent O(N) operations during view re-evaluation on every selection tap
+    @State private var baseFrequentCategories: [String] = []
+    
+    @State private var cachedTotals: PeriodTotals?
+    @State private var cachedFilteredExpenses: [Expense] = []
+    @State private var cachedMerchantTotalsByName: [String: PeriodTotals.MerchantTotal] = [:]
+    @State private var cachedInboxGroups: [InboxGroup] = []
+    @State private var cachedPendingGroups: [InboxGroup] = []
+    @State private var cachedPeriodPendingMerchantNames: Set<String> = []
+
+    /// Índices de Pendientes para que un toque en la bolita no cueste un
+    /// recorrido completo de `expenses`: los ids sin clasificar por comercio y
+    /// el importe ya convertido a céntimos de cada uno. Sin esto, cada
+    /// selección hacía dos barridos de toda la base (uno para juntar ids, otro
+    /// para sumar), y con miles de gastos la marca tardaba en pintarse.
+    @State private var cachedPendingIDsByMerchant: [String: [UUID]] = [:]
+    @State private var cachedPendingCentsByID: [UUID: Int] = [:]
 
     @StateObject private var budgets = CategoryBudgetStore.shared
     @StateObject private var catalog = CategoryCatalog.shared
@@ -117,29 +135,22 @@ struct CategoriesView: View {
     @Namespace private var animation
 
     // MARK: - Totales
-    //
-    // Todo viene de `Accounting.totals`: el mismo criterio y las mismas cifras
-    // que Resumen. Antes esta vista sumaba `amount` mientras Resumen sumaba
-    // `unpaidAmount`, y cada gasto en USD se convertía por separado antes de
-    // sumar (ACCOUNTING.md §2 y §10).
 
     var totals: PeriodTotals {
-        Accounting.totals(expenses: expenses,
-                          incomes: [],
-                          period: period,
-                          usdToPen: exchangeRateService.usdToPenRate)
+        cachedTotals ?? PeriodTotals.empty
     }
 
-    func dailySpent(for period: Period) -> [PeriodTotals.DayTotal] {
-        Accounting.totals(expenses: expenses,
-                          incomes: [],
-                          period: period,
-                          usdToPen: exchangeRateService.usdToPenRate).dailySpent
+    func dailySpent(for targetPeriod: Period) -> [PeriodTotals.DayTotal] {
+        if targetPeriod == self.period, let t = cachedTotals {
+            return t.dailySpent
+        }
+        return Accounting.totals(expenses: expenses,
+                                 incomes: [],
+                                 period: targetPeriod,
+                                 usdToPen: exchangeRateService.usdToPenRate).dailySpent
     }
 
-    var filteredExpenses: [Expense] {
-        expenses.filter { period.contains($0.date) }
-    }
+    var filteredExpenses: [Expense] { cachedFilteredExpenses }
 
     private var snapshots: [ExpenseSnapshot] { expenses.map(\.accountingSnapshot) }
 
@@ -154,52 +165,11 @@ struct CategoriesView: View {
 
     // MARK: - Pendientes (bandeja)
 
-    /// Comercios sin clasificar del periodo filtrado.
-    var inboxGroups: [InboxGroup] {
-        let totalByMerchant = merchantTotalsByName
-        var grouped: [String: [Expense]] = [:]
-        for expense in filteredExpenses where expense.category == Accounting.unclassified {
-            grouped[expense.merchant, default: []].append(expense)
-        }
+    var inboxGroups: [InboxGroup] { cachedInboxGroups }
 
-        var result: [InboxGroup] = []
-        result.reserveCapacity(grouped.count)
-        for (merchant, items) in grouped {
-            result.append(InboxGroup(merchant: merchant,
-                                     expenses: items.sorted { $0.date > $1.date },
-                                     total: totalByMerchant[merchant]?.total ?? 0))
-        }
-        return result.sorted { lhs, rhs in
-            if lhs.expenses.count == rhs.expenses.count { return lhs.merchant < rhs.merchant }
-            return lhs.expenses.count > rhs.expenses.count
-        }
-    }
+    var pendingGroups: [InboxGroup] { cachedPendingGroups }
 
-    /// Comercios pendientes de **todo** el historial, para el badge, el modo
-    /// una-por-una, y la franja de alcance.
-    var pendingGroups: [InboxGroup] {
-        let pending = expenses.filter { $0.category == Accounting.unclassified }
-        var grouped: [String: [Expense]] = [:]
-        for expense in pending { grouped[expense.merchant, default: []].append(expense) }
-
-        let rate = exchangeRateService.usdToPenRate
-        return grouped
-            .map { merchant, items in
-                let cents = items.reduce(0) { $0 + Accounting.penCents($1.accountingSnapshot, fallbackRate: rate) }
-                return InboxGroup(merchant: merchant,
-                                  expenses: items.sorted { $0.date > $1.date },
-                                  total: Money.value(cents))
-            }
-            .sorted {
-                $0.expenses.count == $1.expenses.count
-                    ? $0.merchant < $1.merchant
-                    : $0.expenses.count > $1.expenses.count
-            }
-    }
-
-    /// Nombres de los comercios pendientes **dentro** del periodo — para saber
-    /// si un comercio de `pendingGroups` queda fuera cuando el alcance es "todo".
-    private var periodPendingMerchantNames: Set<String> { Set(inboxGroups.map(\.merchant)) }
+    private var periodPendingMerchantNames: Set<String> { cachedPeriodPendingMerchantNames }
 
     /// Lo que la lista muestra: el periodo filtrado, o todo el historial si el
     /// usuario tocó "Ver todos". Cambiar esto **no** toca el `Period` visible
@@ -266,31 +236,74 @@ struct CategoriesView: View {
     }
 
     func suggestion(for group: InboxGroup) -> CategorySuggestion? {
-        SuggestionEngine.suggest(for: group.merchant,
-                                 rules: MerchantRules.all(),
-                                 history: expenses)
+        SuggestionEngine.suggest(for: group.merchant, rules: MerchantRules.all(), history: expenses)
     }
 
     func frequentCategories(excluding suggestion: CategorySuggestion?) -> [String] {
         SuggestionEngine.frequentCategories(history: expenses, excluding: suggestion?.category)
     }
 
-    /// Comercios cuyo motor propone la misma categoría con confianza alta, y
-    /// **sólo si hay 2 o más**: con uno solo ya está la fila de sugerencia
-    /// normal, no hace falta un bloque aparte.
-    private var suggestionBuckets: [SuggestionBucket] {
-        var byCategory: [String: [InboxGroup]] = [:]
-        for group in visiblePendingGroups {
-            guard let hint = suggestion(for: group), hint.confidence >= 0.7 else { continue }
-            byCategory[hint.category, default: []].append(group)
+    
+    private func updateCaches() {
+        baseFrequentCategories = SuggestionEngine.frequentCategories(history: expenses, excluding: nil)
+        
+        let rate = exchangeRateService.usdToPenRate
+        
+        let newTotals = Accounting.totals(expenses: expenses, incomes: [], period: period, usdToPen: rate)
+        self.cachedTotals = newTotals
+        
+        let newFiltered = expenses.filter { period.contains($0.date) }
+        self.cachedFilteredExpenses = newFiltered
+        
+        var map: [String: PeriodTotals.MerchantTotal] = [:]
+        for item in newTotals.byMerchant { map[item.merchant] = item }
+        self.cachedMerchantTotalsByName = map
+        
+        var groupedIn: [String: [Expense]] = [:]
+        for expense in newFiltered where expense.category == Accounting.unclassified {
+            groupedIn[expense.merchant, default: []].append(expense)
         }
-        return byCategory
-            .filter { $0.value.count >= 2 }
-            .map { SuggestionBucket(category: $0.key, merchants: $0.value) }
-            .sorted { lhs, rhs in
-                lhs.merchants.count == rhs.merchants.count ? lhs.category < rhs.category : lhs.merchants.count > rhs.merchants.count
+        var newInbox: [InboxGroup] = []
+        newInbox.reserveCapacity(groupedIn.count)
+        for (merchant, items) in groupedIn {
+            newInbox.append(InboxGroup(merchant: merchant,
+                                     expenses: items.sorted { $0.date > $1.date },
+                                     total: map[merchant]?.total ?? 0))
+        }
+        self.cachedInboxGroups = newInbox.sorted { lhs, rhs in
+            if lhs.expenses.count == rhs.expenses.count { return lhs.merchant < rhs.merchant }
+            return lhs.expenses.count > rhs.expenses.count
+        }
+        
+        let pending = expenses.filter { $0.category == Accounting.unclassified }
+        var groupedPending: [String: [Expense]] = [:]
+        var idsByMerchant: [String: [UUID]] = [:]
+        var centsByID: [UUID: Int] = [:]
+        for expense in pending {
+            groupedPending[expense.merchant, default: []].append(expense)
+            idsByMerchant[expense.merchant, default: []].append(expense.id)
+            centsByID[expense.id] = Accounting.penCents(expense.accountingSnapshot, fallbackRate: rate)
+        }
+        self.cachedPendingIDsByMerchant = idsByMerchant
+        self.cachedPendingCentsByID = centsByID
+        
+        self.cachedPendingGroups = groupedPending
+            .map { merchant, items in
+                let cents = items.reduce(0) { $0 + Accounting.penCents($1.accountingSnapshot, fallbackRate: rate) }
+                return InboxGroup(merchant: merchant,
+                                  expenses: items.sorted { $0.date > $1.date },
+                                  total: Money.value(cents))
             }
+            .sorted {
+                $0.expenses.count == $1.expenses.count
+                    ? $0.merchant < $1.merchant
+                    : $0.expenses.count > $1.expenses.count
+            }
+            
+        self.cachedPeriodPendingMerchantNames = Set(self.cachedInboxGroups.map(\.merchant))
     }
+
+
 
     // MARK: - Selección de Pendientes
 
@@ -304,7 +317,11 @@ struct CategoriesView: View {
         } else {
             for group in visiblePendingGroups {
                 selectedMerchants.insert(group.merchant)
-                for expense in group.expenses { selectedMovementIDs.remove(expense.id) }
+            }
+            if !selectedMovementIDs.isEmpty {
+                for group in visiblePendingGroups {
+                    for expense in group.expenses { selectedMovementIDs.remove(expense.id) }
+                }
             }
         }
     }
@@ -316,8 +333,10 @@ struct CategoriesView: View {
             selectedMerchants.remove(merchant)
         } else {
             selectedMerchants.insert(merchant)
-            for expense in expenses where expense.merchant == merchant {
-                selectedMovementIDs.remove(expense.id)
+            if !selectedMovementIDs.isEmpty {
+                for id in cachedPendingIDsByMerchant[merchant] ?? [] {
+                    selectedMovementIDs.remove(id)
+                }
             }
         }
     }
@@ -337,8 +356,8 @@ struct CategoriesView: View {
 
     private var selectionExpenseIDs: Set<UUID> {
         var ids = selectedMovementIDs
-        for expense in expenses where selectedMerchants.contains(expense.merchant) && expense.category == Accounting.unclassified {
-            ids.insert(expense.id)
+        for merchant in selectedMerchants {
+            ids.formUnion(cachedPendingIDsByMerchant[merchant] ?? [])
         }
         return ids
     }
@@ -346,10 +365,7 @@ struct CategoriesView: View {
     private var selectionCount: Int { selectedMerchants.count + selectedMovementIDs.count }
 
     private var selectionTotalAmount: Double {
-        let rate = exchangeRateService.usdToPenRate
-        let cents = expenses
-            .filter { selectionExpenseIDs.contains($0.id) }
-            .reduce(0) { $0 + Accounting.penCents($1.accountingSnapshot, fallbackRate: rate) }
+        let cents = selectionExpenseIDs.reduce(0) { $0 + (cachedPendingCentsByID[$1] ?? 0) }
         return Money.value(cents)
     }
 
@@ -364,45 +380,18 @@ struct CategoriesView: View {
         return "Clasificar \(selectionCount) elementos"
     }
 
-    private var selectionCategories: [String] { CategoryStyle.selectable(history: expenses) }
 
-    private var selectionStatuses: [String: CategoryLimitStatus] {
-        let statuses = budgets.statuses(for: selectionCategories,
-                                        expenses: snapshots,
-                                        on: limitReferenceDate,
-                                        usdToPen: exchangeRateService.usdToPenRate)
-        return Dictionary(uniqueKeysWithValues: statuses.map { ($0.category, $0) })
-    }
 
-    /// La etiqueta "sugerida" sólo aparece si **todos** los comercios de la
-    /// selección coinciden en la misma propuesta — una sugerencia a medias
-    /// confundiría más de lo que ayuda.
-    private var selectionSuggestedCategory: String? {
-        guard !selectedMerchants.isEmpty else { return nil }
-        let picks = selectedMerchants.compactMap { merchant -> String? in
-            guard let group = pendingGroups.first(where: { $0.merchant == merchant }) else { return nil }
-            let hint = suggestion(for: group)
-            return (hint?.confidence ?? 0) >= 0.45 ? hint?.category : nil
-        }
-        guard picks.count == selectedMerchants.count, let first = picks.first, Set(picks).count == 1 else { return nil }
-        return first
-    }
-
-    private var merchantTotalsByName: [String: PeriodTotals.MerchantTotal] {
-        var map: [String: PeriodTotals.MerchantTotal] = [:]
-        for item in totals.byMerchant { map[item.merchant] = item }
-        return map
-    }
+    private var merchantTotalsByName: [String: PeriodTotals.MerchantTotal] { cachedMerchantTotalsByName }
 
     @ViewBuilder
     private func merchantCard(for group: InboxGroup) -> some View {
-        let hint = suggestion(for: group)
         InboxMerchantCard(
             group: group,
-            suggestion: hint,
-            frequentCategories: frequentCategories(excluding: hint),
+            suggestion: nil,
+            frequentCategories: baseFrequentCategories,
             isSelected: selectedMerchants.contains(group.merchant),
-            selectedMovementIDs: selectedMovementIDs,
+            selectedMovementIDs: selectedMovementIDs(in: group),
             isExpanded: expandedMerchants.contains(group.merchant),
             isHighlighted: highlightedID == group.merchant,
             isOutOfPeriod: pendingScope == .all && !periodPendingMerchantNames.contains(group.merchant),
@@ -412,7 +401,19 @@ struct CategoriesView: View {
             onPick: { apply($0, to: group.merchant) },
             onOther: { selectedMerchantToCategorize = MerchantWrapper(id: group.merchant) }
         )
+        .equatable()
         .id(group.merchant)
+    }
+
+    /// Sólo los movimientos sueltos de *este* comercio. Pasar el conjunto
+    /// entero hacía que cualquier marca invalidara las 20 tarjetas a la vez.
+    private func selectedMovementIDs(in group: InboxGroup) -> Set<UUID> {
+        guard !selectedMovementIDs.isEmpty else { return [] }
+        var subset: Set<UUID> = []
+        for expense in group.expenses where selectedMovementIDs.contains(expense.id) {
+            subset.insert(expense.id)
+        }
+        return subset
     }
 
     private func toggleMerchantExpand(_ merchant: String) {
@@ -737,7 +738,19 @@ struct CategoriesView: View {
                 withAnimation(.easeInOut(duration: 0.4)) { proxy.scrollTo("TOP", anchor: .top) }
             }
         }
-        .onAppear { refreshLimitNotices() }
+        .onAppear {
+            refreshLimitNotices()
+            updateCaches()
+        }
+        .onChange(of: expenses) { _, _ in
+            updateCaches()
+        }
+        .onChange(of: period) { _, _ in
+            updateCaches()
+        }
+        .onChange(of: exchangeRateService.usdToPenRate) { _, _ in
+            updateCaches()
+        }
         .onChange(of: scrollToTopTrigger) { _, _ in
             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                 selectedTab = .misCategorias
@@ -787,13 +800,13 @@ struct CategoriesView: View {
             .presentationCornerRadius(28)
         }
         .sheet(isPresented: $showAssignSelection) {
-            AssignSelectionSheet(title: selectionSheetTitle,
-                                 subtitle: Money.format(selectionTotalAmount) + " en total",
-                                 categories: selectionCategories,
-                                 statuses: selectionStatuses,
-                                 suggestedCategory: selectionSuggestedCategory) { category in
+            AssignCategorySheet(context: AssignCategoryContext.selection(title: selectionSheetTitle, amount: selectionTotalAmount),
+                                history: expenses) { category, _ in
                 applySelection(category: category)
             }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
         }
         .sheet(item: $editingCategory) { wrapper in
             NavigationStack {
@@ -832,8 +845,8 @@ struct CategoriesView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Text(tab.rawValue)
-                        if tab == .inbox, pendingGroups.count > 0 {
-                            Text("\(pendingGroups.count)")
+                        if tab == .inbox, inboxGroups.count > 0 {
+                            Text("\(inboxGroups.count)")
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(selectedTab == tab ? themeColor : .white)
                                 .padding(.horizontal, 6)
@@ -1120,30 +1133,11 @@ struct CategoriesView: View {
             if pendingGroups.isEmpty {
                 ContentUnavailableView("Pendientes vacío", systemImage: "checkmark.circle.fill", description: Text("Todos tus gastos están clasificados."))
             } else {
-                VStack(spacing: 12) {
+                LazyVStack(spacing: 12) {
                     scopeBanner
-
-                    InboxProgressCard(classified: classifiedMerchantCount(scope: pendingScope),
-                                      total: totalMerchantCount(scope: pendingScope)) {
-                        showClassifyFlow = true
-                    }
 
                     searchField
 
-                    if !suggestionBuckets.isEmpty {
-                        VStack(alignment: .leading, spacing: 9) {
-                            Text("EL MOTOR PROPONE")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(palette.secondaryLabel)
-                                .padding(.horizontal, 16)
-
-                            ForEach(suggestionBuckets) { bucket in
-                                SuggestionBucketCard(bucket: bucket) {
-                                    applyBatch(bucket.category, to: bucket.merchants.map(\.merchant))
-                                }
-                            }
-                        }
-                    }
 
                     selectAllRow
 

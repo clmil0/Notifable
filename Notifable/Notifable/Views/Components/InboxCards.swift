@@ -1,66 +1,5 @@
 import SwiftUI
 
-/// Cuánto llevas clasificado y el atajo para acabar de una vez.
-struct InboxProgressCard: View {
-
-    let classified: Int
-    let total: Int
-    var onClassifyAll: () -> Void
-
-    @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
-
-    private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
-    private var palette: Palette { Palette(scheme) }
-    private var pending: Int { max(0, total - classified) }
-    private var fraction: Double {
-        guard total > 0 else { return 0 }
-        return Double(classified) / Double(total)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("\(classified) de \(total) comercios clasificados")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(palette.label)
-                Spacer()
-                Text("\(Int((fraction * 100).rounded()))%")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(accent.onSurface(scheme))
-            }
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(palette.track)
-                    Capsule()
-                        .fill(accent.color)
-                        .frame(width: geo.size.width * CGFloat(fraction))
-                }
-            }
-            .frame(height: 8)
-            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: fraction)
-
-            if pending > 0 {
-                Button(action: onClassifyAll) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "bolt.fill")
-                        Text(pending == 1 ? "Clasificar el que queda" : "Clasificar los \(pending) restantes")
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(accent.color)
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .surfaceCard(radius: 20)
-        .padding(.horizontal, 16)
-    }
-}
 
 /// Un lote de comercios a los que el motor propone la misma categoría con
 /// confianza alta. Aparece sólo con 2 o más: con uno solo ya está la fila de
@@ -134,7 +73,26 @@ struct SuggestionBucketCard: View {
 /// seleccionar, y un checkbox por movimiento dentro del comercio expandido —
 /// el caso de un Yape/Plin donde el resto de movimientos del mismo remitente
 /// puede ir a otra categoría, y por eso hace falta poder soltar uno solo.
-struct InboxMerchantCard: View {
+struct InboxMerchantCard: View, Equatable {
+
+    /// Sin esto, marcar una bolita reevaluaba el cuerpo de **todas** las
+    /// tarjetas visibles —cada una con su carrusel de chips— y el toque tardaba
+    /// en pintarse. Las cláusulas comparan sólo lo que dibuja la tarjeta; las
+    /// closures se ignoran a propósito (nunca son iguales entre pasadas).
+    static func == (lhs: InboxMerchantCard, rhs: InboxMerchantCard) -> Bool {
+        lhs.isSelected == rhs.isSelected
+            && lhs.isExpanded == rhs.isExpanded
+            && lhs.isHighlighted == rhs.isHighlighted
+            && lhs.isOutOfPeriod == rhs.isOutOfPeriod
+            && lhs.group.merchant == rhs.group.merchant
+            && lhs.group.total == rhs.group.total
+            && lhs.selectedMovementIDs == rhs.selectedMovementIDs
+            && lhs.suggestion?.category == rhs.suggestion?.category
+            && lhs.suggestion?.confidence == rhs.suggestion?.confidence
+            && lhs.frequentCategories == rhs.frequentCategories
+            && lhs.group.expenses.count == rhs.group.expenses.count
+            && zip(lhs.group.expenses, rhs.group.expenses).allSatisfy { $0.id == $1.id && $0.date == $1.date && $0.amount == $1.amount }
+    }
 
     let group: InboxGroup
     let suggestion: CategorySuggestion?
