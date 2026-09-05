@@ -185,12 +185,20 @@ struct ContentView: View {
     // MARK: - Top Header
     private var topHeader: some View {
         HStack {
-            AppIconTile(size: 34, accent: themeColor, coinFace: .white, detail: false)
+            Button {
+                withAnimation {
+                    selectedTab = .home
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    AppIconTile(size: 34, accent: themeColor, coinFace: .white, detail: false)
 
-            Text("AgruPay")
-                .font(.title)
-                .fontWeight(.bold)
-                .foregroundStyle(Color.primary)
+                    Text("AgruPay")
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .foregroundStyle(Color.primary)
+                }
+            }
             
             Spacer()
             

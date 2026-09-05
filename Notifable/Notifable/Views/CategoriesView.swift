@@ -109,6 +109,9 @@ struct CategoriesView: View {
     /// convertirlo en un obstáculo; se dice después, junto al "Deshacer".
     @State private var limitNote: String?
     @State private var editingCategory: CategoryWrapper?
+    
+    @State private var showingNewCategoryAlert = false
+    @State private var newCategoryName = ""
 
     @StateObject private var budgets = CategoryBudgetStore.shared
     @StateObject private var catalog = CategoryCatalog.shared
@@ -243,20 +246,9 @@ struct CategoriesView: View {
 
     private var outOfPeriodTotal: Double { Money.sum(outOfPeriodGroups) { $0.total } }
 
-    private func totalMerchantCount(scope: PendingScope) -> Int {
-        scope == .period ? Set(filteredExpenses.map(\.merchant)).count : Set(expenses.map(\.merchant)).count
-    }
 
-    private func pendingMerchantCount(scope: PendingScope) -> Int {
-        scope == .period ? inboxGroups.count : pendingGroups.count
-    }
 
-    /// Comercios ya clasificados dentro del alcance elegido. Es lo que hace que
-    /// el número de Resumen y el de Pendientes coincidan siempre: los dos parten
-    /// del mismo `Period` cuando el alcance es "este periodo".
-    private func classifiedMerchantCount(scope: PendingScope) -> Int {
-        max(0, totalMerchantCount(scope: scope) - pendingMerchantCount(scope: scope))
-    }
+
 
     private func assignContext(for merchant: String) -> AssignCategoryContext {
         let group = pendingGroups.first { $0.merchant == merchant }
@@ -832,8 +824,8 @@ struct CategoriesView: View {
                 } label: {
                     HStack(spacing: 6) {
                         Text(tab.rawValue)
-                        if tab == .inbox, pendingGroups.count > 0 {
-                            Text("\(pendingGroups.count)")
+                        if tab == .inbox, inboxGroups.count > 0 {
+                            Text("\(inboxGroups.count)")
                                 .font(.caption2.weight(.bold))
                                 .foregroundStyle(selectedTab == tab ? themeColor : .white)
                                 .padding(.horizontal, 6)
@@ -1004,6 +996,38 @@ struct CategoriesView: View {
                     }
                 }
             }
+            
+            if focusedCategory == nil {
+                Button {
+                    newCategoryName = ""
+                    showingNewCategoryAlert = true
+                } label: {
+                    HStack {
+                        Image(systemName: "plus.circle.fill")
+                        Text("Nueva categoría")
+                        Spacer()
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(themeColor)
+                    .padding()
+                    .background(palette.surface)
+                    .cornerRadius(12)
+                }
+                .padding(.top, 4)
+            }
+        }
+        .alert("Nueva categoría", isPresented: $showingNewCategoryAlert) {
+            TextField("Nombre de la categoría", text: $newCategoryName)
+            Button("Cancelar", role: .cancel) { }
+            Button("Crear") {
+                let name = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty {
+                    catalog.save(CustomCategory(name: name))
+                    editingCategory = CategoryWrapper(id: name)
+                }
+            }
+        } message: {
+            Text("Ingresa el nombre de la nueva categoría.")
         }
     }
 
@@ -1122,11 +1146,6 @@ struct CategoriesView: View {
             } else {
                 VStack(spacing: 12) {
                     scopeBanner
-
-                    InboxProgressCard(classified: classifiedMerchantCount(scope: pendingScope),
-                                      total: totalMerchantCount(scope: pendingScope)) {
-                        showClassifyFlow = true
-                    }
 
                     searchField
 
