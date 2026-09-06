@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import SwiftData
 @testable import Notifable
 
 /// Checklist de verificación de ACCOUNTING.md.
@@ -354,5 +355,94 @@ private extension Double {
     func rounded(toPlaces places: Int) -> Double {
         let factor = pow(10.0, Double(places))
         return (self * factor).rounded() / factor
+    }
+}
+
+/// El atajo de `totalsSnapshot`: `Accounting.totals` no debe cambiar de
+/// resultado por saltarse la relación `payments` en los gastos que no son deuda.
+///
+/// Se prueba sobre `@Model` reales y no sobre `ExpenseSnapshot`, porque lo que
+/// se está fijando es justamente el puente entre SwiftData y la contabilidad:
+/// si el `guard isDebt` se invirtiera, el saldo de las deudas se calcularía
+/// como si no tuvieran abonos y nada más lo detectaría.
+@MainActor
+struct TotalsSnapshotTests {
+
+    static let cal = Period.calendar
+
+    static func makeContext() throws -> ModelContext {
+        let schema = Schema([Expense.self, Income.self, RecurringExpense.self, QuickExpense.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        return ModelContext(try ModelContainer(for: schema, configurations: [config]))
+    }
+
+    static func day(_ y: Int, _ m: Int, _ d: Int) -> Date {
+        cal.date(from: DateComponents(year: y, month: m, day: d, hour: 9))!
+    }
+
+    @Test("Una deuda con abonos conserva su saldo pendiente en los totales")
+    func deudaConAbonos() throws {
+        let context = try Self.makeContext()
+        let fecha = Self.day(2026, 3, 10)
+
+        let deuda = Expense(amount: 200, merchant: "Cena", date: fecha,
+                            category: "Comida", currency: "PEN", isDebt: true)
+        context.insert(deuda)
+
+        let abono = Income(amount: 80, currency: "PEN", source: "Jorge",
+                           date: Self.day(2026, 3, 15))
+        abono.debtReference = deuda
+        context.insert(abono)
+
+        let normal = Expense(amount: 50, merchant: "Metro", date: fecha,
+                             category: "Supermercado", currency: "PEN")
+        context.insert(normal)
+
+        let period = Period(granularity: .mes, reference: fecha)
+        let totals = Accounting.totals(expenses: [deuda, normal], incomes: [abono],
+                                       period: period, usdToPen: 3.7)
+
+        // El gasto del periodo es el importe completo, no el saldo.
+        #expect(Money.cents(totals.spent) == Money.cents(250))
+        // El saldo pendiente sí descuenta el abono: 200 − 80.
+        #expect(Money.cents(totals.debtOutstanding) == Money.cents(120))
+        // Y el abono no es ingreso.
+        #expect(Money.isZero(totals.income))
+        #expect(Money.cents(totals.debtPayments) == Money.cents(80))
+    }
+
+    @Test("El atajo da exactamente lo mismo que el snapshot completo")
+    func atajoEquivalente() throws {
+        let context = try Self.makeContext()
+        let fecha = Self.day(2026, 3, 10)
+
+        let deuda = Expense(amount: 300, merchant: "Viaje", date: fecha,
+                            category: "Otros", currency: "PEN", isDebt: true)
+        context.insert(deuda)
+        let abono = Income(amount: 120, currency: "PEN", source: "Ana", date: fecha)
+        abono.debtReference = deuda
+        context.insert(abono)
+
+        let sueltos = (1...5).map { i in
+            Expense(amount: Double(i) * 17.5, merchant: "Comercio \(i)", date: fecha,
+                    category: i.isMultiple(of: 2) ? "Comida" : "Transporte")
+        }
+        sueltos.forEach { context.insert($0) }
+
+        let todos = [deuda] + sueltos
+        let period = Period(granularity: .mes, reference: fecha)
+
+        let rapido = Accounting.totals(expenses: todos, incomes: [abono],
+                                       period: period, usdToPen: 3.7)
+        let completo = Accounting.totals(expenses: todos.map(\.accountingSnapshot),
+                                         incomes: [abono.accountingSnapshot],
+                                         period: period, usdToPen: 3.7)
+
+        #expect(Money.cents(rapido.spent) == Money.cents(completo.spent))
+        #expect(Money.cents(rapido.debtOutstanding) == Money.cents(completo.debtOutstanding))
+        #expect(rapido.byCategory.map { $0.category } == completo.byCategory.map { $0.category })
+        #expect(rapido.byMerchant.map { $0.merchant } == completo.byMerchant.map { $0.merchant })
+        #expect(rapido.expenseCount == completo.expenseCount)
+        #expect(rapido.hasForeignDebtPayments == completo.hasForeignDebtPayments)
     }
 }

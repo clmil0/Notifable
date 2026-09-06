@@ -153,16 +153,13 @@ private struct DashboardContent: View {
         period.filter(incomes, by: \.date)
     }
     
-    /// Gasto del periodo en soles.
-    var totalCombinedPEN: Double { totals.spent }
-    
-    /// Ingreso del periodo, sin los abonos a deuda (ACCOUNTING.md §3).
-    var totalCombinedIncomePEN: Double { totals.income }
-    
-    var expensesByMerchant: [PeriodTotals.MerchantTotal] {
-        Array(totals.byMerchant.prefix(5))
-    }
-
+    /// - Note: aquí vivían `totalCombinedPEN`, `expensesByMerchant`,
+    ///   `pagedTransactions`, `pendingCount` y `pendingTotal`. Se han quitado a
+    ///   propósito: cada acceso rehacía un recorrido del periodo (o una
+    ///   ordenación completa), y el cuerpo las leía varias veces por dibujado.
+    ///   Ahora el cuerpo las resuelve una sola vez en locales. Si hace falta
+    ///   alguna en una subvista, pásala como parámetro; no la reintroduzcas
+    ///   como propiedad computada.
     var searchedTransactions: [TransactionItem] {
         let exps = showsIncomesOnly ? [] : filteredExpenses.map { TransactionItem.expense($0) }
         let incs = filteredIncomes.map { TransactionItem.income($0) }
@@ -183,23 +180,41 @@ private struct DashboardContent: View {
         }
     }
 
-    /// Sólo lo visible: el resto se agrega en `loadMoreIfNeeded`, no de una.
-    var pagedTransactions: [TransactionItem] {
-        Array(searchedTransactions.prefix(visibleTransactionCount))
-    }
-
     /// Dispara la siguiente página cuando la fila que aparece está entre las
     /// últimas 10 visibles — antes de que el usuario llegue al final a secas,
     /// para que no note el salto.
-    private func loadMoreIfNeeded(currentItem: TransactionItem) {
-        guard let index = pagedTransactions.firstIndex(where: { $0.id == currentItem.id }) else { return }
-        if index >= pagedTransactions.count - 10, visibleTransactionCount < searchedTransactions.count {
+    ///
+    /// **Recibe la posición ya calculada.** Antes buscaba la fila con
+    /// `pagedTransactions.firstIndex(where:)` y comparaba contra
+    /// `searchedTransactions.count`: dos accesos a propiedades computadas que
+    /// rehacían el `map` + la concatenación + **la ordenación completa** del
+    /// periodo. Y esto corre en el `.onAppear` de cada fila, así que montar la
+    /// lista costaba un centenar de ordenaciones del año entero.
+    private func loadMoreIfNeeded(index: Int, pageCount: Int, totalCount: Int) {
+        if index >= pageCount - 10, visibleTransactionCount < totalCount {
             visibleTransactionCount += 50
         }
     }
 
     var body: some View {
-        ZStack {
+        // Todo lo caro, una sola vez por dibujado.
+        //
+        // `totals` es una propiedad computada que recorre el periodo entero, y
+        // el cuerpo la leía ocho veces (la tarjeta, los dos banners, la tira de
+        // ingresos y el gráfico, que la pide dos veces más). Igual la lista de
+        // movimientos, que se ordenaba en cada acceso. Resolverlas aquí no
+        // cambia la semántica —siguen recalculándose en cada dibujado, sin
+        // caché que se pueda quedar rancia—, sólo deja de repetir el mismo
+        // trabajo dentro del mismo dibujado.
+        let totals = self.totals
+        let topMerchants = Array(totals.byMerchant.prefix(5))
+        let awaiting = pendingOccurrences.filter(\.isAwaiting)
+        let pendingCount = awaiting.reduce(0) { $0 + $1.dates.count }
+        let pendingTotal = Money.sum(awaiting) { $0.totalAmount }
+        let transactions = searchedTransactions
+        let paged = Array(transactions.prefix(visibleTransactionCount))
+
+        return ZStack {
             TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
                 VStack(spacing: 24) {
                     
@@ -216,12 +231,12 @@ private struct DashboardContent: View {
                         // Banner de recurrentes pendientes. Va antes que el de
                         // Bandeja porque afecta a las cifras del mes.
                         if pendingCount > 0 {
-                            pendingBanner
+                            pendingBanner(count: pendingCount, total: pendingTotal)
                         }
                         
                         // Banner de Bandeja: sólo si hay comercios sin clasificar.
                         if totals.unclassifiedMerchantCount > 0 {
-                            inboxBanner
+                            inboxBanner(totals: totals)
                         }
                         
                         // Tira de ingresos. Sólo si el usuario los registra.
@@ -232,8 +247,8 @@ private struct DashboardContent: View {
                         }
                         
 
-                        if !expensesByMerchant.isEmpty {
-                            chartCard
+                        if !topMerchants.isEmpty {
+                            chartCard(merchants: topMerchants)
                         }
                         
                         VStack(alignment: .leading, spacing: 12) {
@@ -285,22 +300,26 @@ private struct DashboardContent: View {
                             .cornerRadius(10)
                             .padding(.horizontal)
                             
-                            if searchedTransactions.isEmpty {
+                            if transactions.isEmpty {
                                 Text(searchText.isEmpty ? "No hay transacciones en este período" : "No se encontraron resultados")
                                     .foregroundStyle(.secondary)
                                     .padding(.top, 10)
                                     .frame(maxWidth: .infinity, alignment: .center)
                             } else {
-                                ForEach(pagedTransactions) { item in
+                                ForEach(Array(paged.enumerated()), id: \.element.id) { index, item in
                                     transactionCard(for: item)
-                                        .onAppear { loadMoreIfNeeded(currentItem: item) }
+                                        .onAppear {
+                                            loadMoreIfNeeded(index: index,
+                                                             pageCount: paged.count,
+                                                             totalCount: transactions.count)
+                                        }
                                 }
                             }
                             
                             // Forzar espacio extra si hay pocos elementos (o 0) para que el teclado no los tape
-                            if searchedTransactions.count < 6 {
+                            if transactions.count < 6 {
                                 Color.clear
-                                    .frame(height: CGFloat(6 - searchedTransactions.count) * 85)
+                                    .frame(height: CGFloat(6 - transactions.count) * 85)
                             }
                         }
                         .padding(.top, 10)
@@ -343,15 +362,7 @@ private struct DashboardContent: View {
         RecurringEngine.pending(rules: recurringRules, expenses: expenses)
     }
 
-    private var pendingCount: Int {
-        pendingOccurrences.filter(\.isAwaiting).reduce(0) { $0 + $1.dates.count }
-    }
-
-    private var pendingTotal: Double {
-        Money.sum(pendingOccurrences.filter(\.isAwaiting)) { $0.totalAmount }
-    }
-
-    private var pendingBanner: some View {
+    private func pendingBanner(count pendingCount: Int, total pendingTotal: Double) -> some View {
         HStack(spacing: 12) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -396,7 +407,7 @@ private struct DashboardContent: View {
 
     /// La Bandeja es trabajo pendiente: se anuncia donde el usuario mira, no
     /// escondida en otra pestaña.
-    private var inboxBanner: some View {
+    private func inboxBanner(totals: PeriodTotals) -> some View {
         let accent = AppThemeColor(rawValue: appAccentColor) ?? .purple
         let merchants = totals.unclassifiedMerchantCount
         
@@ -445,7 +456,7 @@ private struct DashboardContent: View {
         .padding(.horizontal, 16)
     }
 
-    private var chartCard: some View {
+    private func chartCard(merchants expensesByMerchant: [PeriodTotals.MerchantTotal]) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Top Comercios")
                 .font(.headline)
@@ -638,8 +649,11 @@ private struct DashboardContent: View {
     @ViewBuilder
     private func expenseAmount(for expense: Expense) -> some View {
         let isReceivable = expense.isDebt
-        let outstanding = Accounting.outstanding(of: expense)
-        let paid = Accounting.paid(of: expense)
+        // Ambas leen `payments` —una relación de SwiftData, un *fault* por
+        // gasto— y ninguna se usa si el movimiento no es deuda. Calcularlas
+        // igualmente costaba un fault por cada fila de la lista.
+        let outstanding = isReceivable ? Accounting.outstanding(of: expense) : expense.amount
+        let paid = isReceivable ? Accounting.paid(of: expense) : 0
         let settled = isReceivable && Money.cents(outstanding) == 0
 
         VStack(alignment: .trailing, spacing: 2) {

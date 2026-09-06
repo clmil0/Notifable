@@ -30,6 +30,34 @@ extension Expense {
             hasForeignPayments: hasForeignPayments
         )
     }
+
+    /// El mismo snapshot, pero **sin tocar `payments`** cuando el gasto no es
+    /// deuda. Sólo para el camino masivo (`Accounting.totals`).
+    ///
+    /// `payments` es una relación de SwiftData: leerla resuelve un *fault* por
+    /// cada gasto, y `accountingSnapshot` la leía siempre. `totals` únicamente
+    /// mira los abonos dentro de `if e.isDebt`, así que para todo lo demás
+    /// —la inmensa mayoría de los movimientos— ese trabajo se tiraba entero.
+    /// Con un año filtrado y varios `totals` por dibujado eran miles de faults
+    /// por fotograma.
+    ///
+    /// No se toca `accountingSnapshot`: ése lo usan `Accounting.outstanding` y
+    /// compañía sobre gastos sueltos, donde el saldo tiene que salir bien sea
+    /// cual sea la marca de deuda.
+    var totalsSnapshot: ExpenseSnapshot {
+        guard isDebt else {
+            return ExpenseSnapshot(
+                amount: amount,
+                currency: currency,
+                date: date,
+                category: category,
+                merchant: merchant,
+                isDebt: false,
+                fxRateAtCapture: fxRateAtCapture
+            )
+        }
+        return accountingSnapshot
+    }
 }
 
 extension Income {
@@ -51,7 +79,7 @@ extension Accounting {
                        incomes: [Income],
                        period: Period,
                        usdToPen: Double) -> PeriodTotals {
-        totals(expenses: expenses.map(\.accountingSnapshot),
+        totals(expenses: expenses.map(\.totalsSnapshot),
                incomes: incomes.map(\.accountingSnapshot),
                period: period,
                usdToPen: usdToPen)
