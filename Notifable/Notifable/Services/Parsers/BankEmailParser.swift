@@ -8,4 +8,14 @@ protocol BankEmailParser {
     
     /// Analiza el texto limpio de un correo y devuelve un `Expense` si logra interpretarlo
     func parse(cleanText: String) -> Expense?
+
+    /// Analiza el texto limpio de un correo y devuelve un `Income` si logra interpretarlo
+    /// (ej. una constancia de recepción de Yapeo/Plin: dinero que entra, no que sale).
+    /// La mayoría de bancos no mandan este tipo de correo, así que el default de abajo
+    /// evita que cada parser existente tenga que declarar el método sin usarlo.
+    func parseIncome(cleanText: String) -> Income?
+}
+
+extension BankEmailParser {
+    func parseIncome(cleanText: String) -> Income? { nil }
 }

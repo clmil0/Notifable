@@ -13,7 +13,13 @@ final class Income {
 
     /// Soles por 1 USD el día del movimiento. Ver ACCOUNTING.md §9.
     var fxRateAtCapture: Double?
-    
+
+    /// El id del correo que lo generó (una constancia de Yapeo recibido, por
+    /// ejemplo). `nil` = anotado a mano. Igual que `Expense.emailID`: permite
+    /// deduplicar en cada sincronización y evita respaldarlo en
+    /// `ConfigBackupManager` — se rearma solo releyendo el correo.
+    var emailID: String?
+
     // Relación a Deuda (Opcional)
     var debtReference: Expense?
     var isFinalDebtPayment: Bool? = false

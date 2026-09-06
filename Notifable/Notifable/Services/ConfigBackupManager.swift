@@ -600,6 +600,10 @@ final class ConfigBackupManager {
         }
 
         for i in incomes {
+            // Igual que los gastos: si viene de un correo (ej. un Yapeo
+            // recibido), se reconstruye solo releyendo Gmail y no hace falta
+            // subirlo — sólo los ingresos anotados a mano viajan aquí.
+            if i.emailID != nil { continue }
             manual.append(ManualTransactionBackup(
                 id: i.id, kind: "income", amount: i.amount, currency: i.currency,
                 title: i.source, subtitle: i.title, category: "Otros",

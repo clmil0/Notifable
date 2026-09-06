@@ -45,9 +45,11 @@ struct BCPParser: BankEmailParser {
             }
         }
         
-        // Extraer últimos dígitos de la tarjeta
+        // Extraer últimos dígitos de la tarjeta. Cubre débito y crédito: un
+        // "Realizaste un consumo... con tu Tarjeta de Crédito BCP" no traía
+        // los dígitos porque este regex sólo buscaba "Débito".
         var cardLastDigits: String? = nil
-        let cardPattern = "Tarjeta de D[ée]bito\\s*\\*+([0-9]{4})"
+        let cardPattern = "Tarjeta de (?:D[ée]bito|Cr[ée]dito)\\s*\\*+([0-9]{4})"
         if let cardRegex = try? NSRegularExpression(pattern: cardPattern, options: [.dotMatchesLineSeparators]),
            let cardMatch = cardRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)),
            let cardRange = Range(cardMatch.range(at: 1), in: cleanText) {
@@ -87,5 +89,56 @@ struct BCPParser: BankEmailParser {
         }
         
         return Expense(amount: amount, merchant: merchant, date: expenseDate, category: "Sin Clasificar", currency: "PEN", cardLastDigits: cardLastDigits)
+    }
+
+    /// "Constancia de recepción de Yapeo a celular BCP": dinero que **entra**,
+    /// no un gasto. Es el único correo de BCP que representa un ingreso.
+    func parseIncome(cleanText: String) -> Income? {
+        guard cleanText.contains("Monto recibido") else {
+            return nil
+        }
+
+        let amountPattern = "Monto recibido\\s*S/\\s*([0-9.,]+)"
+        guard let amountRegex = try? NSRegularExpression(pattern: amountPattern, options: [.dotMatchesLineSeparators]),
+              let amountMatch = amountRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)),
+              let amountRange = Range(amountMatch.range(at: 1), in: cleanText) else {
+            return nil
+        }
+        let amountStr = String(cleanText[amountRange]).replacingOccurrences(of: ",", with: "")
+        let amount = Double(amountStr) ?? 0
+
+        var sender = "Desconocido"
+        let senderPattern = "Enviado por\\s*(.*?)\\s*¿No reconoces"
+        if let senderRegex = try? NSRegularExpression(pattern: senderPattern, options: [.dotMatchesLineSeparators]),
+           let senderMatch = senderRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)),
+           let senderRange = Range(senderMatch.range(at: 1), in: cleanText) {
+            sender = String(cleanText[senderRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        var incomeDate = Date()
+        let datePattern = "Fecha y hora\\s*([0-9]{2}\\s*de\\s*[a-zA-Z]+\\s*de\\s*[0-9]{4}\\s*-\\s*[0-9]{2}:[0-9]{2}\\s*[APM]{2})"
+        if let dateRegex = try? NSRegularExpression(pattern: datePattern, options: [.dotMatchesLineSeparators]),
+           let dateMatch = dateRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)),
+           let dateRange = Range(dateMatch.range(at: 1), in: cleanText) {
+            let dateStr = String(cleanText[dateRange])
+
+            var dStr = dateStr.lowercased()
+            let months = ["enero": "01", "febrero": "02", "marzo": "03", "abril": "04", "mayo": "05", "junio": "06", "julio": "07", "agosto": "08", "septiembre": "09", "setiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"]
+            for (m, num) in months {
+                dStr = dStr.replacingOccurrences(of: m, with: num)
+            }
+            dStr = dStr.replacingOccurrences(of: " de ", with: "")
+            dStr = dStr.replacingOccurrences(of: " - ", with: "-")
+            dStr = dStr.replacingOccurrences(of: " ", with: "")
+
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = "ddMMyyyy-hh:mma"
+            if let parsed = formatter.date(from: dStr) {
+                incomeDate = parsed
+            }
+        }
+
+        return Income(amount: amount, currency: "PEN", source: "Yape", title: sender, date: incomeDate)
     }
 }

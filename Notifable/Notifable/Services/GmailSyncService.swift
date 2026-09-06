@@ -211,7 +211,8 @@ class GmailSyncService: ObservableObject {
     private func existingEmailIDs() -> Set<String> {
         guard let context = modelContext else { return [] }
         let expenses = (try? context.fetch(FetchDescriptor<Expense>())) ?? []
-        return Set(expenses.compactMap { $0.emailID })
+        let incomes = (try? context.fetch(FetchDescriptor<Income>())) ?? []
+        return Set(expenses.compactMap { $0.emailID }).union(incomes.compactMap { $0.emailID })
     }
 
     private func processMessages(_ messages: [[String: Any]],
@@ -271,11 +272,16 @@ class GmailSyncService: ObservableObject {
                     if let body = body {
                         let alreadyImported = queue.sync { knownIDs.contains(id) }
 
-                        if !alreadyImported, let expenseData = self?.parseEmailBody(body) {
-                            foundBankName = expenseData.bankName
+                        if !alreadyImported, let parsed = self?.parseEmailBody(body) {
+                            foundBankName = parsed.bankName
                             DispatchQueue.main.sync {
                                 if let context = self?.modelContext {
-                                    let inserted = self?.handleExpenseInsertion(expenseData: expenseData, emailID: id, context: context) == true
+                                    var inserted = false
+                                    if let expense = parsed.expense {
+                                        inserted = self?.handleExpenseInsertion(expenseData: (expense, parsed.bankName), emailID: id, context: context) == true
+                                    } else if let income = parsed.income {
+                                        inserted = self?.handleIncomeInsertion(income: income, emailID: id, context: context) == true
+                                    }
                                     if inserted {
                                         newExpensesFound += 1
                                     }
@@ -358,11 +364,16 @@ class GmailSyncService: ObservableObject {
                     if let body = body {
                         let alreadyImported = queue.sync { knownIDs.contains(id) }
 
-                        if !alreadyImported, let expenseData = self?.parseEmailBody(body) {
-                            foundBankName = expenseData.bankName
+                        if !alreadyImported, let parsed = self?.parseEmailBody(body) {
+                            foundBankName = parsed.bankName
                             DispatchQueue.main.sync {
                                 if let context = self?.modelContext {
-                                    let inserted = self?.handleExpenseInsertion(expenseData: expenseData, emailID: id, context: context) == true
+                                    var inserted = false
+                                    if let expense = parsed.expense {
+                                        inserted = self?.handleExpenseInsertion(expenseData: (expense, parsed.bankName), emailID: id, context: context) == true
+                                    } else if let income = parsed.income {
+                                        inserted = self?.handleIncomeInsertion(income: income, emailID: id, context: context) == true
+                                    }
                                     if inserted {
                                         newExpensesFound += 1
                                     }
@@ -370,7 +381,7 @@ class GmailSyncService: ObservableObject {
                             }
                             queue.sync { _ = knownIDs.insert(id) }
                         }
-                        
+
                         queue.async {
                             if !processedIDs.contains(id) {
                                 processedIDs.append(id)
@@ -647,15 +658,23 @@ class GmailSyncService: ObservableObject {
         return json["snippet"] as? String ?? ""
     }
     
-    private func parseEmailBody(_ text: String) -> (expense: Expense, bankName: String)? {
+    private func parseEmailBody(_ text: String) -> (expense: Expense?, income: Income?, bankName: String)? {
         let cleanText = text.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
-        
+
         for parser in parsers {
             if let expense = parser.parse(cleanText: cleanText) {
-                return (applyAutoCategorization(to: expense), parser.bankName)
+                return (applyAutoCategorization(to: expense), nil, parser.bankName)
             }
         }
-        
+
+        // Un correo no puede ser gasto e ingreso a la vez: sólo se prueba
+        // parseIncome cuando ningún parser lo reconoció como gasto.
+        for parser in parsers {
+            if let income = parser.parseIncome(cleanText: cleanText) {
+                return (nil, income, parser.bankName)
+            }
+        }
+
         return nil
     }
     
@@ -793,6 +812,16 @@ class GmailSyncService: ObservableObject {
         
         newExpense.emailID = emailID
         context.insert(newExpense)
+        try? context.save()
+        return true
+    }
+
+    /// Constancias de dinero recibido (ej. un Yapeo entrante): a diferencia de
+    /// los gastos, no hay vínculo con Apple ni deduplicación especial que
+    /// resolver — el `emailID` ya evita procesarlo dos veces.
+    private func handleIncomeInsertion(income: Income, emailID: String, context: ModelContext) -> Bool {
+        income.emailID = emailID
+        context.insert(income)
         try? context.save()
         return true
     }
