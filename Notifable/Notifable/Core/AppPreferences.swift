@@ -61,7 +61,17 @@ enum AppPreferences {
         .init(key: "readPeriodMonths", kind: .int, note: "Desde cuándo leer el correo"),
 
         // Preferencias de vista que sí son una elección duradera
-        .init(key: "categoriesSegment", kind: .string, note: "Pestaña por defecto en Categorías")
+        .init(key: "categoriesSegment", kind: .string, note: "Pestaña por defecto en Categorías"),
+
+        // Amigos. La sesión y los ids viven en el servidor; lo de aquí es lo
+        // que sólo existe en este teléfono: cómo me presento y cómo llamo yo a
+        // cada amigo. Las notas por amigo van en un solo JSON —apodo, color,
+        // emoji y lo que le comparto— para no abrir una clave por campo.
+        .init(key: SocialProfileStore.Keys.displayName, kind: .string, note: "Tu nombre en Amigos"),
+        .init(key: SocialProfileStore.Keys.status, kind: .string, note: "Tu estado en Amigos"),
+        .init(key: SocialProfileStore.Keys.avatarEmoji, kind: .string, note: "Emoji de tu avatar en Amigos"),
+        .init(key: SocialProfileStore.Keys.friendPreferences, kind: .string,
+              note: "Apodo, color y qué compartes con cada amigo")
     ]
 
     // MARK: - Fotografía

@@ -61,6 +61,18 @@ final class ConfigBackupManager {
     /// todavía no sincroniza. Lo enseña `BackupFoundView`.
     var foundBackup: BackupHeader?
 
+    /// `GmailLinkFlow` está en pantalla y va a hacer la misma pregunta con su
+    /// propio paso de "Encontramos tu configuración". Sin esto, volver de
+    /// Google reactiva la escena, dispara `checkForExistingBackup()` y el
+    /// usuario recibe la oferta dos veces —una encima de la otra.
+    var isPresentingLinkFlow = false {
+        didSet { if isPresentingLinkFlow { foundBackup = nil } }
+    }
+
+    /// `true` si el usuario ya contestó a la oferta de restaurar —restaurando
+    /// o diciendo "ahora no"—, así ninguna otra pantalla la vuelve a plantear.
+    var wasBackupOfferAnswered: Bool { UserDefaults.standard.bool(forKey: Keys.offerDismissed) }
+
     /// Se pausó sola tras un "Empezar de cero": ver `pauseAfterLocalWipe()`.
     var isPausedAfterWipe: Bool { UserDefaults.standard.string(forKey: Keys.pausedCode) != nil }
     var lastErrorMessage: String?
@@ -114,6 +126,12 @@ final class ConfigBackupManager {
         // ofreciéramos restaurar mientras está encima, la oferta no se vería y
         // se daría por descartada.
         guard UserDefaults.standard.bool(forKey: "hasSeenOnboarding") else { return }
+        guard !isPresentingLinkFlow else { return }
+        // Hay una vinculación por atender: la secuencia completa —restaurar y
+        // luego elegir desde cuándo leer— la hace `GmailLinkFlow`. El aviso
+        // suelto se adelantaba, restauraba por su cuenta y dejaba al usuario
+        // sin la segunda mitad.
+        guard !UserDefaults.standard.bool(forKey: GmailAuthService.pendingLinkFlowKey) else { return }
         guard !isEnabled, !isPausedAfterWipe else { return }
         guard !UserDefaults.standard.bool(forKey: Keys.offerDismissed) else { return }
         guard BackupAccount.shared.canSignInSilently || BackupAccount.shared.isSignedIn else { return }
@@ -673,6 +691,11 @@ final class ConfigBackupManager {
         if let preferences = payload.preferences {
             AppPreferences.apply(preferences)
         }
+
+        // Amigos: el apodo, el color y lo que le comparto a cada uno acaban de
+        // entrar en `UserDefaults`, pero el store ya tenía cargado en memoria
+        // lo del teléfono anterior a la restauración.
+        SocialProfileStore.shared.reloadFromDefaults()
     }
 
     /// Upsert por `id`: lo que ya existe se actualiza, lo nuevo se inserta, lo

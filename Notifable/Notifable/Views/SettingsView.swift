@@ -19,6 +19,10 @@ struct SettingsView: View {
     @Query private var quickExpenses: [QuickExpense]
 
     @StateObject private var gmailAuth = GmailAuthService.shared
+
+    /// Ver el `onReceive` del final del cuerpo.
+    @AppStorage(GmailAuthService.pendingLinkFlowKey) private var pendingLinkFlow = false
+    @State private var didReadInitialAuthState = false
     @StateObject private var gmailSync = GmailSyncService.shared
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
@@ -81,6 +85,23 @@ struct SettingsView: View {
             }
             .appAppearance()
             .appTextSize()
+        }
+        // Vincular desde la tarjeta de arriba, o desde Gmail y bancos: al
+        // llegar el token, Ajustes se cierra solo y la secuencia la presenta
+        // `ContentView`. Presentarla desde aquí, encima del propio
+        // `fullScreenCover` de Ajustes, no funciona: iOS descarta esa
+        // presentación mientras la hoja de Google se está cerrando, y el modal
+        // no aparecía hasta que el usuario cerraba Ajustes a mano.
+        .onReceive(gmailAuth.$isAuthenticated) { isAuthenticated in
+            // La primera emisión es el valor que ya traía al abrir la pantalla;
+            // sin saltarla, entrar a Ajustes con una vinculación a medias lo
+            // cerraría de inmediato.
+            guard didReadInitialAuthState else {
+                didReadInitialAuthState = true
+                return
+            }
+            guard isAuthenticated, pendingLinkFlow else { return }
+            dismiss()
         }
     }
 

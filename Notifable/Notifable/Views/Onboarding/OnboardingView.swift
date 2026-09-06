@@ -25,9 +25,9 @@ struct OnboardingView: View {
 
     enum Step: Equatable {
         case slides
-        case restore(BackupHeader)
-        case history(usesGmail: Bool)
-        case reading(monthsLabel: String)
+        /// Todo lo que sigue a entrar con Google vive en `GmailLinkFlow`, que
+        /// es la misma pieza que usa Ajustes → Gmail y bancos.
+        case link
     }
 
     @State private var step: Step = .slides
@@ -46,22 +46,8 @@ struct OnboardingView: View {
             switch step {
             case .slides:
                 carousel
-            case .restore(let header):
-                OnboardingRestoreView(header: header) { restored in
-                    advanceAfterAccount(restored: restored)
-                }
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-            case .history(let usesGmail):
-                OnboardingHistoryView(usesGmail: usesGmail) { monthsLabel in
-                    if let monthsLabel {
-                        withAnimation(.snappy) { step = .reading(monthsLabel: monthsLabel) }
-                    } else {
-                        finish()
-                    }
-                }
-                .transition(.move(edge: .trailing).combined(with: .opacity))
-            case .reading(let monthsLabel):
-                OnboardingReadingView(monthsLabel: monthsLabel) { finish() }
+            case .link:
+                GmailLinkFlow { finish() }
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
@@ -69,7 +55,7 @@ struct OnboardingView: View {
         .onChange(of: gmailAuth.isAuthenticated) { _, isAuthenticated in
             guard isAuthenticated, isConnecting else { return }
             isConnecting = false
-            Task { await lookForBackup() }
+            withAnimation(.snappy) { step = .link }
         }
     }
 
@@ -650,32 +636,10 @@ struct OnboardingView: View {
     /// Entró con Google: antes de nada, ¿esa cuenta ya tenía un respaldo? Si no
     /// lo tiene —el caso normal de alguien que estrena la app— no se le enseña
     /// una pantalla de recuperación vacía.
-    private func lookForBackup() async {
-        let manager = ConfigBackupManager.shared
-        if let header = await manager.peek(code: nil), header.hasData {
-            manager.lastErrorMessage = nil
-            withAnimation(.snappy) { step = .restore(header) }
-        } else {
-            manager.lastErrorMessage = nil
-            await advanceAfterAccountAsync(restored: false)
-        }
-    }
-
-    private func advanceAfterAccount(restored: Bool) {
-        Task { await advanceAfterAccountAsync(restored: restored) }
-    }
-
-    private func advanceAfterAccountAsync(restored: Bool) async {
-        // Si no restauró, la sincronización se enciende igual: es una cuenta
-        // nueva y a partir de ahora lo que configure se guarda solo.
-        if !restored {
-            await ConfigBackupManager.shared.enableWithAccount()
-        }
-        ConfigBackupManager.shared.dismissBackupOffer()
-        withAnimation(.snappy) { step = .history(usesGmail: true) }
-    }
-
     private func finish() {
+        // La secuencia ya se hizo aquí dentro; sin esto, la marca que dejó
+        // `signIn()` haría que la app la repitiera nada más entrar.
+        UserDefaults.standard.set(false, forKey: GmailAuthService.pendingLinkFlowKey)
         hasSeenOnboarding = true
     }
 }

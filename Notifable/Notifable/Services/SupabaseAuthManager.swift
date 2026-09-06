@@ -67,6 +67,20 @@ final class SupabaseAuthManager {
         await pushProfile(name: name)
     }
 
+    /// Nombre, estado y emoji de una vez: es lo que guarda el modal de perfil.
+    func updateProfile(name: String, status: String, avatarEmoji: String?) async {
+        displayName = name
+        SocialProfileStore.shared.displayName = name
+        SocialProfileStore.shared.status = status
+        SocialProfileStore.shared.avatarEmoji = avatarEmoji
+        await pushProfile(name: name, status: status, avatarEmoji: avatarEmoji)
+    }
+
+    /// `false` mientras el proyecto de Supabase no tenga las columnas nuevas de
+    /// `profiles`. Lo pone `pushProfile` al ver que el servidor las rechaza, y
+    /// lo lee Amigos para no prometer que el estado se ve del otro lado.
+    private(set) var supportsProfileExtras = true
+
     private func signInAnonymously() async {
         guard let url = URL(string: "\(projectURL)/auth/v1/signup") else { return }
         var request = URLRequest(url: url)
@@ -102,18 +116,49 @@ final class SupabaseAuthManager {
 
     /// Upsert por `id` (clave primaria de `profiles`): crea la fila la primera
     /// vez, y la actualiza si el nombre cambió.
-    private func pushProfile(name: String) async {
-        guard let userID, let accessToken else { return }
-        guard let url = URL(string: "\(projectURL)/rest/v1/profiles") else { return }
+    private func pushProfile(name: String,
+                            status: String? = nil,
+                            avatarEmoji: String? = nil) async {
+        let store = SocialProfileStore.shared
+        let sentStatus = status ?? store.status
+        let sentEmoji = avatarEmoji ?? store.avatarEmoji
+
+        // Dos intentos como mucho: con los campos nuevos y, si el servidor no
+        // los conoce todavía (falta correr el SQL), sólo con el nombre. Sin
+        // esto, un proyecto sin migrar dejaría de guardar hasta el nombre.
+        if supportsProfileExtras {
+            let extended: [String: String] = [
+                "id": "", "display_name": name,
+                "status": sentStatus, "avatar_emoji": sentEmoji ?? ""
+            ]
+            if await postProfile(fields: extended, name: name) { return }
+            supportsProfileExtras = false
+            print("Amigos: `profiles` todavía no tiene `status`/`avatar_emoji`; se sube sólo el nombre.")
+        }
+        _ = await postProfile(fields: ["id": "", "display_name": name], name: name)
+    }
+
+    /// `true` si el servidor lo aceptó. `fields` llega sin `id` resuelto: lo
+    /// pone aquí, que es donde se sabe que hay sesión.
+    private func postProfile(fields: [String: String], name: String) async -> Bool {
+        guard let userID, let accessToken else { return false }
+        guard let url = URL(string: "\(projectURL)/rest/v1/profiles") else { return false }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue(apiKey, forHTTPHeaderField: "apikey")
         request.addValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.addValue("application/json", forHTTPHeaderField: "Content-Type")
         request.addValue("resolution=merge-duplicates,return=minimal", forHTTPHeaderField: "Prefer")
-        let payload: [String: String] = ["id": userID, "display_name": name]
+        var payload = fields
+        payload["id"] = userID
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
-        _ = try? await URLSession.shared.data(for: request)
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return false }
+            return (200...299).contains(http.statusCode)
+        } catch {
+            return false
+        }
     }
 
     /// Base para que `FriendsManager` arme sus propias peticiones REST/RPC

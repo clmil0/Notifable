@@ -92,4 +92,5 @@ struct NotifableApp: App {
             }
         }
     }
+
 }

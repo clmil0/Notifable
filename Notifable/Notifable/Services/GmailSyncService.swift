@@ -49,6 +49,17 @@ class GmailSyncService: ObservableObject {
             print("Sync throttled. Last sync was \(Int(Date().timeIntervalSince(lastSync)/60)) minutes ago.")
             return
         }
+
+        // Nadie pidió un rango y nunca se ha leído nada: no hay nada que
+        // sincronizar. Antes esta rama se inventaba el último mes y descargaba
+        // correo por su cuenta apenas se vinculaba Gmail — sin que el usuario
+        // hubiera elegido leer su pasado, y a veces antes de que le llegara la
+        // pregunta. El pasado sólo se descarga cuando lo pide: en la pantalla
+        // de "¿Cuánto correo miramos?" o en Gmail y bancos.
+        if startDate == nil, endDate == nil, lastSyncDate == nil {
+            print("Sync skipped: sin lectura previa y sin rango elegido por el usuario.")
+            return
+        }
         
         DispatchQueue.main.async {
             self.isSyncing = true
@@ -113,10 +124,10 @@ class GmailSyncService: ObservableObject {
             let safeEpoch = Int(lastSync.timeIntervalSince1970) - 3600 // 1 hr margen
             query = "(\(query)) AND after:\(safeEpoch)"
         } else {
-            if let oneMonthAgo = Calendar.current.date(byAdding: .month, value: -1, to: Date()) {
-                let startEpoch = Int(oneMonthAgo.timeIntervalSince1970)
-                query = "(\(query)) AND after:\(startEpoch)"
-            }
+            // Sin rango y sin lectura previa no se inventa una ventana: ver
+            // `syncEmails`, que ya corta antes de llegar aquí.
+            completion(.success([]))
+            return
         }
         
         if let end = endDate {

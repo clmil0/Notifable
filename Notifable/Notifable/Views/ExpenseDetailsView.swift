@@ -517,6 +517,15 @@ struct EditExpenseSheet: View {
     }
 
     private func save() {
+        // Se compara contra el valor original y sólo lo que de verdad cambió
+        // se manda a `record`: antes se mandaban los tres campos siempre, así
+        // que abrir "Editar" y tocar Guardar sin tocar nada ya creaba una fila
+        // en el respaldo — con casi cualquier gasto tarde o temprano pasando
+        // por aquí, esa fila terminaba existiendo para prácticamente todos.
+        let originalAmount = expense.amount
+        let originalMerchant = expense.merchant
+        let originalDate = expense.date
+
         let cleaned = amountText.replacingOccurrences(of: ",", with: ".")
         if let value = Double(cleaned), value > 0 {
             // Céntimos enteros, igual que en el init del modelo.
@@ -524,10 +533,11 @@ struct EditExpenseSheet: View {
         }
         expense.merchant = merchant.trimmingCharacters(in: .whitespaces)
         expense.date = date
+
         ExpenseEditStore.record(expense,
-                                merchant: expense.merchant,
-                                amount: expense.amount,
-                                occurredAt: expense.date)
+                                merchant: expense.merchant != originalMerchant ? expense.merchant : nil,
+                                amount: Money.cents(expense.amount) != Money.cents(originalAmount) ? expense.amount : nil,
+                                occurredAt: expense.date != originalDate ? expense.date : nil)
         try? modelContext.save()
         dismiss()
     }

@@ -34,7 +34,18 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
         isAuthenticated = getAccessToken() != nil || getRefreshToken() != nil
     }
     
+    /// Vinculación recién empezada. Lo lee `GmailLinkFlow` para saber que, en
+    /// cuanto llegue el token, hay que hacer las dos preguntas de después de
+    /// conectar: restaurar la configuración y desde cuándo leer el correo.
+    ///
+    /// Se marca aquí y no en cada botón porque hay cuatro sitios que vinculan
+    /// —la tarjeta de arriba de Ajustes, Gmail y bancos, la pantalla de copia
+    /// de seguridad y el onboarding— y el que lo olvide deja al usuario sin la
+    /// secuencia, que es justo lo que pasaba con la tarjeta de Ajustes.
+    static let pendingLinkFlowKey = "pendingGmailLinkFlow"
+
     func signIn() {
+        UserDefaults.standard.set(true, forKey: Self.pendingLinkFlowKey)
         guard let url = URL(string: "\(authURL)?client_id=\(clientID)&redirect_uri=\(redirectURI)&response_type=code&scope=\(scope)&prompt=consent&access_type=offline") else { return }
         
         let scheme = "com.googleusercontent.apps.565627106864-cd3nnm389bdf9cfdqo015d7tbm052bdr"

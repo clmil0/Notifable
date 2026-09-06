@@ -8,6 +8,7 @@ struct GmailBanksView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     /// Recuerda el último periodo elegido para que "Leer" no vuelva a "1 mes"
     /// cada vez que se abre la pantalla.
@@ -15,6 +16,11 @@ struct GmailBanksView: View {
 
     @StateObject private var gmailAuth = GmailAuthService.shared
     @StateObject private var gmailSync = GmailSyncService.shared
+
+    /// Sólo para el rótulo del botón mientras se va y se vuelve de Google. La
+    /// secuencia de después de conectar la presenta `SettingsView`, que es la
+    /// raíz de este `fullScreenCover`.
+    @State private var isLinking = false
 
     @State private var showUnlinkDialog = false
     @State private var showRecoveryAlert = false
@@ -45,6 +51,19 @@ struct GmailBanksView: View {
         .onAppear {
             loadBankStates()
             showCustomStepper = !Self.standardPeriods.contains(readPeriodMonths)
+        }
+        .onReceive(gmailAuth.$isAuthenticated) { isAuthenticated in
+            if isAuthenticated { isLinking = false }
+        }
+        // Cancelar en la pantalla de Google no avisa de nada: si al volver
+        // seguimos sin cuenta, el botón se destraba solo. La espera es para no
+        // pisar el caso normal, donde el token llega poco después de reactivar.
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active, isLinking else { return }
+            Task {
+                try? await Task.sleep(for: .seconds(5))
+                if !gmailAuth.isAuthenticated { isLinking = false }
+            }
         }
         .confirmationDialog("¿Desvincular Gmail?",
                             isPresented: $showUnlinkDialog,
@@ -125,9 +144,10 @@ struct GmailBanksView: View {
                 }
             } else {
                 Button {
+                    isLinking = true
                     gmailAuth.signIn()
                 } label: {
-                    Text("Vincular Gmail")
+                    Text(isLinking ? "Conectando…" : "Vincular Gmail")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)

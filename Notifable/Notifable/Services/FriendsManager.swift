@@ -1,23 +1,36 @@
 import Foundation
 import SwiftUI
 
-/// Un amigo conectado: sólo su nombre y un color derivado de su id para el
-/// avatar. Nunca carga aquí nada financiero — eso vive en `FriendShareRow`.
+/// Un amigo conectado: su nombre, el estado que él escribió, y las notas
+/// privadas que yo le puse (apodo, color, emoji), que salen de
+/// `SocialProfileStore` y nunca del servidor. Nada financiero vive aquí — eso
+/// es `FriendShareRow`.
 struct Friend: Identifiable, Hashable {
     let id: String
+    /// Como se llama él a sí mismo. Para lo que se enseña en pantalla usa
+    /// `name`, que respeta el apodo.
     let displayName: String
+    /// Su línea de estado, si el servidor ya la sirve.
+    var status: String = ""
 
-    var initial: String {
-        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "?" : String(trimmed.prefix(1)).uppercased()
+    private var preferences: FriendPreferences { SocialProfileStore.shared.preferences(for: id) }
+
+    /// Cómo lo llamo yo: el apodo si le puse uno.
+    var name: String { SocialProfileStore.shared.name(for: id, realName: displayName) }
+
+    var hasNickname: Bool {
+        !preferences.nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Color estable por amigo: mismo id, mismo color siempre, sin guardar nada.
-    var tint: Color {
-        let palette: [Color] = [.blue, .purple, .orange, .green, .pink, .teal, .indigo, .red]
-        let hash = id.unicodeScalars.reduce(0) { $0 + Int($1.value) }
-        return palette[hash % palette.count]
-    }
+    var initial: String { SocialProfileStore.initial(of: name) }
+
+    /// Emoji si lo eligió; si no, la inicial.
+    var glyph: String { SocialProfileStore.shared.glyph(for: id, realName: displayName) }
+
+    var usesEmoji: Bool { preferences.emoji?.isEmpty == false }
+
+    /// El color elegido, o el de siempre derivado del id.
+    var tint: Color { SocialProfileStore.shared.color(for: id) }
 }
 
 /// Una fila de `friend_shares`: lo que un amigo (`sharerID`) decidió mostrarle
@@ -75,6 +88,7 @@ final class FriendsManager {
     var lastErrorMessage: String?
 
     private var profileNames: [String: String] = [:]
+    private var profileStatuses: [String: String] = [:]
 
     private var baseURL: String { auth.baseURL }
 
@@ -116,26 +130,55 @@ final class FriendsManager {
         }
     }
 
+    /// Dos formas de la misma consulta: con el estado, y sin él para un
+    /// proyecto de Supabase al que todavía no se le ha corrido el SQL de las
+    /// columnas nuevas. Sin el repliegue, no cargaría ni la lista de amigos.
     private func fetchProfiles(ids: [String]) async -> [Friend] {
         guard !ids.isEmpty else { return [] }
-        let list = ids.joined(separator: ",")
-        guard let url = URL(string: "\(baseURL)/rest/v1/profiles?id=in.(\(list))&select=id,display_name") else { return [] }
-        guard let request = auth.authorizedRequest(url: url, method: "GET") else { return [] }
+        if let friends = await fetchProfiles(ids: ids, includingStatus: true) { return friends }
+        return await fetchProfiles(ids: ids, includingStatus: false) ?? []
+    }
 
-        struct Row: Decodable { let id: String; let display_name: String }
+    private func fetchProfiles(ids: [String], includingStatus: Bool) async -> [Friend]? {
+        let list = ids.joined(separator: ",")
+        let columns = includingStatus ? "id,display_name,status" : "id,display_name"
+        guard let url = URL(string: "\(baseURL)/rest/v1/profiles?id=in.(\(list))&select=\(columns)") else { return nil }
+        guard let request = auth.authorizedRequest(url: url, method: "GET") else { return nil }
+
+        struct Row: Decodable {
+            let id: String
+            let display_name: String
+            let status: String?
+        }
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return [] }
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
             let rows = try JSONDecoder().decode([Row].self, from: data)
-            for row in rows { profileNames[row.id] = row.display_name }
-            return rows.map { Friend(id: $0.id, displayName: $0.display_name) }
+            for row in rows {
+                profileNames[row.id] = row.display_name
+                profileStatuses[row.id] = row.status ?? ""
+            }
+            return rows.map { Friend(id: $0.id, displayName: $0.display_name, status: $0.status ?? "") }
         } catch {
-            return []
+            return nil
         }
     }
 
+    /// El nombre real, tal como él lo escribió.
     func name(for id: String) -> String { profileNames[id] ?? "Amigo" }
+
+    /// Cómo lo veo yo: el apodo que le puse, o su nombre.
+    func displayName(for id: String) -> String {
+        SocialProfileStore.shared.name(for: id, realName: name(for: id))
+    }
+
+    func status(for id: String) -> String { profileStatuses[id] ?? "" }
+
+    func friend(with id: String) -> Friend {
+        friends.first { $0.id == id }
+            ?? Friend(id: id, displayName: name(for: id), status: status(for: id))
+    }
 
     // MARK: - Compartidos
 
@@ -255,7 +298,39 @@ final class FriendsManager {
 
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         _ = try? await URLSession.shared.data(for: request)
+        // El respaldo de configuración no lleva `friend_shares` —esa tabla se
+        // reescribe cada mes y vive en el servidor—, así que lo elegido se
+        // anota también aquí: es lo que devuelve "a Camila le compartías el
+        // total y dos categorías" al estrenar teléfono.
+        SocialProfileStore.shared.rememberShare(friendID: viewerID,
+                                                shareTotal: shareTotal,
+                                                categories: categories)
         await loadShares()
+    }
+
+    /// Elimina la amistad de los dos lados. Necesita la función
+    /// `delete_friendship` en Supabase: borrar directo por REST lo impediría la
+    /// política RLS, y debe borrar también las filas de `friend_shares` de ida
+    /// y de vuelta. Si el proyecto todavía no la tiene, no se toca nada local y
+    /// se dice por qué.
+    @discardableResult
+    func removeFriend(_ friendID: String) async -> Bool {
+        guard let url = URL(string: "\(baseURL)/rest/v1/rpc/delete_friendship") else { return false }
+        guard var request = auth.authorizedRequest(url: url, method: "POST") else { return false }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_friend_id": friendID])
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                lastErrorMessage = "Falta la función `delete_friendship` en Supabase."
+                return false
+            }
+            SocialProfileStore.shared.forget(friendID: friendID)
+            await refresh()
+            return true
+        } catch {
+            lastErrorMessage = "No se pudo eliminar la amistad."
+            return false
+        }
     }
 
     /// Deja de compartir con un amigo puntual este mes.
@@ -264,6 +339,7 @@ final class FriendsManager {
         guard var request = auth.authorizedRequest(url: url, method: "POST") else { return }
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_viewer_id": viewerID])
         _ = try? await URLSession.shared.data(for: request)
+        SocialProfileStore.shared.forgetShare(friendID: viewerID)
         await loadShares()
     }
 }

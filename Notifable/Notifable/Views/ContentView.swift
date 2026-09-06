@@ -38,6 +38,11 @@ struct ContentView: View {
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     @State private var showSettings = false
+
+    /// Red de seguridad de la cadena de vinculación: normalmente la presenta
+    /// `SettingsView`, pero si la app se cerró a medias —o el token llegó ya
+    /// fuera de Ajustes— la pregunta sigue pendiente y hay que hacerla igual.
+    /// Sólo con Ajustes cerrado: dos `fullScreenCover` a la vez no se pueden.
     /// El tema tiene tres estados; el botón de la cabecera alterna entre claro
     /// y oscuro sobre el que se esté viendo, y "Automático" se elige en Ajustes.
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
@@ -123,6 +128,7 @@ struct ContentView: View {
             .background(Color(.systemBackground).ignoresSafeArea())
             .ignoresSafeArea(.keyboard)
             .onAppear(perform: resolveRecurring)
+            .gmailLinkFlow(isEnabled: !showSettings)
             .fullScreenCover(isPresented: $showSettings) {
                 SettingsView()
             }

@@ -174,6 +174,64 @@ struct OverLimitAlert: View {
     }
 }
 
+/// La fila de "Nueva categoría", al final de Mis Categorías.
+///
+/// Mismas medidas que `UnifiedCategoryRow` —igual ancho, igual radio, igual
+/// bloque de icono de 36 pt— para que caiga en la misma columna que las demás;
+/// lo que la distingue es el borde discontinuo, el "+" y el tinte de acento, no
+/// un tamaño distinto. Antes era un botón suelto más bajo y más estrecho que
+/// las tarjetas, y parecía de otra pantalla.
+struct NewCategoryRow: View {
+
+    var onTap: () -> Void
+
+    @Environment(\.colorScheme) private var scheme
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+
+    private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
+    private var palette: Palette { Palette(scheme) }
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(accent.color.opacity(0.18))
+                    .frame(width: 36, height: 36)
+                    .overlay(
+                        Image(systemName: "plus")
+                            .font(.footnote.weight(.bold))
+                            .foregroundStyle(accent.color)
+                    )
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Nueva categoría")
+                        .font(.headline)
+                        .foregroundStyle(accent.onSurface(scheme))
+                    Text("Nombre, color y límite")
+                        .font(.footnote)
+                        .foregroundStyle(palette.secondaryLabel)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(accent.color.opacity(scheme == .dark ? 0.10 : 0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(accent.color.opacity(0.5),
+                                  style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
+            )
+            .padding(.horizontal, 16)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 /// Fila unificada de `6d`: sustituye a `CategoryLimitRow` + la tarjeta de
 /// categoría expandible que existían por separado. Antes cada categoría se
 /// pintaba dos veces —una fila de límite arriba, una tarjeta abajo—; ahora es

@@ -110,8 +110,11 @@ struct CategoriesView: View {
     @State private var limitNote: String?
     @State private var editingCategory: CategoryWrapper?
     
-    @State private var showingNewCategoryAlert = false
-    @State private var newCategoryName = ""
+    /// Crear categoría abre el **mismo** `CategorySettingsView` que se usa al
+    /// crearla desde el sheet de asignar (nombre, color, límite y lo demás). El
+    /// alert de sólo-nombre que había antes creaba categorías a medias: sin
+    /// color y sin límite, y había que volver a entrar a configurarlas.
+    @State private var creatingCategory = false
 
     @StateObject private var budgets = CategoryBudgetStore.shared
     @StateObject private var catalog = CategoryCatalog.shared
@@ -998,36 +1001,22 @@ struct CategoriesView: View {
             }
             
             if focusedCategory == nil {
-                Button {
-                    newCategoryName = ""
-                    showingNewCategoryAlert = true
-                } label: {
-                    HStack {
-                        Image(systemName: "plus.circle.fill")
-                        Text("Nueva categoría")
-                        Spacer()
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(themeColor)
-                    .padding()
-                    .background(palette.surface)
-                    .cornerRadius(12)
-                }
-                .padding(.top, 4)
+                NewCategoryRow { creatingCategory = true }
+                    .padding(.top, 2)
             }
         }
-        .alert("Nueva categoría", isPresented: $showingNewCategoryAlert) {
-            TextField("Nombre de la categoría", text: $newCategoryName)
-            Button("Cancelar", role: .cancel) { }
-            Button("Crear") {
-                let name = newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !name.isEmpty {
-                    catalog.save(CustomCategory(name: name))
-                    editingCategory = CategoryWrapper(id: name)
-                }
+        .sheet(isPresented: $creatingCategory) {
+            NavigationStack {
+                CategorySettingsView(category: "", isNew: true, history: expenses)
+                    // El modal compartido sólo trae "Listo" —dentro de un sheet
+                    // no hay botón de atrás que haga de salida—, así que la
+                    // cancelación se añade aquí en vez de tocar la pieza común.
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancelar") { creatingCategory = false }
+                        }
+                    }
             }
-        } message: {
-            Text("Ingresa el nombre de la nueva categoría.")
         }
     }
 
