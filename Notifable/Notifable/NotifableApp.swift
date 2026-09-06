@@ -83,6 +83,17 @@ struct NotifableApp: App {
         }
         .modelContainer(sharedModelContainer) // Inyecta la BD a todas las vistas
         .onChange(of: scenePhase) { oldPhase, newPhase in
+            // El bloqueo se arma al **salir**, no al volver: `.inactive` es la
+            // pantalla que iOS fotografía para el conmutador de apps, así que
+            // esperar al regreso dejaría el saldo a la vista en la vista de
+            // tarjetas. `AppLock` ignora el paso a `.inactive` que provoca el
+            // propio diálogo de Face ID.
+            if newPhase == .active {
+                AppLock.shared.sceneDidBecomeActive()
+            } else {
+                AppLock.shared.sceneWillResignActive()
+            }
+
             if newPhase == .active {
                 if GmailAuthService.shared.isAuthenticated {
                     GmailSyncService.shared.modelContext = sharedModelContainer.mainContext

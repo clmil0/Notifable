@@ -201,6 +201,10 @@ struct SettingsEntry: Identifiable, Hashable {
         SettingsEntry(id: "notifications", title: "Notificaciones",
                       keywords: ["aviso", "recordatorio", "deuda", "cobro", "presupuesto"],
                       section: "La app", destination: "notifications"),
+        SettingsEntry(id: "lock", title: "Bloqueo",
+                      keywords: ["face id", "faceid", "touch id", "huella", "cara",
+                                 "privacidad", "seguridad", "contraseña", "código"],
+                      section: "La app", destination: "lock"),
         SettingsEntry(id: "data", title: "Datos y respaldo",
                       keywords: ["csv", "exportar", "backup", "nube", "borrar", "caché"],
                       section: "La app", destination: "data")

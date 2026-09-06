@@ -60,7 +60,6 @@ struct CategoriesView: View {
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
     @Environment(\.colorScheme) var colorScheme
 
-    @Binding var scrollOffset: CGFloat
     @Binding var scrollToTopTrigger: Bool
 
     @StateObject private var exchangeRateService = ExchangeRateService.shared
@@ -144,7 +143,7 @@ struct CategoriesView: View {
     }
 
     var filteredExpenses: [Expense] {
-        expenses.filter { period.contains($0.date) }
+        period.filter(expenses, by: \.date)
     }
 
     private var snapshots: [ExpenseSnapshot] { expenses.map(\.accountingSnapshot) }
@@ -640,7 +639,7 @@ struct CategoriesView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            TrackableScrollView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger) {
+            TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
                 VStack(spacing: 24) {
                     // 1. Periodo: una sola fila, compartida con las otras pestañas.
                     PeriodHeader(period: $period, dailySpent: dailySpent(for:))
@@ -1213,6 +1212,6 @@ struct CategoriesView: View {
 // unificada de `UnifiedCategoryRow`.
 
 #Preview {
-    CategoriesView(scrollOffset: .constant(100), scrollToTopTrigger: .constant(false))
+    CategoriesView(scrollToTopTrigger: .constant(false))
         .modelContainer(for: [Expense.self, Income.self], inMemory: true)
 }

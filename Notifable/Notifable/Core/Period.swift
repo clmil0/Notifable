@@ -60,13 +60,23 @@ struct Period: Equatable, Hashable {
     }
 
     /// Lunes como primer día de la semana (Perú).
-    static var calendar: Calendar {
+    ///
+    /// `let` y no `var` computada: construir un `Calendar` arrastra la creación
+    /// de un `Locale`, y esto se leía dentro de bucles sobre todo el historial
+    /// —un calendario nuevo por gasto filtrado, otro por barra del scrubber—.
+    /// `Calendar` es un tipo por valor e inmutable, así que compartir la misma
+    /// instancia entre hilos es seguro.
+    ///
+    /// - Note: la zona horaria queda fijada al arrancar. Cambiarla en el
+    ///   sistema (viajar de país) no se refleja hasta reabrir la app; a cambio,
+    ///   los límites de día dejan de recalcularse miles de veces por segundo.
+    static let calendar: Calendar = {
         var c = Calendar(identifier: .gregorian)
         c.firstWeekday = 2
         c.locale = Locale(identifier: "es_PE")
         c.timeZone = .current
         return c
-    }
+    }()
 
     // MARK: - Intervalo
 
@@ -105,6 +115,50 @@ struct Period: Equatable, Hashable {
     func contains(_ date: Date) -> Bool {
         let i = interval
         return date >= i.start && date < i.end
+    }
+
+    /// Filtra una colección resolviendo el intervalo **una sola vez**.
+    ///
+    /// `contains(_:)` recalcula `interval` en cada llamada, y eso dentro de un
+    /// `filter` sobre todo el historial construía un `DateInterval` —con su
+    /// `dateInterval(of:for:)` detrás— por cada movimiento. Aquí se resuelve
+    /// fuera del bucle y la comparación es la misma de siempre: `[start, end)`.
+    func filter<T>(_ items: [T], by date: (T) -> Date) -> [T] {
+        let i = interval
+        return items.filter { date($0) >= i.start && date($0) < i.end }
+    }
+
+    // MARK: - Ventana de datos
+
+    /// Rango de fechas que una pantalla necesita tener **cargado** para poder
+    /// dibujar este periodo. Es lo que acota los `@Query` de Resumen y Ritmo.
+    ///
+    /// No basta con `interval`, por dos motivos:
+    /// - Al entrar a un día, el scrubber sigue dibujando el mes (o la semana)
+    ///   que lo contiene, así que sus barras necesitan los movimientos de todo
+    ///   ese mes aunque la lista muestre un solo día. Se usa el mes porque es
+    ///   superconjunto de la semana: `PeriodHeader` decide cuál de los dos
+    ///   enseña con un `@State` propio que esta capa no ve.
+    /// - Ritmo compara siempre contra el periodo anterior.
+    ///
+    /// - Parameter includingPrevious: añade el periodo anterior completo.
+    func dataWindow(includingPrevious: Bool = false) -> DateInterval {
+        var start = interval.start
+        var end = interval.end
+
+        if granularity == .dia,
+           let month = Period.calendar.dateInterval(of: .month, for: reference) {
+            start = min(start, month.start)
+            end = max(end, month.end)
+        }
+
+        if includingPrevious {
+            let earlier = previous.interval
+            start = min(start, earlier.start)
+            end = max(end, earlier.end)
+        }
+
+        return DateInterval(start: start, end: end)
     }
 
     /// Mismo periodo, corrido una unidad atrás. Base de todas las comparaciones.

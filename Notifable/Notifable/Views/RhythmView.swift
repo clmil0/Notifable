@@ -7,18 +7,49 @@ import SwiftData
 /// dibujaba con `now` en vez del periodo navegado, así que al retroceder una
 /// semana los números de arriba cambiaban y el gráfico no. Aquí todo sale de
 /// `PeriodTotals`, y lo primero que se lee es una frase, no un eje.
+/// Envoltorio: sólo lee el periodo guardado y se lo pasa al contenido.
+///
+/// Existe porque `@Query` se construye en el `init` y `@AppStorage` no se puede
+/// leer desde ahí. Partir la vista en dos es lo que permite que la consulta a
+/// la base esté **acotada al periodo visible** en lugar de traerse el historial
+/// entero: al cambiar de periodo, `RhythmContent` se reconstruye con otro
+/// descriptor y SwiftData recarga sólo ese tramo.
 struct RhythmView: View {
 
-    @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
-    @Query(sort: \Income.date, order: .reverse) private var incomes: [Income]
+    @Binding var scrollToTopTrigger: Bool
+    @AppStorage("period") private var period = Period()
+
+    var body: some View {
+        RhythmContent(period: $period, scrollToTopTrigger: $scrollToTopTrigger)
+    }
+}
+
+private struct RhythmContent: View {
+
+    @Query private var expenses: [Expense]
+    @Query private var incomes: [Income]
     @Environment(\.colorScheme) private var colorScheme
 
-    @Binding var scrollOffset: CGFloat
+    @Binding var period: Period
     @Binding var scrollToTopTrigger: Bool
 
     @StateObject private var exchangeRateService = ExchangeRateService.shared
-    @AppStorage("period") private var period = Period()
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+
+    /// La ventana incluye el periodo anterior: `Rhythm` lo compara siempre, y
+    /// sin él el titular diría "no hay con qué comparar" en vez de la frase.
+    init(period: Binding<Period>, scrollToTopTrigger: Binding<Bool>) {
+        self._period = period
+        self._scrollToTopTrigger = scrollToTopTrigger
+
+        let window = period.wrappedValue.dataWindow(includingPrevious: true)
+        let start = window.start
+        let end = window.end
+        _expenses = Query(filter: #Predicate<Expense> { $0.date >= start && $0.date < end },
+                          sort: \Expense.date, order: .reverse)
+        _incomes = Query(filter: #Predicate<Income> { $0.date >= start && $0.date < end },
+                         sort: \Income.date, order: .reverse)
+    }
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(colorScheme) }
@@ -44,8 +75,10 @@ struct RhythmView: View {
     /// Suscripciones del periodo, una fila por comercio.
     private var subscriptions: [DetectedSubscription] {
         let cal = Period.calendar
+        let range = period.interval
         var grouped: [String: [Expense]] = [:]
-        for expense in expenses where expense.isSubscription && period.contains(expense.date) {
+        for expense in expenses
+        where expense.isSubscription && expense.date >= range.start && expense.date < range.end {
             grouped[expense.merchant, default: []].append(expense)
         }
         return grouped
@@ -67,7 +100,7 @@ struct RhythmView: View {
     // MARK: - Cuerpo
 
     var body: some View {
-        TrackableScrollView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger) {
+        TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 16) {
                 PeriodHeader(period: $period, dailySpent: dailySpent(for:))
 

@@ -38,6 +38,9 @@ struct SettingsView: View {
     @AppStorage("syncYape") private var syncYape = true
     @AppStorage("syncInterbank") private var syncInterbank = true
     @AppStorage("syncScotiabank") private var syncScotiabank = true
+    // Igual que los avisos: se lee aquí para que la fila de la raíz refleje el
+    // valor sin tener que volver a entrar.
+    @AppStorage(AppLock.enabledKey) private var lockEnabled = false
 
     @State private var query = ""
 
@@ -122,7 +125,7 @@ struct SettingsView: View {
 
     private var expensesThisMonth: Int {
         let period = Period(granularity: .mes, reference: Date())
-        return expenses.filter { period.contains($0.date) }.count
+        return period.filter(expenses, by: \.date).count
     }
 
     private var unclassifiedMerchantCount: Int {
@@ -195,6 +198,11 @@ struct SettingsView: View {
                 NotificationSettingsView()
             }
             SettingsSeparator()
+            SettingsRow(title: "Bloqueo", icon: AppLock.biometryIcon,
+                        tint: .orange, value: lockValue) {
+                AppLockSettingsView()
+            }
+            SettingsSeparator()
             SettingsRow(title: "Datos y respaldo", icon: "externaldrive.fill",
                         tint: .gray, value: "\(expenses.count) gastos") {
                 DataBackupView()
@@ -218,6 +226,11 @@ struct SettingsView: View {
         if active == 0 && quickExpenses.isEmpty { return "Ninguno" }
         if active == 0 { return "\(quickExpenses.count) atajos" }
         return active == 1 ? "1 activo" : "\(active) activos"
+    }
+
+    private var lockValue: String {
+        guard AppLock.canLock else { return "No disponible" }
+        return lockEnabled ? AppLock.biometryName : "Desactivado"
     }
 
     private var rulesValue: String {
@@ -301,6 +314,7 @@ struct SettingsView: View {
         case "range":         RangeSyncView()
         case "appearance":    AppearanceSettingsView()
         case "notifications": NotificationSettingsView()
+        case "lock":          AppLockSettingsView()
         default:              DataBackupView()
         }
     }

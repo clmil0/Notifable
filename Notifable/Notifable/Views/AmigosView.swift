@@ -15,11 +15,26 @@ import SwiftData
 /// - lo que te comparten legible de un golpe, con su desglose;
 /// - un contador de "con cuántos de tus amigos estás compartiendo".
 struct AmigosHubView: View {
-    @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
+    /// Sólo el mes en curso, que es lo único que esta pantalla enseña.
+    ///
+    /// Antes cargaba el historial entero para calcular un total del mes. Con
+    /// varios años de correo leído eso son decenas de miles de objetos
+    /// materializados —y su relación `payments` resuelta— cada vez que se
+    /// dibuja la pestaña.
+    @Query private var expenses: [Expense]
     @Environment(\.colorScheme) private var colorScheme
 
-    @Binding var scrollOffset: CGFloat
     @Binding var scrollToTopTrigger: Bool
+
+    init(scrollToTopTrigger: Binding<Bool>) {
+        self._scrollToTopTrigger = scrollToTopTrigger
+
+        let window = Period(granularity: .mes, reference: Date()).dataWindow()
+        let start = window.start
+        let end = window.end
+        _expenses = Query(filter: #Predicate<Expense> { $0.date >= start && $0.date < end },
+                          sort: \Expense.date, order: .reverse)
+    }
 
     @StateObject private var exchangeRateService = ExchangeRateService.shared
     @State private var friendsManager = FriendsManager.shared
@@ -63,7 +78,7 @@ struct AmigosHubView: View {
     }
 
     var body: some View {
-        TrackableScrollView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger) {
+        TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 22) {
                 header
                 profileCard

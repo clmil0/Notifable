@@ -33,7 +33,6 @@ struct ContentView: View {
     @AppStorage("remindRecurring") private var remindRecurring = true
     @State private var didResolveRecurring = false
     @State private var selectedTab: AppTab = .home
-    @State private var scrollOffset: CGFloat = 0
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
@@ -50,6 +49,7 @@ struct ContentView: View {
     @State private var selectedTransactionType: TransactionType? = nil
     @State private var showAddPicker = false
     @State private var showSplash = true
+    @StateObject private var appLock = AppLock.shared
     @State private var tabWidth: CGFloat = 0
     @State private var scrollToTopTrigger: Bool = false
     @State private var themeButtonCenter: CGPoint = CGPoint(x: UIScreen.main.bounds.width - 80, y: 60)
@@ -110,13 +110,13 @@ struct ContentView: View {
                                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                                     selectedTab = .categories
                                 }
-                            }, scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
+                            }, scrollToTopTrigger: $scrollToTopTrigger)
                         case .categories:
-                            CategoriesView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
+                            CategoriesView(scrollToTopTrigger: $scrollToTopTrigger)
                         case .trends:
-                            RhythmView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
+                            RhythmView(scrollToTopTrigger: $scrollToTopTrigger)
                         case .amigos:
-                            AmigosHubView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger)
+                            AmigosHubView(scrollToTopTrigger: $scrollToTopTrigger)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -128,6 +128,16 @@ struct ContentView: View {
             .background(Color(.systemBackground).ignoresSafeArea())
             .ignoresSafeArea(.keyboard)
             .onAppear(perform: resolveRecurring)
+            .onChange(of: appLock.isLocked) { _, locked in
+                // Ajustes y las hojas se presentan en la capa de modales de
+                // iOS, por encima de este `ZStack`: si quedaran abiertas, la
+                // pantalla de bloqueo estaría **detrás** de ellas y no taparía
+                // nada. Bloquear cierra lo que hubiera encima.
+                guard locked else { return }
+                showSettings = false
+                selectedTransactionType = nil
+                showAddPicker = false
+            }
             .gmailLinkFlow(isEnabled: !showSettings)
             .fullScreenCover(isPresented: $showSettings) {
                 SettingsView()
@@ -175,6 +185,15 @@ struct ContentView: View {
             }
 
             
+            // La puerta va por encima de todo lo de esta pantalla, y por
+            // debajo del splash: al abrir se ve primero la marca y luego el
+            // bloqueo, no los dos peleándose.
+            if appLock.isLocked {
+                LockScreenView(lock: appLock)
+                    .transition(.opacity)
+                    .zIndex(10)
+            }
+
             // Splash Screen Overlay: la gota a gota de "Icono y Splash" (handoff
             // de identidad) — reemplaza el placeholder de la campanita.
             if showSplash {

@@ -45,6 +45,40 @@ enum RecurringEngine {
     /// Diferencia de monto aceptada para considerar que es el mismo cobro (15%).
     static let amountTolerance = 0.15
 
+    /// Tramo del historial que `pending(rules:expenses:)` llega a mirar.
+    ///
+    /// Existe para que Resumen pueda acotar su `@Query` sin romper la
+    /// deduplicación: si la ventana se quedara corta, un cobro real del banco
+    /// no encontraría su ocurrencia y la regla se anunciaría como pendiente
+    /// estando ya cobrada. Se calcula con el **mismo** criterio que `pending`
+    /// (desde la última ocurrencia resuelta, o desde el inicio de la regla) más
+    /// el margen de `bankMatch` a cada lado.
+    ///
+    /// `nil` si no hay ninguna regla activa: entonces no hace falta historial.
+    static func matchWindow(rules: [RecurringExpense],
+                            horizon: Int = 0,
+                            now: Date = Date()) -> DateInterval? {
+
+        let cal = Period.calendar
+        let today = cal.startOfDay(for: now)
+        guard let end = cal.date(byAdding: .day,
+                                 value: horizon + 1 + toleranceDays,
+                                 to: today) else { return nil }
+
+        var earliest: Date?
+        for rule in rules where !rule.isPaused && rule.frequency != .never {
+            let from = rule.lastResolvedOccurrence
+                .flatMap { cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: $0)) }
+                ?? cal.startOfDay(for: rule.startDate)
+            guard from < end else { continue }
+            if earliest == nil || from < earliest! { earliest = from }
+        }
+
+        guard let earliest else { return nil }
+        let start = cal.date(byAdding: .day, value: -toleranceDays, to: earliest) ?? earliest
+        return DateInterval(start: start, end: end)
+    }
+
     /// Ocurrencias vencidas y no resueltas, hasta hoy inclusive.
     ///
     /// - Parameter horizon: días hacia adelante a incluir. 0 = sólo lo vencido.

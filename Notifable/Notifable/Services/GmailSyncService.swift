@@ -235,6 +235,22 @@ class GmailSyncService: ObservableObject {
         return Set(expenses.compactMap { $0.emailID }).union(incomes.compactMap { $0.emailID })
     }
 
+    /// `existingEmailIDs()` en el hilo principal, se llame desde donde se llame.
+    ///
+    /// **Corrección de un cuelgue permanente:** aquí había un
+    /// `DispatchQueue.main.sync` a secas. `processMessages` llega desde el
+    /// callback de `URLSession` (un hilo de fondo) y ahí funcionaba, pero
+    /// `recoverExpenses` se invoca desde el botón "Sí, recuperar" de la alerta
+    /// de Recuperación de Gastos —o sea, **ya en el hilo principal**—, y
+    /// `main.sync` desde el propio hilo principal es un interbloqueo inmediato
+    /// y definitivo: la app se quedaba congelada, sin crash y sin registro.
+    /// Estando ya en main no hace falta ningún salto; el `sync` se reserva para
+    /// cuando de verdad se viene de otro hilo.
+    private func knownEmailIDsFromMain() -> Set<String> {
+        if Thread.isMainThread { return existingEmailIDs() }
+        return DispatchQueue.main.sync { self.existingEmailIDs() }
+    }
+
     private func processMessages(_ messages: [[String: Any]],
                                  token: String,
                                  isRangeSync: Bool = false,
@@ -272,8 +288,7 @@ class GmailSyncService: ObservableObject {
 
         // Se siembra con lo que ya está en la base y se va ampliando: dos
         // correos de la misma tanda no pueden crear el mismo gasto dos veces.
-        var knownIDs: Set<String> = []
-        DispatchQueue.main.sync { knownIDs = self.existingEmailIDs() }
+        var knownIDs: Set<String> = knownEmailIDsFromMain()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             for message in newMessages {
@@ -367,8 +382,7 @@ class GmailSyncService: ObservableObject {
         var newExpensesFound = 0
 
         // Recuperar dos veces tampoco puede duplicar.
-        var knownIDs: Set<String> = []
-        DispatchQueue.main.sync { knownIDs = self.existingEmailIDs() }
+        var knownIDs: Set<String> = knownEmailIDsFromMain()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             for id in ids {

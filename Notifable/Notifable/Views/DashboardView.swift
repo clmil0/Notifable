@@ -21,27 +21,79 @@ enum TransactionItem: Identifiable {
     }
 }
 
+/// Envoltorio: resuelve el periodo guardado y las reglas recurrentes, y con
+/// ambos decide **qué tramo del historial** hace falta cargar.
+///
+/// `@Query` se construye en el `init` y `@AppStorage` no se puede leer desde
+/// ahí, así que la pantalla se parte en dos. Lo que se gana: la consulta deja
+/// de traerse el historial completo —que con años de correo leído son decenas
+/// de miles de objetos, con su relación `payments` resuelta uno a uno— y se
+/// queda en el periodo visible. Al filtrar por año se cargará un año; antes se
+/// cargaba todo igualmente.
 struct DashboardView: View {
     /// Lleva a la pestaña Categorías. Lo resuelve `ContentView`, que es quien
     /// tiene la pestaña seleccionada.
     var onOpenInbox: () -> Void = {}
 
-    @Environment(\.modelContext) private var modelContext
-    @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
-    @Query(sort: \Income.date, order: .reverse) private var incomes: [Income]
-    @Query private var recurringRules: [RecurringExpense]
-    @Environment(\.colorScheme) var colorScheme
-    
-    @Binding var scrollOffset: CGFloat
     @Binding var scrollToTopTrigger: Bool
-    
-    @StateObject private var exchangeRateService = ExchangeRateService.shared
-    
-    /// Un solo periodo para toda la app. Sustituye a `dashboardFilter` +
-    /// `categoriesFilter` + `syncFilters` + tres `referenceDate` independientes.
+
     @AppStorage("period") private var period = Period()
-    
+    @Query private var recurringRules: [RecurringExpense]
+
+    /// El periodo visible **más** lo que necesita la deduplicación de
+    /// recurrentes: si la ventana se quedara corta, un cobro del banco ya
+    /// registrado no encontraría su ocurrencia y se anunciaría como pendiente
+    /// estando cobrado.
+    private var window: DateInterval {
+        let visible = period.dataWindow()
+        guard let recurring = RecurringEngine.matchWindow(rules: recurringRules) else { return visible }
+        return DateInterval(start: min(visible.start, recurring.start),
+                            end: max(visible.end, recurring.end))
+    }
+
+    var body: some View {
+        DashboardContent(onOpenInbox: onOpenInbox,
+                         period: $period,
+                         scrollToTopTrigger: $scrollToTopTrigger,
+                         recurringRules: recurringRules,
+                         window: window)
+    }
+}
+
+private struct DashboardContent: View {
+    let onOpenInbox: () -> Void
+
+    @Environment(\.modelContext) private var modelContext
+    @Query private var expenses: [Expense]
+    @Query private var incomes: [Income]
+    /// Vienen del envoltorio, que ya los consultó para calcular la ventana.
+    let recurringRules: [RecurringExpense]
+    @Environment(\.colorScheme) var colorScheme
+
+    @Binding var period: Period
+    @Binding var scrollToTopTrigger: Bool
+
+    @StateObject private var exchangeRateService = ExchangeRateService.shared
+
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+
+    init(onOpenInbox: @escaping () -> Void,
+         period: Binding<Period>,
+         scrollToTopTrigger: Binding<Bool>,
+         recurringRules: [RecurringExpense],
+         window: DateInterval) {
+        self.onOpenInbox = onOpenInbox
+        self._period = period
+        self._scrollToTopTrigger = scrollToTopTrigger
+        self.recurringRules = recurringRules
+
+        let start = window.start
+        let end = window.end
+        _expenses = Query(filter: #Predicate<Expense> { $0.date >= start && $0.date < end },
+                          sort: \Expense.date, order: .reverse)
+        _incomes = Query(filter: #Predicate<Income> { $0.date >= start && $0.date < end },
+                         sort: \Income.date, order: .reverse)
+    }
     
     var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
 
@@ -94,11 +146,11 @@ struct DashboardView: View {
     }
     
     var filteredExpenses: [Expense] {
-        expenses.filter { period.contains($0.date) }
+        period.filter(expenses, by: \.date)
     }
     
     var filteredIncomes: [Income] {
-        incomes.filter { period.contains($0.date) }
+        period.filter(incomes, by: \.date)
     }
     
     /// Gasto del periodo en soles.
@@ -148,7 +200,7 @@ struct DashboardView: View {
 
     var body: some View {
         ZStack {
-            TrackableScrollView(scrollOffset: $scrollOffset, scrollToTopTrigger: $scrollToTopTrigger) {
+            TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
                 VStack(spacing: 24) {
                     
                     // Contenedor principal para no tapar el top header
@@ -736,6 +788,6 @@ struct DashboardView: View {
 }
 
 #Preview {
-    DashboardView(scrollOffset: .constant(100), scrollToTopTrigger: .constant(false))
+    DashboardView(scrollToTopTrigger: .constant(false))
         .modelContainer(for: [Expense.self, Income.self], inMemory: true)
 }

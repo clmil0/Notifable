@@ -59,7 +59,6 @@ class SyncManager {
 // MARK: - Social View
 struct SocialView: View {
     @State private var syncManager = SyncManager.shared
-    @Binding var scrollOffset: CGFloat
     
     var body: some View {
         ZStack {
@@ -70,7 +69,7 @@ struct SocialView: View {
                     description: Text("No se encontraron transacciones en Supabase. ¿Ya creaste la tabla 'expenses'?")
                 )
             } else {
-                TrackableScrollView(scrollOffset: $scrollOffset) {
+                TrackableScrollView {
                     VStack(spacing: 16) {
                         ForEach(syncManager.socialFeed) { expense in
                             HStack {
@@ -111,5 +110,5 @@ struct SocialView: View {
 }
 
 #Preview {
-    SocialView(scrollOffset: .constant(100))
+    SocialView()
 }
