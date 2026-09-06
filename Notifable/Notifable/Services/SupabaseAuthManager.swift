@@ -114,6 +114,73 @@ final class SupabaseAuthManager {
         }
     }
 
+    /// Un `access_token` vivo, refrescándolo primero si ya venció.
+    ///
+    /// El JWT anónimo de Supabase dura 1 hora y hasta ahora nada lo
+    /// refrescaba — `refreshToken` se guardaba pero nunca se usaba. Los REST
+    /// de `FriendsManager` no lo notaban tanto porque un 401 sólo dejaba
+    /// `lastErrorMessage` en silencio, pero Realtime SÍ lo rechaza de forma
+    /// explícita al unirse al canal (el JWT ahí se valida contra RLS), así
+    /// que una sesión de más de una hora sin resincronizar se quedaba con
+    /// Realtime roto sin ningún aviso visible. Cualquier cosa que necesite un
+    /// token para hablar con Supabase debería pasar por aquí, no leer
+    /// `accessToken` directo.
+    func validAccessToken() async -> String? {
+        if let accessToken, !Self.isExpired(accessToken) { return accessToken }
+        guard await refreshSession() else { return nil }
+        return accessToken
+    }
+
+    /// Decodifica el `exp` del JWT (segunda parte, base64url) sin verificar
+    /// la firma — sólo hace falta saber si ya venció, no validarlo; eso ya lo
+    /// hace el servidor en cada petición.
+    private static func isExpired(_ token: String) -> Bool {
+        let parts = token.split(separator: ".")
+        guard parts.count == 3 else { return true }
+        var base64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 { base64 += "=" }
+        guard let data = Data(base64Encoded: base64),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let exp = json["exp"] as? Double else { return true }
+        // 30s de margen: que no vaya a vencer a mitad de una petición.
+        return Date(timeIntervalSince1970: exp) <= Date().addingTimeInterval(30)
+    }
+
+    @discardableResult
+    private func refreshSession() async -> Bool {
+        guard let refreshToken else { return false }
+        guard let url = URL(string: "\(projectURL)/auth/v1/token?grant_type=refresh_token") else { return false }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue(apiKey, forHTTPHeaderField: "apikey")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["refresh_token": refreshToken])
+
+        struct RefreshResponse: Decodable {
+            let access_token: String
+            let refresh_token: String
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                print("Amigos: no se pudo refrescar la sesión (HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1)).")
+                return false
+            }
+            let decoded = try JSONDecoder().decode(RefreshResponse.self, from: data)
+            accessToken = decoded.access_token
+            self.refreshToken = decoded.refresh_token
+            UserDefaults.standard.set(accessToken, forKey: Keys.accessToken)
+            UserDefaults.standard.set(self.refreshToken, forKey: Keys.refreshToken)
+            return true
+        } catch {
+            print("Amigos: error de red refrescando la sesión: \(error)")
+            return false
+        }
+    }
+
     /// Upsert por `id` (clave primaria de `profiles`): crea la fila la primera
     /// vez, y la actualiza si el nombre cambió.
     private func pushProfile(name: String,

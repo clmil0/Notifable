@@ -285,9 +285,7 @@ struct GmailBanksView: View {
     }
 
     private func startSync() {
-        let start = Calendar.current.startOfDay(
-            for: Calendar.current.date(byAdding: .month, value: -readPeriodMonths, to: Date()) ?? Date())
-        gmailSync.syncEmails(force: true, startDate: start, endDate: Date())
+        gmailSync.syncEmails(force: true, startDate: rangeStartDate, endDate: Date())
     }
 
     /// Abreviado para los chips: cinco opciones tienen que caber en una fila.
@@ -306,8 +304,7 @@ struct GmailBanksView: View {
     }
 
     private var rangeStartDate: Date {
-        Calendar.current.startOfDay(
-            for: Calendar.current.date(byAdding: .month, value: -readPeriodMonths, to: Date()) ?? Date())
+        GmailSyncService.smartRangeStart(months: readPeriodMonths)
     }
 
     private func formatted(_ date: Date) -> String {

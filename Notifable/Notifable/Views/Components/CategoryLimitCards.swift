@@ -39,7 +39,7 @@ struct SpendingDistributionCard: View {
                     Text("GASTO DE " + monthLabel.uppercased())
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(palette.secondaryLabel)
-                    Text(Money.formatCompact(total))
+                    Text(Money.format(total))
                         .font(.system(size: 25, weight: .bold, design: .rounded))
                         .foregroundStyle(palette.label)
                 }

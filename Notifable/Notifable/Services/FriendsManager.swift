@@ -70,6 +70,15 @@ struct FriendShareRow: Identifiable, Codable, Hashable {
 /// esquema SQL (`redeem_invite_code`, `upsert_my_share`, `respond_to_share`,
 /// `stop_sharing`) — nunca un INSERT/UPDATE directo, así el servidor decide
 /// quién puede tocar qué, no el cliente.
+///
+/// `@MainActor`: sin esto, dos llamadas a `refresh()` casi simultáneas (el
+/// `.task` inicial y un pull-to-refresh que se cruza, por ejemplo) podían
+/// correr de verdad en paralelo en hilos distintos y las dos pasar el guard
+/// de `startListeningForChanges` antes de que ninguna marcara
+/// `isListeningForChanges` — eso abría dos conexiones de Realtime a la vez
+/// (se veía en los logs: todo duplicado). Aislado al actor principal, esa
+/// comprobación y esa asignación no pueden entrelazarse con otra llamada.
+@MainActor
 @Observable
 final class FriendsManager {
 
@@ -90,6 +99,11 @@ final class FriendsManager {
     private var profileNames: [String: String] = [:]
     private var profileStatuses: [String: String] = [:]
 
+    /// Sólo se arma una vez por sesión: no hace falta re-suscribirse en cada
+    /// `refresh()` (pull-to-refresh, reabrir la pestaña...), sólo la primera
+    /// vez que hay sesión.
+    private var isListeningForChanges = false
+
     private var baseURL: String { auth.baseURL }
 
     private static var currentMonthKey: String {
@@ -105,6 +119,25 @@ final class FriendsManager {
         defer { isLoading = false }
         await loadFriendships()
         await loadShares()
+        await startListeningForChanges()
+    }
+
+    /// Escucha en vivo lo que cambia del lado de un amigo: si él canjea tu
+    /// código, o si activa/edita lo que te comparte, esto llega solo — sin
+    /// esperar a que el usuario haga pull-to-refresh. RLS ya filtra: sólo
+    /// llegan filas donde este usuario es `user_a`/`user_b` (amistades) o
+    /// `sharer_id`/`viewer_id` (compartidos).
+    private func startListeningForChanges() async {
+        guard !isListeningForChanges else { return }
+        isListeningForChanges = true
+
+        let realtime = SupabaseRealtimeClient.shared
+        await realtime.subscribe(table: "friendships") { [weak self] _ in
+            Task { await self?.loadFriendships() }
+        }
+        await realtime.subscribe(table: "friend_shares") { [weak self] _ in
+            Task { await self?.loadShares() }
+        }
     }
 
     // MARK: - Amistades
@@ -234,24 +267,35 @@ final class FriendsManager {
         }
     }
 
-    /// Canjea el código de un amigo: crea la amistad si es válido.
+    /// Canjea el código de un amigo: crea la amistad si es válido y devuelve
+    /// el perfil de quien lo generó — la función RPC ya lo trae, así que no
+    /// hace falta adivinar cuál es "el nuevo" comparando listas antes/después.
     @discardableResult
-    func redeem(code: String) async -> Bool {
-        guard let url = URL(string: "\(baseURL)/rest/v1/rpc/redeem_invite_code") else { return false }
-        guard var request = auth.authorizedRequest(url: url, method: "POST") else { return false }
+    func redeem(code: String) async -> Friend? {
+        guard let url = URL(string: "\(baseURL)/rest/v1/rpc/redeem_invite_code") else { return nil }
+        guard var request = auth.authorizedRequest(url: url, method: "POST") else { return nil }
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_code": code])
 
+        struct OwnerProfile: Decodable {
+            let id: String
+            let display_name: String
+            let status: String?
+        }
+
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                 lastErrorMessage = "Código inválido o vencido."
-                return false
+                return nil
             }
+            let profile = try JSONDecoder().decode(OwnerProfile.self, from: data)
+            profileNames[profile.id] = profile.display_name
+            profileStatuses[profile.id] = profile.status ?? ""
             await refresh()
-            return true
+            return Friend(id: profile.id, displayName: profile.display_name, status: profile.status ?? "")
         } catch {
             lastErrorMessage = "No se pudo canjear el código."
-            return false
+            return nil
         }
     }
 

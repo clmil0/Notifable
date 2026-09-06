@@ -150,8 +150,7 @@ struct OnboardingHistoryView: View {
     }
 
     private var rangeStartDate: Date {
-        Calendar.current.startOfDay(
-            for: Calendar.current.date(byAdding: .month, value: -readPeriodMonths, to: Date()) ?? Date())
+        GmailSyncService.smartRangeStart(months: readPeriodMonths)
     }
 
     private var rangeLabel: String {

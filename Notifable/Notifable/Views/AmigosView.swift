@@ -34,11 +34,10 @@ struct AmigosHubView: View {
     @State private var showProfileSheet = false
 
     @State private var showInviteSheet = false
-    @State private var myInviteCode: String?
-    @State private var isGeneratingCode = false
-    @State private var redeemCodeDraft = ""
-    @State private var isRedeeming = false
-    @State private var redeemFeedback: String?
+    /// El amigo que se acaba de agregar: la fila en "Lo que tú compartes" lo
+    /// resalta unos segundos con "Nuevo · elige qué le compartes" en vez del
+    /// resumen normal. Se limpia solo — ver `flagRecentlyAdded`.
+    @State private var recentlyAddedFriendID: String?
 
     @State private var selectedFriend: Friend?
     @State private var friendToEdit: Friend?
@@ -100,7 +99,9 @@ struct AmigosHubView: View {
         .sheet(isPresented: $showProfileSheet) {
             MyProfileSheet()
         }
-        .sheet(isPresented: $showInviteSheet) { inviteSheet }
+        .sheet(isPresented: $showInviteSheet) {
+            AddFriendSheet(onJoined: flagRecentlyAdded)
+        }
         .sheet(item: $selectedFriend) { friend in
             AmigoDetailView(friend: friend, totals: totals)
         }
@@ -148,7 +149,8 @@ struct AmigosHubView: View {
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(themeColor)
         }
-        .padding(14)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
         .surfaceCard()
     }
 
@@ -248,7 +250,8 @@ struct AmigosHubView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                .padding(12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
                 .surfaceCard()
             }
         }
@@ -317,7 +320,8 @@ struct AmigosHubView: View {
                 .padding(.leading, 52)
             }
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     /// El nombre real acompaña al apodo: si yo la guardé como "Cami", conviene
@@ -362,7 +366,9 @@ struct AmigosHubView: View {
                         if index > 0 {
                             Divider().background(palette.separator).padding(.leading, 62)
                         }
+                        let isNew = friend.id == recentlyAddedFriendID
                         Button {
+                            if isNew { recentlyAddedFriendID = nil }
                             selectedFriend = friend
                         } label: {
                             HStack(spacing: 12) {
@@ -372,9 +378,9 @@ struct AmigosHubView: View {
                                     Text(friend.name)
                                         .font(.subheadline.bold())
                                         .foregroundStyle(palette.label)
-                                    Text(shareSummary(for: friend))
-                                        .font(.caption)
-                                        .foregroundStyle(isSharing(with: friend) ? palette.secondaryLabel : palette.tertiaryLabel)
+                                    Text(isNew ? "Nuevo · elige qué le compartes" : shareSummary(for: friend))
+                                        .font(.caption.weight(isNew ? .semibold : .regular))
+                                        .foregroundStyle(isNew ? themeColor : (isSharing(with: friend) ? palette.secondaryLabel : palette.tertiaryLabel))
                                         .lineLimit(1)
                                 }
 
@@ -384,10 +390,13 @@ struct AmigosHubView: View {
                                     .font(.caption.bold())
                                     .foregroundStyle(palette.tertiaryLabel)
                             }
-                            .padding(12)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
                             .contentShape(Rectangle())
+                            .background(isNew ? themeColor.opacity(0.12) : Color.clear)
                         }
                         .buttonStyle(.plain)
+                        .animation(.easeOut(duration: 1.2), value: recentlyAddedFriendID)
                         // Editar apodo y color sin tener que entrar al detalle:
                         // es una nota rápida, no una decisión de privacidad.
                         .contextMenu {
@@ -475,85 +484,332 @@ struct AmigosHubView: View {
         .surfaceCard()
     }
 
-    // MARK: - Hoja de invitación
+    // MARK: - Recién agregado
 
-    private var inviteSheet: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    if let code = myInviteCode {
-                        HStack {
-                            Text(code)
-                                .font(.title2.monospaced().bold())
-                            Spacer()
-                            ShareLink(item: "Agrégame en AgruPay con el código \(code)") {
-                                Image(systemName: "square.and.arrow.up")
-                            }
-                        }
-                    } else {
-                        Button {
-                            Task {
-                                isGeneratingCode = true
-                                myInviteCode = await friendsManager.generateInviteCode()
-                                isGeneratingCode = false
-                            }
-                        } label: {
-                            if isGeneratingCode {
-                                ProgressView()
-                            } else {
-                                Text("Generar mi código")
-                            }
-                        }
-                        .disabled(isGeneratingCode)
-                    }
-                } header: {
-                    Text("Tu código")
-                } footer: {
-                    Text("Válido 7 días y de un solo uso.")
-                }
+    /// El "glow" de la fila lo hace la propia `.animation` de `outgoingSection`
+    /// reaccionando a `recentlyAddedFriendID`: aquí sólo se agenda cuándo se
+    /// apaga, para que no se quede resaltado para siempre si el usuario no
+    /// toca la fila.
+    private func flagRecentlyAdded(_ id: String) {
+        recentlyAddedFriendID = id
+        Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if recentlyAddedFriendID == id {
+                recentlyAddedFriendID = nil
+            }
+        }
+    }
+}
 
-                Section {
-                    TextField("Código de tu amigo", text: $redeemCodeDraft)
-                        .textInputAutocapitalization(.characters)
-                        .autocorrectionDisabled()
-                    Button {
-                        Task {
-                            isRedeeming = true
-                            let code = redeemCodeDraft.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                            let ok = await friendsManager.redeem(code: code)
-                            isRedeeming = false
-                            if ok {
-                                redeemFeedback = "¡Listo! Ya son amigos."
-                                redeemCodeDraft = ""
-                            } else {
-                                redeemFeedback = friendsManager.lastErrorMessage ?? "No se pudo canjear el código."
-                            }
-                        }
-                    } label: {
-                        if isRedeeming {
-                            ProgressView()
-                        } else {
-                            Text("Unirme")
-                        }
-                    }
-                    .disabled(isRedeeming || redeemCodeDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+/// 1c — el flujo completo de "Agregar amigo": código propio listo al abrir,
+/// canjear el de un amigo con éxito animado, y la hoja se retira sola.
+///
+/// `onJoined` avisa a `AmigosHubView` quién se acaba de agregar para que la
+/// fila en "Lo que tú compartes" lo resalte — esta hoja no toca esa lista
+/// directamente, sólo reporta el id.
+struct AddFriendSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
-                    if let feedback = redeemFeedback {
-                        Text(feedback)
-                            .font(.caption)
+    let onJoined: (String) -> Void
+
+    @State private var friendsManager = FriendsManager.shared
+
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    private var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
+    private var palette: Palette { Palette(colorScheme) }
+
+    @State private var myCode: String?
+    @State private var isGeneratingCode = false
+    @State private var copied = false
+
+    @State private var redeemInput = ""
+    @State private var isRedeeming = false
+    @State private var redeemError: String?
+    @State private var joinedFriend: Friend?
+
+    private var isSuccess: Bool { joinedFriend != nil }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let joinedFriend {
+                successContent(friend: joinedFriend)
+            } else {
+                formContent
+            }
+        }
+        .task { await ensureCode() }
+        // Semimodal, no a pantalla completa: el contenido cabe de sobra en
+        // media hoja, y abrirla hasta arriba era ocupar espacio de más.
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(28)
+        .appAppearance()
+        .appTextSize()
+    }
+
+    // MARK: - Formulario
+
+    private var formContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Agregar amigo")
+                            .font(.title2.bold())
+                        Text("Se agregan con un código, no por nombre.")
+                            .font(.subheadline)
                             .foregroundStyle(palette.secondaryLabel)
                     }
-                } header: {
-                    Text("Unirme con un código")
+                    Spacer()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption.bold())
+                            .foregroundStyle(palette.secondaryLabel)
+                            .frame(width: 32, height: 32)
+                            .background(Color(.systemGray5), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                myCodeSection
+                redeemSection
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 26)
+        }
+    }
+
+    private var myCodeSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("TU CÓDIGO")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(palette.secondaryLabel)
+                Spacer()
+                Text("Vence en 7 días")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .background(Color.orange.opacity(0.14), in: Capsule())
+            }
+
+            codeCells
+
+            HStack(spacing: 10) {
+                Button {
+                    copyCode()
+                } label: {
+                    Text(copied ? "✓ Copiado" : "Copiar")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(copied ? .green : themeColor)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(myCode == nil)
+
+                if let myCode {
+                    ShareLink(item: "Agrégame en AgruPay con el código \(myCode)") {
+                        Text("Compartir")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .background(themeColor)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                } else {
+                    Text("Compartir")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.6))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(themeColor.opacity(0.5))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }
-            .navigationTitle("Agregar amigo")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cerrar") { showInviteSheet = false }
+
+            privacyNote(text: "Agregarse **no comparte nada todavía**. Después eliges, por persona, si ve tu total del mes, algunas categorías, o nada.")
+        }
+    }
+
+    private var codeCells: some View {
+        let chars = Array(myCode ?? "")
+        return HStack(spacing: 6) {
+            if isGeneratingCode {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 56)
+            } else if myCode == nil {
+                Button("No se pudo generar el código. Reintentar.") {
+                    Task { await ensureCode(force: true) }
+                }
+                .font(.footnote.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+            } else {
+                ForEach(0..<8, id: \.self) { i in
+                    Text(i < chars.count ? String(chars[i]) : "")
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
+        }
+        .onTapGesture { copyCode() }
+    }
+
+    private var redeemSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Divider()
+                .padding(.vertical, 6)
+
+            Text("CANJEAR EL CÓDIGO DE UN AMIGO")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(palette.secondaryLabel)
+
+            HStack(spacing: 10) {
+                TextField("8 caracteres", text: $redeemInput)
+                    .font(.system(.body, design: .monospaced).weight(.semibold))
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .padding(.horizontal, 14)
+                    .frame(height: 48)
+                    .background(Color(.secondarySystemBackground))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(redeemError != nil ? Color.red : Color.clear, lineWidth: 1)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .onChange(of: redeemInput) { _, newValue in
+                        if newValue.count > 8 { redeemInput = String(newValue.prefix(8)) }
+                        redeemError = nil
+                    }
+
+                Button {
+                    submitRedeem()
+                } label: {
+                    if isRedeeming {
+                        ProgressView().tint(.white)
+                            .frame(width: 60, height: 48)
+                    } else {
+                        Text("Unirme")
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 18)
+                            .frame(height: 48)
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(canSubmit ? .white : palette.tertiaryLabel)
+                .background(canSubmit ? themeColor : Color(.systemGray5))
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .disabled(!canSubmit || isRedeeming)
+            }
+
+            if let redeemError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text(redeemError)
+                }
+                .font(.caption)
+                .foregroundStyle(.red)
+            } else {
+                Text("Escribe los 8 caracteres que te compartió tu amigo.")
+                    .font(.caption)
+                    .foregroundStyle(palette.tertiaryLabel)
+            }
+        }
+    }
+
+    private var canSubmit: Bool { redeemInput.count == 8 }
+
+    private func privacyNote(text: String) -> some View {
+        HStack(alignment: .top, spacing: 9) {
+            Text("🔒")
+                .font(.footnote)
+            Text(.init(text))
+                .font(.footnote)
+                .foregroundStyle(themeColor)
+                .tint(themeColor)
+        }
+        .padding(13)
+        .background(themeColor.opacity(colorScheme == .dark ? 0.16 : 0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    // MARK: - Éxito
+
+    private func successContent(friend: Friend) -> some View {
+        VStack(spacing: 16) {
+            Spacer(minLength: 40)
+            ZStack {
+                Circle()
+                    .fill(Color.green.opacity(0.14))
+                    .frame(width: 74, height: 74)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 30, weight: .bold))
+                    .foregroundStyle(.green)
+            }
+            .transition(.scale(scale: 0.6).combined(with: .opacity))
+
+            Text("Ya son amigos")
+                .font(.title2.bold())
+
+            Text("\(friend.displayName) está en tu lista. Todavía no ve nada de tu gasto.")
+                .font(.subheadline)
+                .foregroundStyle(palette.secondaryLabel)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 30)
+            Spacer(minLength: 40)
+        }
+        .frame(maxWidth: .infinity)
+        .animation(.spring(response: 0.45, dampingFraction: 0.75), value: isSuccess)
+    }
+
+    // MARK: - Acciones
+
+    private func ensureCode(force: Bool = false) async {
+        guard force || myCode == nil else { return }
+        isGeneratingCode = true
+        myCode = await friendsManager.generateInviteCode()
+        isGeneratingCode = false
+    }
+
+    private func copyCode() {
+        guard let myCode else { return }
+        UIPasteboard.general.string = myCode
+        copied = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_700_000_000)
+            copied = false
+        }
+    }
+
+    private func submitRedeem() {
+        guard canSubmit, !isRedeeming else { return }
+        let code = redeemInput.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        isRedeeming = true
+        redeemError = nil
+        Task {
+            let friend = await friendsManager.redeem(code: code)
+            isRedeeming = false
+            guard let friend else {
+                redeemError = friendsManager.lastErrorMessage ?? "Código inválido o vencido. Pídele uno nuevo."
+                return
+            }
+            onJoined(friend.id)
+            joinedFriend = friend
+            try? await Task.sleep(nanoseconds: 1_600_000_000)
+            dismiss()
         }
     }
 }
@@ -1009,7 +1265,9 @@ struct AmigoDetailView: View {
     @State private var selectedCategories: Set<String> = []
     @State private var didLoadInitialState = false
     @State private var showStopConfirm = false
+    @State private var showDeleteConfirm = false
     @State private var showEditSheet = false
+    @State private var errorMessage: String?
 
     private var categoryTotals: [PeriodTotals.CategoryTotal] {
         totals.byCategory.filter { Money.cents($0.total) > 0 }
@@ -1017,6 +1275,8 @@ struct AmigoDetailView: View {
     }
 
     private var shownName: String { social.name(for: friend.id, realName: friend.displayName) }
+    private var stopConfirmTitle: String { "¿Dejar de compartir con " + shownName + "?" }
+    private var deleteConfirmTitle: String { "¿Eliminar a " + shownName + "?" }
 
     /// Lo que vería si abriera la app ahora mismo.
     private var previewAmount: Double {
@@ -1035,18 +1295,7 @@ struct AmigoDetailView: View {
                     categoriesCard
                     privacyNote
 
-                    if friendsManager.myShare(toward: friend.id) != nil {
-                        Button(role: .destructive) { showStopConfirm = true } label: {
-                            Text("Dejar de compartir con " + shownName)
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(palette.negative)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 48)
-                                .background(palette.negative.opacity(0.12),
-                                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
-                    }
+                    destructiveActions
                 }
                 .padding(16)
             }
@@ -1064,7 +1313,7 @@ struct AmigoDetailView: View {
             .sheet(isPresented: $showEditSheet) {
                 FriendEditSheet(friend: friend)
             }
-            .confirmationDialog("¿Dejar de compartir con " + shownName + "?",
+            .confirmationDialog(stopConfirmTitle,
                                 isPresented: $showStopConfirm,
                                 titleVisibility: .visible) {
                 Button("Dejar de compartir", role: .destructive) {
@@ -1074,6 +1323,14 @@ struct AmigoDetailView: View {
                     }
                 }
                 Button("Cancelar", role: .cancel) {}
+            }
+            .confirmationDialog(deleteConfirmTitle,
+                                isPresented: $showDeleteConfirm,
+                                titleVisibility: .visible) {
+                Button("Eliminar amigo", role: .destructive) { deleteFriend() }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Dejarán de verse el gasto el uno al otro. Puedes volver a agregarlo con un código.")
             }
             .onAppear(perform: loadInitialStateIfNeeded)
             .onChange(of: shareTotal) { _, _ in persistShare() }
@@ -1203,6 +1460,53 @@ struct AmigoDetailView: View {
                                           categories: Array(selectedCategories),
                                           totalAmount: totals.spent,
                                           categoryTotals: categoryAmounts)
+        }
+    }
+
+    /// Aparte del `body`, igual que en `FriendEditSheet`: junto con el resto
+    /// de la vista, el comprobador de tipos de Swift se rendía aquí también
+    /// ("unable to type-check this expression in reasonable time").
+    @ViewBuilder
+    private var destructiveActions: some View {
+        if friendsManager.myShare(toward: friend.id) != nil {
+            Button(role: .destructive) { showStopConfirm = true } label: {
+                Text("Dejar de compartir con " + shownName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.negative)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    .background(palette.negative.opacity(0.12),
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+
+        // Antes esto sólo vivía dentro de "Editar" — un paso de más para algo
+        // que la gente busca desde aquí mismo.
+        Button(role: .destructive) { showDeleteConfirm = true } label: {
+            Text("Eliminar a " + shownName)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(palette.negative)
+                .frame(maxWidth: .infinity)
+                .frame(height: 48)
+        }
+        .buttonStyle(.plain)
+
+        if let errorMessage {
+            Text(errorMessage)
+                .font(.caption)
+                .foregroundStyle(palette.negative)
+        }
+    }
+
+    private func deleteFriend() {
+        Task {
+            let removed = await friendsManager.removeFriend(friend.id)
+            if removed {
+                dismiss()
+            } else {
+                errorMessage = friendsManager.lastErrorMessage ?? "No se pudo eliminar la amistad."
+            }
         }
     }
 }

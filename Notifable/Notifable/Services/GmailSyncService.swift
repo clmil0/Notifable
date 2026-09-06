@@ -203,6 +203,26 @@ class GmailSyncService: ObservableObject {
         return Calendar.current.startOfDay(for: endDate) >= Calendar.current.startOfDay(for: Date())
     }
 
+    /// Punto de partida para leer "los últimos N meses", siempre el día 1 de
+    /// un mes — nunca una fecha suelta a mitad de mes, que dejaría el primer
+    /// tramo del rango incompleto y "1 mes" significaría cosas distintas
+    /// según qué día del mes se pidiera.
+    ///
+    /// El mes de hoy sólo cuenta como uno completo si ya se pasó la quincena
+    /// (día > 15); si no, el rango arranca un mes antes. Así, pedir "1 mes"
+    /// el 3 o el 15 de agosto trae desde el 1 de julio (agosto apenas
+    /// empieza, no es un mes de historial todavía), pero pedirlo el 20 de
+    /// agosto ya trae desde el 1 de agosto (agosto ya lleva más de la mitad).
+    static func smartRangeStart(months: Int, from reference: Date = Date(), calendar: Calendar = .current) -> Date {
+        let day = calendar.component(.day, from: reference)
+        let currentMonthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: reference)) ?? reference
+        let anchor = day <= 15
+            ? (calendar.date(byAdding: .month, value: -1, to: currentMonthStart) ?? currentMonthStart)
+            : currentMonthStart
+        let start = calendar.date(byAdding: .month, value: -(months - 1), to: anchor) ?? anchor
+        return calendar.startOfDay(for: start)
+    }
+
     /// Correos que la app ya convirtió en un gasto que sigue en la base.
     ///
     /// La deduplicación no puede depender sólo de `processedEmailIDs`: esa lista
