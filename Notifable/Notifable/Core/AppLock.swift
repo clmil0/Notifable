@@ -1,6 +1,7 @@
 import Foundation
 import LocalAuthentication
 import SwiftUI
+import UIKit
 
 /// Bloqueo de la app con Face ID / Touch ID.
 ///
@@ -46,8 +47,14 @@ final class AppLock: ObservableObject {
 
     /// `true` mientras la pantalla de bloqueo debe tapar la app.
     @Published private(set) var isLocked: Bool
-    /// Motivo del último intento fallido, para poder decirlo en pantalla.
-    @Published private(set) var lastError: String?
+    /// Motivo del último intento fallido, con sus pasos y sus botones. No es
+    /// un texto: la pantalla necesita saber **qué** falló para ofrecer la
+    /// salida que corresponde (ver `AppLockFailure`).
+    @Published private(set) var lastFailure: AppLockFailure?
+
+    /// Texto llano del último fallo, para los sitios que sólo quieren mostrarlo
+    /// (los ajustes, por ejemplo).
+    var lastError: String? { lastFailure?.headline }
 
     /// El propio diálogo de Face ID manda la escena a `.inactive`. Sin esta
     /// marca, salir de él volvería a bloquear la app y el desbloqueo no
@@ -72,9 +79,14 @@ final class AppLock: ObservableObject {
 
     // MARK: - Disponibilidad
 
+    /// `nonisolated` las cuatro: sólo preguntan a un `LAContext` recién creado
+    /// y no tocan estado de la clase, así que exigir el actor principal para
+    /// leer el nombre de la biometría sería una atadura sin motivo — y las usan
+    /// tipos que no están aislados, como `AppLockFailure`.
+    ///
     /// Qué biometría tiene este teléfono. `.none` si no hay ninguna disponible
     /// —sin sensor, sin códigos registrados o con Face ID denegado a la app—.
-    static var biometry: LABiometryType {
+    nonisolated static var biometry: LABiometryType {
         let context = LAContext()
         var error: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics,
@@ -84,13 +96,13 @@ final class AppLock: ObservableObject {
 
     /// `false` en un teléfono sin código: ahí no hay nada con qué desbloquear,
     /// así que el ajuste ni se ofrece.
-    static var canLock: Bool {
+    nonisolated static var canLock: Bool {
         LAContext().canEvaluatePolicy(.deviceOwnerAuthentication, error: nil)
     }
 
     /// "Face ID", "Touch ID"… El nombre real, no uno inventado: el usuario tiene
     /// que reconocer en el ajuste lo mismo que le pedirá el sistema.
-    static var biometryName: String {
+    nonisolated static var biometryName: String {
         switch biometry {
         case .faceID: return "Face ID"
         case .touchID: return "Touch ID"
@@ -99,7 +111,7 @@ final class AppLock: ObservableObject {
         }
     }
 
-    static var biometryIcon: String {
+    nonisolated static var biometryIcon: String {
         switch biometry {
         case .faceID: return "faceid"
         case .touchID: return "touchid"
@@ -142,13 +154,37 @@ final class AppLock: ObservableObject {
     // MARK: - Bloquear y desbloquear
 
     /// El intento de desbloqueo de la pantalla de bloqueo.
-    func unlock() async {
+    /// El intento de desbloqueo de la pantalla de bloqueo.
+    ///
+    /// `preferPasscode` es para el botón "Usar código del iPhone": cuando la
+    /// biometría está bloqueada o sin configurar, iOS va directo al teclado del
+    /// código, que es justo la salida que el usuario acaba de pedir.
+    func unlock(preferPasscode: Bool = false) async {
         guard isLocked else { return }
-        lastError = await authenticate(reason: "Desbloquea AgruPay para ver tus movimientos.")
-        if lastError == nil {
+        lastFailure = await attempt(reason: "Desbloquea AgruPay para ver tus movimientos.",
+                                    preferPasscode: preferPasscode)
+        if lastFailure == nil {
             isLocked = false
             leftForegroundAt = nil
         }
+    }
+
+    /// Quitar el bloqueo **sin** autenticarse. Sólo cuando el iPhone no tiene
+    /// código: en ese estado no hay nada con qué demostrar quién eres, y exigir
+    /// una prueba imposible dejaría al dueño encerrado fuera de sus propios
+    /// datos para siempre. Con código, `disable()` sigue exigiéndola.
+    func disableBecauseNoPasscode() {
+        guard !Self.canLock else { return }
+        defaults.set(false, forKey: Self.enabledKey)
+        isLocked = false
+        lastFailure = nil
+        objectWillChange.send()
+    }
+
+    /// Abre Ajustes de iOS en la ficha de AgruPay.
+    func openSystemSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
     }
 
     /// La app deja de estar activa. Se bloquea **aquí** y no al volver, porque
@@ -173,44 +209,33 @@ final class AppLock: ObservableObject {
 
     // MARK: - LocalAuthentication
 
-    /// `nil` si el usuario se autenticó; si no, el motivo en lenguaje llano.
-    private func authenticate(reason: String) async -> String? {
-        guard Self.canLock else {
-            return "Este iPhone no tiene código ni biometría configurados."
-        }
+    /// `nil` si el usuario se autenticó; si no, el fallo con su salida.
+    private func attempt(reason: String, preferPasscode: Bool = false) async -> AppLockFailure? {
+        guard Self.canLock else { return .noPasscode }
 
         isAuthenticating = true
         defer { isAuthenticating = false }
 
         let context = LAContext()
         context.localizedCancelTitle = "Cancelar"
+        // Sin título de reserva, iOS espera a los tres intentos fallidos antes
+        // de ofrecer el código. Nombrarlo lo pone desde el primer segundo.
+        context.localizedFallbackTitle = preferPasscode ? "" : "Usar código"
 
         do {
             let ok = try await context.evaluatePolicy(.deviceOwnerAuthentication,
                                                       localizedReason: reason)
-            return ok ? nil : "No se pudo verificar tu identidad."
+            return ok ? nil : .other("No se pudo verificar tu identidad.")
         } catch {
-            return Self.describe(error)
+            return AppLockFailure.from(error)
         }
     }
 
-    private static func describe(_ error: Error) -> String {
-        guard let laError = error as? LAError else { return error.localizedDescription }
-        switch laError.code {
-        case .userCancel, .appCancel, .systemCancel:
-            return "Verificación cancelada."
-        case .userFallback:
-            return "Elige «Usar código» para continuar."
-        case .biometryLockout:
-            return "Demasiados intentos. Desbloquea el iPhone con su código y vuelve a intentarlo."
-        case .biometryNotAvailable:
-            return biometryName + " no está disponible para AgruPay. Puedes darle permiso en Ajustes de iOS."
-        case .biometryNotEnrolled:
-            return "No hay " + biometryName + " configurado en este iPhone."
-        case .passcodeNotSet:
-            return "Este iPhone no tiene código configurado."
-        default:
-            return "No se pudo verificar tu identidad."
+    /// `nil` si se autenticó; si no, el motivo en texto (activar/desactivar el
+    /// ajuste sólo necesita decirlo, no ofrecer pasos).
+    private func authenticate(reason: String) async -> String? {
+        await attempt(reason: reason).map { failure in
+            failure == .cancelled ? "Verificación cancelada." : failure.headline
         }
     }
 }

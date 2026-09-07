@@ -132,10 +132,12 @@ final class FriendsManager {
         isListeningForChanges = true
 
         let realtime = SupabaseRealtimeClient.shared
-        await realtime.subscribe(table: "friendships") { [weak self] _ in
+        // `subscribe` no es async y devuelve el id de la suscripción: sin el
+        // `_ =` el resultado queda sin usar, y el `await` sobraba.
+        _ = realtime.subscribe(table: "friendships") { [weak self] _ in
             Task { await self?.loadFriendships() }
         }
-        await realtime.subscribe(table: "friend_shares") { [weak self] _ in
+        _ = realtime.subscribe(table: "friend_shares") { [weak self] _ in
             Task { await self?.loadShares() }
         }
     }

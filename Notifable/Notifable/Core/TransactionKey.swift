@@ -43,7 +43,7 @@ enum TransactionKey {
 
     /// Día del movimiento en UTC: la llave tiene que ser la misma aunque el
     /// teléfono cambie de zona horaria al viajar.
-    nonisolated(unsafe) static let dayFormatter: DateFormatter = {
+    static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
