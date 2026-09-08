@@ -26,15 +26,9 @@ class GmailSyncService: ObservableObject {
     
     private let baseURL = "https://gmail.googleapis.com/gmail/v1/users/me"
     
-    // Lista de parsers modulares de cada banco
-    private let parsers: [BankEmailParser] = [
-        BBVAParser(),
-        BCPParser(),
-        YapeParser(),
-        InterbankParser(),
-        ScotiabankParser(),
-        AppleParser()
-    ]
+    // Lista compartida con iCloud: añadir un banco lo activa en los dos
+    // proveedores a la vez. Ver `BankEmailIngestor`.
+    private var parsers: [BankEmailParser] { BankEmailIngestor.parsers }
     
     // Configura el ModelContext desde el lugar donde se llame
     var modelContext: ModelContext?
@@ -230,9 +224,7 @@ class GmailSyncService: ObservableObject {
     /// reinstalar, y entonces el mismo rango se importaba dos veces.
     private func existingEmailIDs() -> Set<String> {
         guard let context = modelContext else { return [] }
-        let expenses = (try? context.fetch(FetchDescriptor<Expense>())) ?? []
-        let incomes = (try? context.fetch(FetchDescriptor<Income>())) ?? []
-        return Set(expenses.compactMap { $0.emailID }).union(incomes.compactMap { $0.emailID })
+        return BankEmailIngestor.existingEmailIDs(in: context)
     }
 
     /// `existingEmailIDs()` en el hilo principal, se llame desde donde se llame.
@@ -692,54 +684,18 @@ class GmailSyncService: ObservableObject {
         return json["snippet"] as? String ?? ""
     }
     
+    /// Delega en el motor compartido. La interpretación, la regla de categoría
+    /// y la inserción son idénticas en Gmail y en iCloud; tenerlas dos veces
+    /// hacía que se separaran a la primera corrección.
     private func parseEmailBody(_ text: String) -> (expense: Expense?, income: Income?, bankName: String)? {
-        let cleanText = text.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
-
-        for parser in parsers {
-            if let expense = parser.parse(cleanText: cleanText) {
-                return (applyAutoCategorization(to: expense), nil, parser.bankName)
-            }
-        }
-
-        // Un correo no puede ser gasto e ingreso a la vez: sólo se prueba
-        // parseIncome cuando ningún parser lo reconoció como gasto.
-        for parser in parsers {
-            if let income = parser.parseIncome(cleanText: cleanText) {
-                return (nil, income, parser.bankName)
-            }
-        }
-
-        return nil
+        guard let parsed = BankEmailIngestor.parse(text) else { return nil }
+        return (parsed.expense, parsed.income, parsed.bankName)
     }
-    
+
     // MARK: - Autocategorización Global
     
     private func applyAutoCategorization(to expense: Expense) -> Expense {
-        // Una regla que el usuario ya definió en la Bandeja manda sobre todo lo
-        // demás: para eso la definió. Antes sólo se reetiquetaban los gastos que
-        // ya estaban en la base y el siguiente correo del mismo comercio volvía
-        // a caer sin clasificar.
-        if let rule = MerchantRules.category(for: expense.merchant) {
-            expense.category = rule
-            expense.isSubscription = rule == "Entretenimiento"
-            return expense
-        }
-
-        var autoCategory = Accounting.unclassified
-        let lowerMerchant = expense.merchant.lowercased()
-        if lowerMerchant.contains("starbucks") || lowerMerchant.contains("eats") || lowerMerchant.contains("tambo") || lowerMerchant.contains("sharethemeal") {
-            autoCategory = "Comida"
-        } else if lowerMerchant.contains("uber") || lowerMerchant.contains("lyft") || lowerMerchant.contains("didi") || lowerMerchant.contains("cabify") || lowerMerchant.contains("yango") {
-            autoCategory = "Transporte"
-        } else if lowerMerchant.contains("netflix") || lowerMerchant.contains("spotify") || lowerMerchant.contains("apple") || lowerMerchant.contains("disney") || lowerMerchant.contains("prime") {
-            autoCategory = "Entretenimiento"
-        }
-        
-        let isSub = autoCategory == "Entretenimiento"
-        
-        expense.category = autoCategory
-        expense.isSubscription = isSub
-        return expense
+        BankEmailIngestor.autoCategorize(expense)
     }
     
     private func decodeBase64Url(_ base64Url: String) -> String? {
@@ -792,71 +748,16 @@ class GmailSyncService: ObservableObject {
     }
     
     private func handleExpenseInsertion(expenseData: (expense: Expense, bankName: String), emailID: String, context: ModelContext) -> Bool {
-        let newExpense = expenseData.expense
-        
-        let isAppleReceipt = expenseData.bankName == "Apple"
-        let isAppleBankBill = !isAppleReceipt && newExpense.merchant.lowercased().contains("apple")
-        
-        if isAppleReceipt || isAppleBankBill {
-            let amount = newExpense.amount
-            let date = newExpense.date
-            
-            let allExpenses = (try? context.fetch(FetchDescriptor<Expense>())) ?? []
-            
-            if let match = allExpenses.first(where: {
-                $0.id != newExpense.id &&
-                $0.relatedEmailID == nil &&
-                $0.amount == amount &&
-                abs($0.date.timeIntervalSince(date)) <= 48 * 3600 &&
-                ($0.merchant.lowercased().contains("apple") || $0.merchant == "Apple")
-            }) {
-                if isAppleReceipt {
-                    // Overwrite match (Bank Expense) with Apple Receipt details
-                    match.merchant = newExpense.merchant == "Apple" ? match.merchant : "Apple: \(newExpense.merchant)"
-                    if let notes = newExpense.notes { match.notes = notes }
-                    match.isSubscription = newExpense.isSubscription
-                    match.category = newExpense.category
-                    match.relatedEmailID = emailID
-                } else {
-                    // Llega el cargo del banco, pero el recibo de Apple ya
-                    // había creado el gasto (llegó primero). La factura de
-                    // Apple sólo trae el día — sin hora, queda en 00:00 — así
-                    // que la hora real hay que tomarla del correo del banco,
-                    // que sí la tiene.
-                    match.date = date
-                    if let card = newExpense.cardLastDigits { match.cardLastDigits = card }
-                    match.relatedEmailID = emailID
-                }
-                try? context.save()
-                return true
-            }
-        }
-        
-        if isAppleReceipt {
-            // No se encontró el cargo del banco todavía para vincularlo (puede
-            // llegar después, o nunca si el usuario no sincroniza ese correo).
-            // Si no le ponemos ya el prefijo "Apple:", este gasto se guarda con
-            // el nombre de la app/plan ("Claude by Anthropic...") sin la
-            // palabra "apple" en ningún lado — y cuando el cargo del banco
-            // llegue después, la búsqueda por merchant.contains("apple") no lo
-            // va a encontrar y el gasto se duplica. Poniéndolo desde ya, la
-            // vinculación funciona sin importar en qué orden lleguen los correos.
-            newExpense.merchant = newExpense.merchant == "Apple" ? newExpense.merchant : "Apple: \(newExpense.merchant)"
-        }
-        
-        newExpense.emailID = emailID
-        context.insert(newExpense)
-        try? context.save()
-        return true
+        BankEmailIngestor.insert(expense: expenseData.expense,
+                                 bankName: expenseData.bankName,
+                                 emailID: emailID,
+                                 context: context)
     }
 
     /// Constancias de dinero recibido (ej. un Yapeo entrante): a diferencia de
     /// los gastos, no hay vínculo con Apple ni deduplicación especial que
     /// resolver — el `emailID` ya evita procesarlo dos veces.
     private func handleIncomeInsertion(income: Income, emailID: String, context: ModelContext) -> Bool {
-        income.emailID = emailID
-        context.insert(income)
-        try? context.save()
-        return true
+        BankEmailIngestor.insert(income: income, emailID: emailID, context: context)
     }
 }

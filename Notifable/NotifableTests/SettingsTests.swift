@@ -115,7 +115,7 @@ struct SettingsTests {
     @Test("Cada entrada buscable lleva a un destino que existe")
     func destinosValidos() {
         let known: Set<String> = ["budget", "recurring", "rules", "gmail", "range",
-                                  "appearance", "notifications", "lock", "data"]
+                                  "appearance", "notifications", "lock", "icloud", "data"]
         for entry in SettingsEntry.all {
             #expect(known.contains(entry.destination), "destino desconocido: \(entry.destination)")
             #expect(!entry.title.isEmpty)

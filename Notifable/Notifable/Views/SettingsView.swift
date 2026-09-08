@@ -41,6 +41,7 @@ struct SettingsView: View {
     // Igual que los avisos: se lee aquí para que la fila de la raíz refleje el
     // valor sin tener que volver a entrar.
     @AppStorage(AppLock.enabledKey) private var lockEnabled = false
+    @AppStorage(ICloudMailAccount.addressKey) private var iCloudAddress = ""
 
     @State private var query = ""
 
@@ -179,6 +180,11 @@ struct SettingsView: View {
                 GmailBanksView()
             }
             SettingsSeparator()
+            SettingsRow(title: "iCloud Mail", icon: "icloud.fill",
+                        tint: captureTint, value: iCloudValue) {
+                ICloudMailView()
+            }
+            SettingsSeparator()
             SettingsRow(title: "Leer un rango pasado", icon: "calendar",
                         tint: captureTint, value: "Acción") {
                 RangeSyncView()
@@ -226,6 +232,10 @@ struct SettingsView: View {
         if active == 0 && quickExpenses.isEmpty { return "Ninguno" }
         if active == 0 { return "\(quickExpenses.count) atajos" }
         return active == 1 ? "1 activo" : "\(active) activos"
+    }
+
+    private var iCloudValue: String {
+        iCloudAddress.isEmpty ? "Sin conectar" : iCloudAddress
     }
 
     private var lockValue: String {
@@ -315,6 +325,7 @@ struct SettingsView: View {
         case "appearance":    AppearanceSettingsView()
         case "notifications": NotificationSettingsView()
         case "lock":          AppLockSettingsView()
+        case "icloud":        ICloudMailView()
         default:              DataBackupView()
         }
     }
