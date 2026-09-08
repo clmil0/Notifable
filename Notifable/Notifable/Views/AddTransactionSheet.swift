@@ -36,9 +36,11 @@ struct AddTransactionSheet: View {
     @State private var undoTarget: Expense?
     @State private var pendingDismissToken = UUID()
     @State private var editingQuick: QuickExpense?
-    /// Mientras se escribe en un campo de texto el teclado del sistema ya ocupa
-    /// media pantalla; el numérico propio sobra y tapaba el formulario.
-    @FocusState private var textFieldFocused: Bool
+    /// Dos destinos de foco: el monto abre el teclado numérico del sistema y
+    /// los campos de texto el normal. Antes era un solo `Bool` que sólo servía
+    /// para esconder el teclado propio.
+    private enum Field: Hashable { case amount, text }
+    @FocusState private var focused: Field?
 
     init(transactionType: TransactionType = .gasto) {
         _draft = State(initialValue: TransactionDraft(type: transactionType))
@@ -63,11 +65,6 @@ struct AddTransactionSheet: View {
                                : Color(red: 0.114, green: 0.498, blue: 0.235))
     }
 
-    private var keypadBackground: Color {
-        scheme == .dark ? Color(red: 0.055, green: 0.055, blue: 0.063)   // #0E0E10
-                        : Color(red: 0.949, green: 0.949, blue: 0.969)   // #F2F2F7
-    }
-
     // MARK: - Cuerpo
 
     var body: some View {
@@ -87,19 +84,9 @@ struct AddTransactionSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
 
-            if !textFieldFocused {
-                Keypad(background: keypadBackground) { key in
-                    withAnimation(.none) { draft.press(key) }
-                } onClear: {
-                    draft.amountText = ""
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-
             primaryButton
         }
         .background(palette.background)
-        .animation(.easeInOut(duration: 0.2), value: textFieldFocused)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(32)
@@ -125,7 +112,23 @@ struct AddTransactionSheet: View {
         .sheet(isPresented: $showQuickEditor) {
             QuickExpenseEditor(quick: editingQuick)
         }
+        .toolbar {
+            // El `.decimalPad` no tiene tecla de retorno, así que sin esto no
+            // hay forma de cerrarlo y tapa el botón de guardar.
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Listo") { focused = nil }
+                    .fontWeight(.semibold)
+            }
+        }
         .onAppear(perform: preselectSingleDebt)
+        .task {
+            // El foco inicial va al monto, que es lo primero que se escribe.
+            // Con un respiro: puesto en `onAppear`, la hoja todavía se está
+            // presentando y iOS descarta la petición.
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            focused = .amount
+        }
     }
 
     // MARK: - 1. Barra superior
@@ -178,6 +181,13 @@ struct AddTransactionSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Todo lo que se teclea pasa por el saneador: el `.decimalPad` del sistema
+    /// no puede validar tecla a tecla como hacía el teclado propio.
+    private var amountBinding: Binding<String> {
+        Binding(get: { draft.amountText },
+                set: { draft.amountText = TransactionDraft.sanitizedAmount($0) })
+    }
+
     private var amountLabel: String {
         if draft.type == .ingreso && draft.isDebtPayment { return "MONTO DEL ABONO" }
         return draft.type == .gasto ? "MONTO DEL GASTO" : "MONTO DEL INGRESO"
@@ -199,13 +209,14 @@ struct AddTransactionSheet: View {
                 .font(.system(size: 34, weight: .semibold, design: .rounded))
                 .foregroundStyle(symbolColor)
 
-            Text(draft.displayAmount)
+            TextField("0.00", text: amountBinding)
                 .font(.system(size: 52, weight: .bold, design: .rounded))
                 .foregroundStyle(amountColor)
+                .keyboardType(.decimalPad)
+                .focused($focused, equals: .amount)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
-
-            BlinkingCursor(color: accentFill)
+                .accessibilityLabel(amountLabel)
 
             Spacer(minLength: 0)
         }
@@ -468,8 +479,8 @@ struct AddTransactionSheet: View {
                 .textInputAutocapitalization(.words)
                 .disableAutocorrection(true)
                 .submitLabel(.done)
-                .focused($textFieldFocused)
-                .onSubmit { textFieldFocused = false }
+                .focused($focused, equals: .text)
+                .onSubmit { focused = nil }
 
             if !draft.merchant.isEmpty {
                 Button { draft.merchant = "" } label: {
@@ -823,8 +834,8 @@ struct AddTransactionSheet: View {
                     .font(.body)
                     .textInputAutocapitalization(.sentences)
                     .submitLabel(.done)
-                    .focused($textFieldFocused)
-                    .onSubmit { textFieldFocused = false }
+                    .focused($focused, equals: .text)
+                    .onSubmit { focused = nil }
 
                 // "Opcional" a la derecha en vez de dentro del placeholder: así
                 // no desaparece en cuanto empiezas a escribir.
@@ -1336,30 +1347,15 @@ struct AddTransactionSheet: View {
     }
 }
 
-// MARK: - Cursor
-
-/// El cursor parpadeante da la señal de "esto se está escribiendo" que un `Text`
-/// no da. Oculto a VoiceOver: no aporta nada leído en voz alta.
-struct BlinkingCursor: View {
-    let color: Color
-    @State private var visible = true
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 1, style: .continuous)
-            .fill(color)
-            .frame(width: 2, height: 44)
-            .opacity(visible ? 1 : 0)
-            .animation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true), value: visible)
-            .onAppear { visible = false }
-            .accessibilityHidden(true)
-    }
-}
-
 // MARK: - Teclado numérico
 
-/// Teclado propio en vez de `.keyboardType(.decimalPad)`: no tapa el formulario,
-/// no cambia la altura del contenido al aparecer, y permite validar tecla por
-/// tecla (dos separadores decimales, más de dos decimales, tope de 9 dígitos).
+/// Teclado numérico propio. Lo usa el editor de límites por categoría.
+///
+/// El alta de gasto/ingreso lo usaba también, y se cambió al `.decimalPad` del
+/// sistema a petición: escribir un monto con el teclado de siempre pesa más que
+/// las ventajas que tenía éste —no tapar el formulario, no mover la altura del
+/// contenido y poder validar tecla a tecla—. Esa última la cubre ahora
+/// `TransactionDraft.sanitizedAmount(_:)` sobre el texto completo.
 struct Keypad: View {
 
     let background: Color

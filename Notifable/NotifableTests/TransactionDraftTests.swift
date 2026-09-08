@@ -221,3 +221,56 @@ struct TransactionDraftTests {
         #expect(ingreso.makeExpense() == nil)
     }
 }
+
+/// Saneado del monto con el teclado del sistema.
+///
+/// El `.decimalPad` no puede validar tecla a tecla como hacía el teclado
+/// propio, así que las mismas reglas se aplican sobre el texto completo. Sin
+/// esto vuelve el "1.2.3" que `Money.parse` no sabe leer.
+struct AmountSanitizerTests {
+
+    @Test("Un segundo separador decimal se ignora")
+    func unSoloSeparador() {
+        #expect(TransactionDraft.sanitizedAmount("1.2.3") == "1.23")
+        #expect(TransactionDraft.sanitizedAmount("12..50") == "12.50")
+    }
+
+    @Test("Coma y punto valen igual, y se guarda punto")
+    func comaOPunto() {
+        #expect(TransactionDraft.sanitizedAmount("45,50") == "45.50")
+        #expect(TransactionDraft.sanitizedAmount("45.50") == "45.50")
+    }
+
+    @Test("Como mucho dos decimales")
+    func dosDecimales() {
+        #expect(TransactionDraft.sanitizedAmount("12.3456") == "12.34")
+    }
+
+    @Test("Tope de nueve dígitos enteros")
+    func topeDeEnteros() {
+        #expect(TransactionDraft.sanitizedAmount("1234567890123") == "123456789")
+        // El tope es de enteros: los decimales siguen cabiendo.
+        #expect(TransactionDraft.sanitizedAmount("1234567890.99") == "123456789.99")
+    }
+
+    @Test("Un separador al principio se convierte en 0.")
+    func separadorInicial() {
+        #expect(TransactionDraft.sanitizedAmount(".5") == "0.5")
+        #expect(TransactionDraft.sanitizedAmount(",75") == "0.75")
+    }
+
+    @Test("Todo lo que no sea número ni separador se cae")
+    func basuraFuera() {
+        #expect(TransactionDraft.sanitizedAmount("S/ 86.40") == "86.40")
+        #expect(TransactionDraft.sanitizedAmount("abc") == "")
+        #expect(TransactionDraft.sanitizedAmount("") == "")
+    }
+
+    @Test("Lo saneado siempre lo entiende Money.parse")
+    func siempreParseable() {
+        for entrada in ["1.2.3", "45,50", "12.3456", ".5", "S/ 86.40", "999"] {
+            let limpio = TransactionDraft.sanitizedAmount(entrada)
+            #expect(Money.parse(limpio) != nil, "«\(entrada)» → «\(limpio)» no se puede leer")
+        }
+    }
+}

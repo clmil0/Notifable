@@ -171,6 +171,45 @@ struct TransactionDraft {
         case backspace
     }
 
+    /// Filtra lo que se teclea en el monto cuando la entrada es el teclado del
+    /// sistema (`.decimalPad`) y no el propio.
+    ///
+    /// El teclado propio validaba tecla a tecla; el del sistema no puede, así
+    /// que las mismas tres reglas se aplican aquí sobre el texto completo: un
+    /// solo separador decimal, como mucho dos decimales y tope de nueve dígitos
+    /// enteros. Sin esto vuelve el "1.2.3" que `Money.parse` no sabe leer y que
+    /// el `guard` de guardar descartaba en silencio.
+    ///
+    /// Acepta coma **y** punto —el `.decimalPad` enseña el separador del idioma
+    /// del teléfono, que no siempre es el mismo— y normaliza a punto, que es lo
+    /// que el resto del código espera.
+    static func sanitizedAmount(_ input: String) -> String {
+        var result = ""
+        var hasSeparator = false
+        var decimals = 0
+        var integerDigits = 0
+
+        for character in input {
+            if character.isNumber {
+                if hasSeparator {
+                    guard decimals < 2 else { continue }
+                    decimals += 1
+                } else {
+                    guard integerDigits < 9 else { continue }
+                    integerDigits += 1
+                }
+                result.append(character)
+            } else if character == "." || character == "," {
+                guard !hasSeparator else { continue }
+                hasSeparator = true
+                // ".5" se escribe solo como "0.5": el separador nunca abre el texto.
+                if result.isEmpty { result = "0" }
+                result.append(".")
+            }
+        }
+        return result
+    }
+
     /// Monto mostrado en el hero. Vacío muestra "0.00" en color terciario.
     var displayAmount: String {
         guard !amountText.isEmpty else { return "0.00" }
