@@ -649,16 +649,18 @@ private struct DashboardContent: View {
     @ViewBuilder
     private func expenseAmount(for expense: Expense) -> some View {
         let isReceivable = expense.isDebt
-        // Ambas leen `payments` —una relación de SwiftData, un *fault* por
-        // gasto— y ninguna se usa si el movimiento no es deuda. Calcularlas
-        // igualmente costaba un fault por cada fila de la lista.
-        let outstanding = isReceivable ? Accounting.outstanding(of: expense) : expense.amount
-        let paid = isReceivable ? Accounting.paid(of: expense) : 0
+        let paid = Accounting.paid(of: expense)
+        let outstanding = Accounting.outstanding(of: expense)
         let settled = isReceivable && Money.cents(outstanding) == 0
+        // La fila enseña lo que el gasto **costó**, igual que el total del mes:
+        // si te devolvieron algo, la cifra grande ya lo descuenta. Mostrar el
+        // importe bruto aquí y el neto arriba dejaba una lista que no sumaba lo
+        // que decía la cabecera.
+        let hasRefunds = Money.cents(paid) > 0
+        let displayed = (isReceivable || hasRefunds) ? outstanding : expense.amount
 
         VStack(alignment: .trailing, spacing: 2) {
-            Text("- " + Money.format(isReceivable ? outstanding : expense.amount,
-                                     currency: expense.currency))
+            Text("- " + Money.format(displayed, currency: expense.currency))
                 .font(.title3)
                 .fontWeight(.bold)
                 .foregroundStyle(settled ? palette.secondaryLabel : palette.label)
@@ -668,7 +670,7 @@ private struct DashboardContent: View {
                 Text("Saldada")
                     .font(.caption2)
                     .foregroundStyle(palette.positive)
-            } else if isReceivable, Money.cents(paid) > 0 {
+            } else if hasRefunds {
                 Text("de " + Money.format(expense.amount, currency: expense.currency)
                      + " · te devolvieron " + Money.format(paid, currency: expense.currency))
                     .font(.caption2)

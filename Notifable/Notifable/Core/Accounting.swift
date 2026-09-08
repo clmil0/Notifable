@@ -75,9 +75,20 @@ struct IncomeSnapshot {
 /// - Cada movimiento en USD se convertía y luego se sumaba, redondeando N veces.
 struct PeriodTotals {
 
-    /// Lo que **gastaste** en el periodo, en soles. Usa `amount`, no `unpaidAmount`:
-    /// un gasto de S/ 100 con S/ 40 abonados sigue siendo un gasto de S/ 100.
-    /// Lo que aún debes es `debtOutstanding`, una cifra distinta.
+    /// Lo que el periodo te **costó** de verdad, en soles: el importe de cada
+    /// gasto menos lo que te hayan devuelto de él.
+    ///
+    /// Antes usaba el importe completo, con el argumento de que "un gasto de
+    /// S/ 100 con S/ 40 abonados sigue siendo un gasto de S/ 100". Eso
+    /// contradecía lo que la app promete en el onboarding —"lo marcas como por
+    /// cobrar y no cuenta en tu mes"— y dejaba la función sin efecto visible:
+    /// marcar algo por cobrar y recibir el dinero no movía ninguna cifra.
+    /// Ahora un gasto reembolsado por completo aporta cero, y uno reembolsado a
+    /// medias aporta lo que te quedaste sin recuperar.
+    ///
+    /// La resta se aplica a **todos** los desgloses (categorías, comercios,
+    /// días) con el mismo criterio, para que sigan sumando exactamente `spent`.
+    /// Lo que aún te deben es `debtOutstanding`, una cifra distinta.
     let spent: Double
     let spentBag: MoneyBag
 
@@ -231,9 +242,16 @@ enum Accounting {
         var foreignDebtPayments = false
 
         for e in periodExpenses {
-            let c = penCents(e, fallbackRate: usdToPen)
+            // Neto: importe menos lo devuelto en su misma moneda. Para un gasto
+            // sin devoluciones es el importe tal cual, así que el caso normal
+            // no cambia.
+            let net = netCost(of: e)
+            let c = penCents(amount: net,
+                             currency: e.currency,
+                             fxRateAtCapture: e.fxRateAtCapture,
+                             fallbackRate: usdToPen)
             spentCents += c
-            spentBag.add(e.amount, currency: e.currency)
+            spentBag.add(net, currency: e.currency)
 
             categoryCents[e.category, default: 0] += c
             categoryMerchants[e.category, default: []].insert(e.merchant)
@@ -327,6 +345,17 @@ enum Accounting {
     /// en soles. Aquí sólo cuentan los abonos de la misma moneda del gasto; si hay
     /// abonos en otra moneda, `hasForeignPayments` lo delata para avisar en la UI
     /// en lugar de calcular mal en silencio.
+    /// Lo que un gasto te costó de verdad: su importe menos lo devuelto.
+    ///
+    /// Numéricamente coincide con `outstanding` —las dos son `importe −
+    /// devuelto`— pero responden a preguntas distintas: ésta es "cuánto me
+    /// costó" y sirve para cualquier gasto; `outstanding` es "cuánto me deben"
+    /// y sólo tiene sentido en uno marcado por cobrar. Se dejan separadas para
+    /// que cambiar una no arrastre a la otra sin querer.
+    static func netCost(of expense: ExpenseSnapshot) -> Double {
+        Money.clampedToZero(Money.subtract(expense.amount, expense.paymentsInOwnCurrency))
+    }
+
     static func outstanding(of expense: ExpenseSnapshot) -> Double {
         Money.clampedToZero(Money.subtract(expense.amount, expense.paymentsInOwnCurrency))
     }

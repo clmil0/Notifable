@@ -287,7 +287,13 @@ enum CategoryLimits {
         var cents = 0
         for expense in expenses where expense.category == category {
             guard expense.date >= interval.start, expense.date < interval.end else { continue }
-            cents += Accounting.penCents(expense, fallbackRate: usdToPen)
+            // El mismo gasto neto que usa `Accounting.totals`: si el límite
+            // contara el importe bruto, la categoría diría "S/ 300 de S/ 400"
+            // en la lista y "pasado" en su límite, con los mismos gastos.
+            cents += Accounting.penCents(amount: Accounting.netCost(of: expense),
+                                         currency: expense.currency,
+                                         fxRateAtCapture: expense.fxRateAtCapture,
+                                         fallbackRate: usdToPen)
         }
         return Money.value(cents)
     }

@@ -190,7 +190,10 @@ struct AccountingChecklistTests {
 
     // MARK: - 4
 
-    @Test("4. marcar o desmarcar una deuda no cambia el gasto")
+    /// La marca por sí sola no cambia nada: lo que descuenta es el dinero
+    /// devuelto, no la etiqueta. Un gasto marcado por cobrar del que aún no te
+    /// han devuelto nada sigue costándote lo mismo.
+    @Test("4. marcar o desmarcar una deuda, sin devoluciones, no cambia el gasto")
     func deudaNoAlteraElGasto() {
         let data = Self.dataset()
         var expenses = data.expenses
@@ -211,7 +214,14 @@ struct AccountingChecklistTests {
 
     // MARK: - 5
 
-    @Test("5. un abono no cambia el gasto ni el ingreso; sólo baja el saldo")
+    /// **Cambiado a propósito.** Antes se exigía que un abono no tocara el
+    /// gasto ("un gasto de S/ 100 con S/ 40 abonados sigue siendo de S/ 100").
+    /// Eso contradecía lo que la app promete —"lo marcas como por cobrar y no
+    /// cuenta en tu mes"— y dejaba la función sin efecto: marcar algo por
+    /// cobrar y cobrarlo no movía ninguna cifra. Ahora el abono **sí** baja el
+    /// gasto; lo que sigue sin tocar es el ingreso, porque cobrar una deuda es
+    /// liquidar un pasivo, no ingresar.
+    @Test("5. un abono baja el gasto y el saldo, pero nunca es ingreso")
     func abonoSoloBajaElSaldo() {
         let period = Self.month(2026, 9)
         let cal = Period.calendar
@@ -229,13 +239,15 @@ struct AccountingChecklistTests {
                                      isDebtPayment: true)
         let after = Accounting.totals(expenses: [debt], incomes: [salary, payment], period: period, usdToPen: Self.rate)
 
-        #expect(Money.equals(before.spent, after.spent), "el gasto cambió: \(before.spent) → \(after.spent)")
+        #expect(Money.equals(Money.subtract(before.spent, after.spent), 40),
+                "el gasto no bajó los 40 devueltos: \(before.spent) → \(after.spent)")
         #expect(Money.equals(before.income, after.income), "el ingreso cambió: \(before.income) → \(after.income)")
         #expect(Money.equals(Money.subtract(before.debtOutstanding, after.debtOutstanding), 40),
                 "el saldo no bajó 40: \(before.debtOutstanding) → \(after.debtOutstanding)")
         #expect(Money.equals(after.debtPayments, 40))
         // Y el abono no infla el balance por partida doble.
-        #expect(Money.equals(after.balance ?? 0, Money.subtract(2000, 500)))
+        #expect(Money.equals(after.balance ?? 0, Money.subtract(2000, 460)),
+                "el balance debe partir del gasto neto, ya sin los 40 devueltos")
     }
 
     @Test("5b. un abono en otra moneda no salda una deuda en soles")
@@ -402,8 +414,9 @@ struct TotalsSnapshotTests {
         let totals = Accounting.totals(expenses: [deuda, normal], incomes: [abono],
                                        period: period, usdToPen: 3.7)
 
-        // El gasto del periodo es el importe completo, no el saldo.
-        #expect(Money.cents(totals.spent) == Money.cents(250))
+        // El gasto neto: la deuda aporta lo que aún no te han devuelto
+        // (200 − 80 = 120) más el gasto normal de 50.
+        #expect(Money.cents(totals.spent) == Money.cents(170))
         // El saldo pendiente sí descuenta el abono: 200 − 80.
         #expect(Money.cents(totals.debtOutstanding) == Money.cents(120))
         // Y el abono no es ingreso.
@@ -444,5 +457,249 @@ struct TotalsSnapshotTests {
         #expect(rapido.byMerchant.map { $0.merchant } == completo.byMerchant.map { $0.merchant })
         #expect(rapido.expenseCount == completo.expenseCount)
         #expect(rapido.hasForeignDebtPayments == completo.hasForeignDebtPayments)
+    }
+}
+
+/// Devoluciones: lo que cuesta un gasto y cuándo queda saldada una deuda.
+///
+/// Los dos bugs que fija este archivo se reportaron juntos y salían del mismo
+/// sitio —el flujo de registrar un abono—, así que se prueban juntos.
+@MainActor
+struct DevolucionesTests {
+
+    static func makeContext() throws -> ModelContext {
+        let schema = Schema([Expense.self, Income.self, RecurringExpense.self, QuickExpense.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        return ModelContext(try ModelContainer(for: schema, configurations: [config]))
+    }
+
+    static func deuda(_ context: ModelContext, amount: Double = 500) -> Expense {
+        let e = Expense(amount: amount, merchant: "Prestamo a Ana", date: Date(),
+                        category: "Prestamos", isDebt: true)
+        context.insert(e)
+        try? context.save()
+        return e
+    }
+
+    /// Reproduce el caso reportado paso a paso, por el mismo camino que el
+    /// formulario: elegir la deuda, teclear el monto y guardar.
+    ///
+    /// El bug: `AddTransactionSheet` leía `draft.cancelsDebt` **después** de
+    /// crear el `Income`, y construirlo con `debtReference` ya lo engancha a
+    /// `debt.payments`. Desde ese instante el saldo descontaba el abono que se
+    /// estaba registrando, así que la condición real era "saldo_después ≤
+    /// monto": con 500 y dos abonos de 200, (500−400)=100 ≤ 200 y la deuda se
+    /// daba por saldada faltando 100.
+    @Test("Dos abonos de 200 sobre 500 dejan saldo de 100 y NO saldan la deuda")
+    func dosAbonosNoSaldanDeMas() throws {
+        let context = try Self.makeContext()
+        let deuda = Self.deuda(context)
+
+        for _ in 1...2 {
+            var draft = TransactionDraft(type: .ingreso)
+            draft.isDebtPayment = true
+            draft.selectDebt(deuda)
+            draft.currency = deuda.currency
+            draft.source = "Ana"
+            draft.amountText = "200"
+
+            guard let resolution = draft.resolveIncome() else {
+                Issue.record("el formulario rechazó un abono válido")
+                return
+            }
+            context.insert(resolution.income)
+            if resolution.cancelsDebt { deuda.isDebt = false }
+            try? context.save()
+        }
+
+        #expect(Money.equals(Accounting.paid(of: deuda), 400))
+        #expect(Money.equals(Accounting.outstanding(of: deuda), 100))
+        #expect(deuda.isDebt, "quedó saldada con 400 de 500")
+    }
+
+    @Test("El abono que sí cubre el saldo restante salda la deuda")
+    func elUltimoAbonoSalda() throws {
+        let context = try Self.makeContext()
+        let deuda = Self.deuda(context)
+
+        for monto in ["200", "200", "100"] {
+            var draft = TransactionDraft(type: .ingreso)
+            draft.isDebtPayment = true
+            draft.selectDebt(deuda)
+            draft.currency = deuda.currency
+            draft.source = "Ana"
+            draft.amountText = monto
+
+            guard let resolution = draft.resolveIncome() else { continue }
+            context.insert(resolution.income)
+            if resolution.cancelsDebt { deuda.isDebt = false }
+            try? context.save()
+        }
+
+        #expect(Money.equals(Accounting.outstanding(of: deuda), 0))
+        #expect(!deuda.isDebt, "con los 500 devueltos debería quedar saldada")
+    }
+
+    /// El otro síntoma del mismo bug: al guardar, el monto se pintaba en rojo
+    /// como si superara lo que te deben.
+    @Test("Un abono parcial no se marca como excedido")
+    func abonoParcialNoExcede() throws {
+        let context = try Self.makeContext()
+        let deuda = Self.deuda(context)
+
+        var draft = TransactionDraft(type: .ingreso)
+        draft.isDebtPayment = true
+        draft.selectDebt(deuda)
+        draft.currency = deuda.currency
+        draft.source = "Ana"
+        draft.amountText = "200"
+
+        let resolution = draft.resolveIncome()
+        context.insert(resolution!.income)
+        try? context.save()
+
+        // Un segundo abono de 200 sobre un saldo de 300 no excede nada.
+        var segundo = TransactionDraft(type: .ingreso)
+        segundo.isDebtPayment = true
+        segundo.selectDebt(deuda)
+        segundo.currency = deuda.currency
+        segundo.source = "Ana"
+        segundo.amountText = "200"
+
+        #expect(Money.equals(segundo.debtOutstanding ?? 0, 300))
+        #expect(segundo.excessOverDebt == nil, "dice que excede sin exceder")
+        #expect(!segundo.cancelsDebt)
+        #expect(segundo.validation == .ready)
+    }
+
+    // MARK: - Lo devuelto resta del gasto
+
+    /// La app promete en el onboarding que lo que te van a devolver "no cuenta
+    /// en tu mes". Antes el gasto se contaba entero y marcarlo por cobrar no
+    /// movía ninguna cifra.
+    @Test("Lo devuelto baja el gasto del mes")
+    func loDevueltoBajaElGasto() throws {
+        let context = try Self.makeContext()
+        let hoy = Date()
+        let deuda = Expense(amount: 500, merchant: "Cena", date: hoy,
+                            category: "Comida", isDebt: true)
+        context.insert(deuda)
+
+        let periodo = Period(granularity: .mes, reference: hoy)
+        let antes = Accounting.totals(expenses: [deuda], incomes: [],
+                                      period: periodo, usdToPen: 3.7)
+        #expect(Money.equals(antes.spent, 500))
+
+        let abono = Income(amount: 200, currency: "PEN", source: "Ana",
+                           date: hoy, debtReference: deuda)
+        context.insert(abono)
+        try? context.save()
+
+        let despues = Accounting.totals(expenses: [deuda], incomes: [abono],
+                                        period: periodo, usdToPen: 3.7)
+        #expect(Money.equals(despues.spent, 300), "el gasto no bajó con la devolución")
+        #expect(Money.equals(despues.debtOutstanding, 300))
+        // El abono sigue sin ser ingreso: es liquidación de un pasivo.
+        #expect(Money.isZero(despues.income))
+        #expect(Money.equals(despues.debtPayments, 200))
+    }
+
+    @Test("Un gasto devuelto por completo no cuenta en el mes")
+    func devueltoEnteroNoCuenta() throws {
+        let context = try Self.makeContext()
+        let hoy = Date()
+        let gasto = Expense(amount: 500, merchant: "Cena", date: hoy,
+                            category: "Comida", isDebt: true)
+        context.insert(gasto)
+        let abono = Income(amount: 500, currency: "PEN", source: "Ana",
+                           date: hoy, debtReference: gasto)
+        context.insert(abono)
+        // Al saldarse deja de estar por cobrar: aun así no debe volver a contar.
+        gasto.isDebt = false
+        try? context.save()
+
+        let totals = Accounting.totals(expenses: [gasto], incomes: [abono],
+                                       period: Period(granularity: .mes, reference: hoy),
+                                       usdToPen: 3.7)
+        #expect(Money.isZero(totals.spent), "un gasto ya devuelto sigue contando")
+    }
+
+    @Test("Los desgloses siguen sumando exactamente el gasto neto")
+    func desglosesCuadranConDevoluciones() throws {
+        let context = try Self.makeContext()
+        let hoy = Date()
+        let a = Expense(amount: 500, merchant: "Cena", date: hoy, category: "Comida", isDebt: true)
+        let b = Expense(amount: 120, merchant: "Taxi", date: hoy, category: "Transporte")
+        context.insert(a)
+        context.insert(b)
+        let abono = Income(amount: 200, currency: "PEN", source: "Ana", date: hoy, debtReference: a)
+        context.insert(abono)
+        try? context.save()
+
+        let totals = Accounting.totals(expenses: [a, b], incomes: [abono],
+                                       period: Period(granularity: .mes, reference: hoy),
+                                       usdToPen: 3.7)
+
+        #expect(Money.equals(totals.spent, 420))          // (500−200) + 120
+        #expect(Money.equals(Money.sum(totals.byCategory) { $0.total }, totals.spent))
+        #expect(Money.equals(Money.sum(totals.byMerchant) { $0.total }, totals.spent))
+        #expect(Money.equals(Money.sum(totals.dailySpent) { $0.total }, totals.spent))
+    }
+}
+
+/// El formulario no puede cambiar de opinión después de guardar.
+///
+/// Al construir el `Income` con `debtReference`, el abono queda enganchado a la
+/// deuda al instante. Si el borrador leyera el saldo en vivo, durante los
+/// instantes que la hoja tarda en cerrarse recalcularía todo contra un saldo que
+/// ya descuenta ese abono: el monto se pintaba en rojo por "exceso" y el aviso
+/// de "queda saldado" salía sin motivo, con el movimiento ya guardado bien.
+@MainActor
+struct BorradorTrasGuardarTests {
+
+    static func makeContext() throws -> ModelContext {
+        let schema = Schema([Expense.self, Income.self, RecurringExpense.self, QuickExpense.self])
+        let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
+        return ModelContext(try ModelContainer(for: schema, configurations: [config]))
+    }
+
+    /// El caso reportado: 15.10 por cobrar, abono de 10.00.
+    @Test("Tras guardar, el borrador sigue diciendo lo mismo que antes")
+    func elBorradorNoSeContradice() throws {
+        let context = try Self.makeContext()
+        let deuda = Expense(amount: 15.10, merchant: "Almuerzo", date: Date(),
+                            category: "Comida", isDebt: true)
+        context.insert(deuda)
+        try? context.save()
+
+        var draft = TransactionDraft(type: .ingreso)
+        draft.isDebtPayment = true
+        draft.selectDebt(deuda)
+        draft.currency = deuda.currency
+        draft.source = "Ana"
+        draft.amountText = "10.00"
+
+        // Lo que el usuario ve antes de tocar guardar.
+        #expect(Money.equals(draft.debtRemainder ?? -1, 5.10))
+        #expect(draft.validation == .ready)
+        #expect(draft.excessOverDebt == nil)
+        #expect(!draft.cancelsDebt)
+
+        guard let resolution = draft.resolveIncome() else {
+            Issue.record("el formulario rechazó un abono válido")
+            return
+        }
+        context.insert(resolution.income)
+        try? context.save()
+
+        // Y exactamente lo mismo después: la hoja sigue en pantalla un momento.
+        #expect(draft.validation == .ready, "el monto se pintó en rojo tras guardar")
+        #expect(draft.excessOverDebt == nil, "dijo que excedía un saldo que él mismo acababa de bajar")
+        #expect(!draft.cancelsDebt, "anunció que quedaba saldada faltando 5.10")
+        #expect(Money.equals(draft.debtRemainder ?? -1, 5.10))
+
+        // Y la contabilidad, correcta.
+        #expect(Money.equals(Accounting.outstanding(of: deuda), 5.10))
+        #expect(deuda.isDebt)
     }
 }

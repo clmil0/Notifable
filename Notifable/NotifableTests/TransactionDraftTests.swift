@@ -114,7 +114,7 @@ struct TransactionDraftTests {
         draft.currency = currency
         draft.source = "Yape"
         draft.isDebtPayment = true
-        draft.selectedDebt = debt
+        draft.selectDebt(debt)
         return draft
     }
 
@@ -151,7 +151,7 @@ struct TransactionDraftTests {
         #expect(draft.validation == .ready)
         #expect(draft.cancelsDebt)
         #expect(Money.equals(draft.debtRemainder ?? 0, 0))
-        #expect(draft.actionTitle.contains("cancelar deuda"))
+        #expect(draft.actionTitle.contains("saldar el cobro"))
         #expect(draft.makeIncome()?.isFinalDebtPayment == true)
     }
 
@@ -172,7 +172,7 @@ struct TransactionDraftTests {
         var draft = TransactionDraft(type: .ingreso)
         draft.amountText = "100"
         draft.isDebtPayment = true
-        #expect(draft.validation == .blocked("Elige la deuda a abonar"))
+        #expect(draft.validation == .blocked("Elige qué te están devolviendo"))
     }
 
     @Test("El ingreso normal no toca ninguna deuda")

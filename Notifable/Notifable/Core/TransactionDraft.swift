@@ -32,7 +32,26 @@ struct TransactionDraft {
     var title: String = ""
     var notes: String = ""
     var isDebtPayment: Bool = false
-    var selectedDebt: Expense? = nil
+
+    /// La deuda elegida y **su saldo en el momento de elegirla**.
+    ///
+    /// El saldo se captura en vez de leerse del modelo cada vez, y esa es la
+    /// diferencia que evita toda una familia de errores: `Expense.payments` es
+    /// una relación viva, así que en cuanto se construye el `Income` con
+    /// `debtReference` el saldo del objeto ya descuenta el abono que se está
+    /// registrando. Leyéndolo en vivo, el formulario se contradecía a sí mismo
+    /// justo después de guardar —el monto se pintaba en rojo por "exceso" y el
+    /// aviso de "queda saldado" aparecía sin motivo— durante el momento que la
+    /// hoja tarda en cerrarse. Un formulario describe lo que el usuario está
+    /// escribiendo; no puede cambiar de opinión por algo que él ya confirmó.
+    private(set) var selectedDebt: Expense? = nil
+    private(set) var selectedDebtOutstanding: Double = 0
+
+    /// Único camino para elegir deuda: así el saldo nunca queda sin capturar.
+    mutating func selectDebt(_ debt: Expense?) {
+        selectedDebt = debt
+        selectedDebtOutstanding = debt.map { Accounting.outstanding(of: $0) } ?? 0
+    }
 
     // MARK: - Monto
 
@@ -40,9 +59,10 @@ struct TransactionDraft {
 
     var hasAmount: Bool { Money.cents(amount) > 0 }
 
-    /// Saldo de la deuda elegida, en su propia moneda.
+    /// Saldo de la deuda elegida, en su propia moneda. Es el capturado al
+    /// elegirla, no el que tenga el objeto ahora mismo.
     var debtOutstanding: Double? {
-        selectedDebt.map { Accounting.outstanding(of: $0) }
+        selectedDebt == nil ? nil : selectedDebtOutstanding
     }
 
     /// Cuánto se pasa el abono del saldo. `nil` si no aplica.
@@ -173,14 +193,42 @@ struct TransactionDraft {
         )
     }
 
-    /// Crea el `Income`. El monto se limita al saldo por si la validación se
-    /// salta desde otro punto de entrada (doble red).
-    func makeIncome() -> Income? {
+    /// Todo lo que hace falta para guardar un cobro, resuelto **de una vez**.
+    ///
+    /// Existe por un bug real: `Income(debtReference: debt)` engancha el cobro
+    /// a `debt.payments` en el mismo instante en que se construye. Desde ese
+    /// momento `debtOutstanding` ya descuenta este abono, y con él `cancelsDebt`
+    /// y `excessOverDebt` pasan a estar mal. `AddTransactionSheet` leía
+    /// `draft.cancelsDebt` **después** de crear el ingreso, así que el abono se
+    /// contaba dos veces —una en el saldo, otra como monto— y la condición que
+    /// de verdad se evaluaba era «saldo_después ≤ monto». Con 500 y dos abonos
+    /// de 200: (500−400)=100 ≤ 200 → la deuda se daba por saldada con 400, y de
+    /// paso el monto se pintaba en rojo por "exceso".
+    ///
+    /// Devolviendo la decisión junto al ingreso, no queda ningún orden posible
+    /// en el que la vista pueda leer un saldo ya contaminado.
+    struct Resolution {
+        let income: Income
+        let debt: Expense?
+        /// Si con este cobro la deuda queda saldada.
+        let cancelsDebt: Bool
+    }
+
+    /// Crea el `Income` y decide si salda. El monto se limita al saldo por si
+    /// la validación se salta desde otro punto de entrada (doble red).
+    func resolveIncome() -> Resolution? {
         guard validation.isReady, type == .ingreso else { return nil }
         let debt = isDebtPayment ? selectedDebt : nil
-        let finalAmount = debt.map { Accounting.clampPayment(amount, to: $0) } ?? Money.normalized(amount)
+
+        // Se leen antes de construir el `Income`: después ya estarían contando
+        // este mismo abono.
+        let cancels = cancelsDebt
+        let finalAmount = debt == nil
+            ? Money.normalized(amount)
+            : min(Money.normalized(amount), selectedDebtOutstanding)
         guard Money.cents(finalAmount) > 0 else { return nil }
-        return Income(
+
+        let income = Income(
             amount: finalAmount,
             currency: currency,
             source: source,
@@ -188,8 +236,16 @@ struct TransactionDraft {
             date: date,
             notes: notes.trimmed.isEmpty ? nil : notes.trimmed,
             debtReference: debt,
-            isFinalDebtPayment: cancelsDebt
+            isFinalDebtPayment: cancels
         )
+        return Resolution(income: income, debt: debt, cancelsDebt: cancels)
+    }
+
+    /// - Warning: sólo para quien no necesite saber si la deuda queda saldada.
+    ///   Si vas a decidir algo sobre la deuda, usa `resolveIncome()`: leer
+    ///   `cancelsDebt` después de llamar aquí da un resultado equivocado.
+    func makeIncome() -> Income? {
+        resolveIncome()?.income
     }
 }
 

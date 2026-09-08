@@ -887,7 +887,7 @@ struct AddTransactionSheet: View {
             set: { on in
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
                     draft.isDebtPayment = on
-                    if on { preselectSingleDebt() } else { draft.selectedDebt = nil }
+                    if on { preselectSingleDebt() } else { draft.selectDebt(nil) }
                 }
             }
         )
@@ -895,7 +895,7 @@ struct AddTransactionSheet: View {
 
     private func preselectSingleDebt() {
         guard draft.isDebtPayment, draft.selectedDebt == nil, activeDebts.count == 1 else { return }
-        draft.selectedDebt = activeDebts.first
+        draft.selectDebt(activeDebts.first)
     }
 
     /// La distinción que ACCOUNTING.md §3 y §4 exigen y que ninguna pantalla
@@ -1207,17 +1207,23 @@ struct AddTransactionSheet: View {
             // suelto no debería reescribir la que el usuario fijó en la Bandeja.
             // Para eso está la Bandeja.
         } else {
-            guard let income = draft.makeIncome() else { return }
+            // Una sola resolución: el ingreso y la decisión de saldar salen
+            // juntos y **antes** de tocar la deuda. Aquí se leía
+            // `draft.cancelsDebt` después de crear el ingreso, cuando el saldo
+            // ya descontaba ese mismo abono: la deuda se daba por saldada con
+            // un abono parcial. Ver `TransactionDraft.Resolution`.
+            guard let resolution = draft.resolveIncome() else { return }
+            let income = resolution.income
             modelContext.insert(income)
             // El vínculo se anota por la huella del gasto, no sólo por la
             // relación de SwiftData: esa relación se rompe cada vez que el
             // gasto se rearma desde el correo.
-            if let debt = draft.selectedDebt, draft.isDebtPayment {
-                IncomeLinkStore.record(income: income, expense: debt, isFinal: draft.cancelsDebt)
+            if let debt = resolution.debt {
+                IncomeLinkStore.record(income: income, expense: debt, isFinal: resolution.cancelsDebt)
             }
             // `isFinalDebtPayment` se deduce del saldo, no de un toggle: el
             // anterior permitía cerrar una deuda con un abono parcial.
-            if draft.cancelsDebt, let debt = draft.selectedDebt {
+            if resolution.cancelsDebt, let debt = resolution.debt {
                 debt.isDebt = false
                 // Saldarlo es una decisión del usuario sobre un gasto del
                 // correo: sin anotarla, la relectura lo devuelve a "por cobrar".
@@ -1276,7 +1282,7 @@ struct AddTransactionSheet: View {
         NavigationStack {
             List(activeDebts) { debt in
                 Button {
-                    draft.selectedDebt = debt
+                    draft.selectDebt(debt)
                     draft.currency = debt.currency
                     showDebtPicker = false
                 } label: {
