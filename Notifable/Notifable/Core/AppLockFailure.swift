@@ -34,17 +34,20 @@ enum AppLockFailure: Equatable {
     /// que de verdad desbloquea.
     ///
     /// `false` cuando la biometría está configurada y disponible y sencillamente
-    /// no se completó la verificación —cancelaste, o no te reconoció—. Ahí no
+    /// no se completó la verificación —cancelaste, no te reconoció, o el
+    /// sistema devolvió un fallo suelto sin motivo concreto (`.other`)—. Ahí no
     /// hay nada que explicar ni ningún ajuste que tocar: lo único que hay que
     /// hacer es volver a mirar el teléfono, así que se sigue en la pantalla en
     /// reposo (2b), que ya dice "Toca para entrar". Sacar los tres pasos y dos
     /// botones para decir "vuelve a mirar" convierte un tropiezo de un segundo
-    /// en un incidente.
+    /// en un incidente. `.other` no tiene pasos de verdad que dar —"vuelve a
+    /// intentarlo" no es un ajuste externo—, así que mandarlo a la guiada sólo
+    /// cambiaba "Toca para entrar" por una tarjeta de error sin salida real.
     var needsGuidance: Bool {
         switch self {
-        case .cancelled, .notRecognized:
+        case .cancelled, .notRecognized, .other:
             return false
-        case .notEnrolled, .notAvailable, .lockout, .noPasscode, .other:
+        case .notEnrolled, .notAvailable, .lockout, .noPasscode:
             return true
         }
     }
@@ -55,6 +58,7 @@ enum AppLockFailure: Equatable {
         switch self {
         case .cancelled: return "Cancelaste la verificación. Toca el sello y vuelve a mirar."
         case .notRecognized: return "\(AppLock.biometryName) no te reconoció. Toca el sello y vuelve a mirar."
+        case .other: return "\(AppLock.biometryName) no respondió. Toca el sello y vuelve a intentar."
         default: return body
         }
     }

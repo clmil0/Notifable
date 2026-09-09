@@ -26,6 +26,7 @@ struct LockScreenView: View {
 
     @ObservedObject var lock: AppLock
     @Environment(\.colorScheme) private var scheme
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
     @State private var isWorking = false
     /// `true` mientras se espera al sistema. Al agotarse, el sello deja de
@@ -35,6 +36,10 @@ struct LockScreenView: View {
     @State private var scanTimer: Task<Void, Never>?
 
     private var palette: Palette { Palette(scheme) }
+    /// El ícono de la puerta usa el acento elegido en Apariencia, no el azul
+    /// de marca fijo: quien cambió su tema debe reconocerlo también aquí, ya
+    /// que esta es la pantalla que iOS fotografía para el conmutador de apps.
+    private var accent: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? AppBrand.accent }
 
     /// Cuál de las dos pantallas toca, y con qué motivo.
     ///
@@ -92,7 +97,7 @@ struct LockScreenView: View {
 
     private var header: some View {
         HStack(spacing: 9) {
-            AppIconTile(size: 30, accent: AppBrand.accent, coinFace: .white, detail: false)
+            AppIconTile(size: 30, accent: accent, coinFace: .white, detail: false)
             Text("AgruPay")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(palette.secondaryLabel)
@@ -119,11 +124,11 @@ struct LockScreenView: View {
                     RoundedRectangle(cornerRadius: 28, style: .continuous)
                         .fill(palette.surface)
                         .frame(width: 96, height: 96)
-                        .shadow(color: AppBrand.accent.opacity(0.16), radius: 16, y: 3)
+                        .shadow(color: accent.opacity(0.16), radius: 16, y: 3)
                         .overlay(
                             Image(systemName: AppLock.biometryIcon)
                                 .font(.system(size: 46, weight: .light))
-                                .foregroundStyle(AppBrand.accent)
+                                .foregroundStyle(accent)
                         )
                 }
                 .frame(width: 96, height: 96)
@@ -165,7 +170,7 @@ struct LockScreenView: View {
     /// Los anillos: nacen pegados al sello y se van abriendo hasta desaparecer.
     private func breathingRing(delay: Double) -> some View {
         RoundedRectangle(cornerRadius: 30, style: .continuous)
-            .stroke(AppBrand.accent, lineWidth: 2)
+            .stroke(accent, lineWidth: 2)
             .frame(width: 96, height: 96)
             .scaleEffect(isScanning ? 1.45 : 1)
             .opacity(isScanning ? 0 : 0.55)
@@ -283,7 +288,7 @@ struct LockScreenView: View {
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .frame(height: 54)
-            .background(AppBrand.accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
         .buttonStyle(.plain)
         .disabled(isWorking)
@@ -293,7 +298,7 @@ struct LockScreenView: View {
         Button(action: action) {
             Text(title)
                 .font(.headline)
-                .foregroundStyle(AppBrand.accent)
+                .foregroundStyle(accent)
                 .frame(maxWidth: .infinity)
                 .frame(height: 52)
                 .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))

@@ -3,6 +3,10 @@ import SwiftData
 
 @main
 struct NotifableApp: App {
+    /// Sólo para `PrivacyShield`: `applicationWillResignActive` es el único
+    /// punto que UIKit garantiza que corre antes de que el sistema fotografíe
+    /// la pantalla para el selector de apps.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     // Configura el contenedor principal de la base de datos de SwiftData
     var sharedModelContainer: ModelContainer = {
         // Migración aditiva: SwiftData crea las tablas nuevas sin tocar las
