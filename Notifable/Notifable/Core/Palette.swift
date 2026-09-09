@@ -88,6 +88,10 @@ extension AppThemeColor {
         case .green:  return Color(red: 0.114, green: 0.498, blue: 0.235)   // #1D7F3C
         case .orange: return Color(red: 0.702, green: 0.416, blue: 0.000)   // #B36A00
         case .red:    return Color(red: 0.659, green: 0.118, blue: 0.082)   // #A81E15
+        case .lavender: return Color(red: 0.357, green: 0.271, blue: 0.722) // #5B45B8
+        case .peach:    return Color(red: 0.659, green: 0.267, blue: 0.122) // #A8441F
+        case .sky:      return Color(red: 0.106, green: 0.353, blue: 0.612) // #1B5A9C
+        case .rose:     return Color(red: 0.631, green: 0.192, blue: 0.353) // #A1315A
         }
     }
 
@@ -99,12 +103,79 @@ extension AppThemeColor {
         case .green:  return Color(red: 0.561, green: 0.890, blue: 0.658)
         case .orange: return Color(red: 1.000, green: 0.749, blue: 0.373)
         case .red:    return Color(red: 1.000, green: 0.541, blue: 0.510)
+        case .lavender: return Color(red: 0.796, green: 0.757, blue: 0.984) // #CBC1FB
+        case .peach:    return Color(red: 0.984, green: 0.780, blue: 0.702) // #FBC7B3
+        case .sky:      return Color(red: 0.722, green: 0.847, blue: 0.973) // #B8D8F8
+        case .rose:     return Color(red: 0.973, green: 0.776, blue: 0.839) // #F8C6D6
         }
     }
 
-    /// Fondo tenue para chips y banners de acento.
+    /// Fondo tenue para chips y banners de acento. Los temas pastel usan un
+    /// tinte propio en claro (el genérico queda muy débil sobre blanco); en
+    /// oscuro la fórmula genérica (20%) ya coincide con el diseño.
     func softFill(_ scheme: ColorScheme) -> Color {
-        color.opacity(scheme == .dark ? 0.20 : 0.14)
+        guard scheme == .light, isDuotone else {
+            return color.opacity(scheme == .dark ? 0.20 : 0.14)
+        }
+        switch self {
+        case .lavender: return Color(red: 0.929, green: 0.918, blue: 0.984) // #EDEAFB
+        case .peach:    return Color(red: 0.992, green: 0.929, blue: 0.906) // #FDEDE7
+        case .sky:      return Color(red: 0.914, green: 0.949, blue: 0.988) // #E9F2FC
+        case .rose:     return Color(red: 0.984, green: 0.922, blue: 0.945) // #FBEBF1
+        default:        return color.opacity(0.14)
+        }
+    }
+
+    // MARK: - Acento 2 (temas pastel de dos colores)
+
+    /// Segundo acento con roles fijos: ingresos, hoy en el scrubber, badge de
+    /// Pendientes, suscripciones, deltas a la baja. En los temas de un solo
+    /// color no existe un segundo acento, así que cae de vuelta al primero —
+    /// esas pantallas se ven exactamente igual que hoy.
+    var secondaryColor: Color {
+        switch self {
+        case .lavender: return Color(red: 0.498, green: 0.847, blue: 0.741) // #7FD8BD
+        case .peach:    return Color(red: 0.561, green: 0.737, blue: 0.910) // #8FBCE8
+        case .sky:      return Color(red: 0.929, green: 0.780, blue: 0.608) // #EDC79B
+        case .rose:     return Color(red: 0.592, green: 0.824, blue: 0.714) // #97D2B6
+        case .purple, .blue, .green, .orange, .red: return color
+        }
+    }
+
+    func secondaryOnSurface(_ scheme: ColorScheme) -> Color {
+        guard isDuotone else { return onSurface(scheme) }
+        guard scheme == .light else {
+            switch self {
+            case .lavender: return Color(red: 0.624, green: 0.906, blue: 0.824) // #9FE7D2
+            case .peach:    return Color(red: 0.733, green: 0.847, blue: 0.957) // #BBD8F4
+            case .sky:      return Color(red: 0.949, green: 0.827, blue: 0.675) // #F2D3AC
+            case .rose:     return Color(red: 0.706, green: 0.890, blue: 0.804) // #B4E3CD
+            default: return secondaryColor
+            }
+        }
+        switch self {
+        case .lavender: return Color(red: 0.118, green: 0.478, blue: 0.388) // #1E7A63
+        case .peach:    return Color(red: 0.141, green: 0.333, blue: 0.514) // #245583
+        case .sky:      return Color(red: 0.541, green: 0.333, blue: 0.078) // #8A5514
+        case .rose:     return Color(red: 0.122, green: 0.420, blue: 0.314) // #1F6B50
+        default: return secondaryColor
+        }
+    }
+
+    /// Color de "esto es un ingreso" (monto, ícono genérico, tinte del botón
+    /// "Ingreso"). Verde de siempre en temas de un color; Acento 2 en pastel.
+    var incomeColor: Color { isDuotone ? secondaryColor : .green }
+
+    func secondarySoftFill(_ scheme: ColorScheme) -> Color {
+        guard isDuotone else { return softFill(scheme) }
+        guard scheme == .light else { return secondaryColor.opacity(0.18) }
+        switch self {
+        case .lavender: return Color(red: 0.902, green: 0.965, blue: 0.945) // #E6F6F1
+        case .peach:    return Color(red: 0.910, green: 0.945, blue: 0.980) // #E8F1FA
+        case .sky:      return Color(red: 0.984, green: 0.945, blue: 0.894) // #FBF1E4
+        case .rose:     return Color(red: 0.914, green: 0.961, blue: 0.937) // #E9F5EF
+        default: return secondaryColor.opacity(0.14)
+        }
     }
 }
 

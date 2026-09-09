@@ -10,6 +10,7 @@ struct AppearanceSettingsView: View {
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
     @AppStorage(AppTextSize.storageKey) private var appTextSize = AppTextSize.sistema.rawValue
+    @AppStorage(DashboardView.tapTitleFiltersKey) private var tapTitleFilters = true
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var appearance: AppAppearance { AppAppearance(rawValue: appearanceRaw) ?? .dark }
@@ -22,12 +23,46 @@ struct AppearanceSettingsView: View {
                 accentPicker
                 themePicker
                 textSizePicker
+                activityTitleTapSection
             }
             .padding(.vertical, 16)
         }
         .background(palette.background)
         .navigationTitle("Apariencia")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Toque en el título de Actividad Reciente
+
+    private var activityTitleTapSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("ACTIVIDAD RECIENTE")
+                .font(.caption)
+                .foregroundStyle(palette.secondaryLabel)
+                .padding(.horizontal, 20)
+
+            Toggle(isOn: $tapTitleFilters) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Tocar el nombre filtra por ese comercio")
+                        .foregroundStyle(palette.label)
+                    Text(tapTitleFilters
+                         ? "Al tocar el nombre de un movimiento, la lista se filtra por ese comercio."
+                         : "Al tocar el nombre se abre el detalle, igual que al tocar el resto de la fila.")
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+            }
+            .tint(accent.color)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(palette.hairline, lineWidth: 0.5)
+            )
+            .padding(.horizontal, 16)
+        }
     }
 
     // MARK: - Vista previa
@@ -99,7 +134,8 @@ struct AppearanceSettingsView: View {
                 .foregroundStyle(palette.secondaryLabel)
                 .padding(.horizontal, 20)
 
-            HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 4) {
                 ForEach(AppThemeColor.allCases) { theme in
                     Button {
                         withAnimation(.easeInOut(duration: 0.15)) { appAccentColor = theme.rawValue }
@@ -107,9 +143,25 @@ struct AppearanceSettingsView: View {
                     } label: {
                         VStack(spacing: 6) {
                             ZStack {
-                                Circle()
-                                    .fill(theme.color)
-                                    .frame(width: 46, height: 46)
+                                if theme.isDuotone {
+                                    // Medio círculo por acento, para que se
+                                    // note de un vistazo que es un tema de
+                                    // dos colores y no uno solo.
+                                    Circle()
+                                        .trim(from: 0, to: 0.5)
+                                        .fill(theme.color)
+                                        .rotationEffect(.degrees(-90))
+                                        .frame(width: 46, height: 46)
+                                    Circle()
+                                        .trim(from: 0.5, to: 1)
+                                        .fill(theme.secondaryColor)
+                                        .rotationEffect(.degrees(-90))
+                                        .frame(width: 46, height: 46)
+                                } else {
+                                    Circle()
+                                        .fill(theme.color)
+                                        .frame(width: 46, height: 46)
+                                }
                                 if appAccentColor == theme.rawValue {
                                     Circle()
                                         .stroke(Color.white, lineWidth: 2.5)
@@ -125,8 +177,7 @@ struct AppearanceSettingsView: View {
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.8)
                         }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 72)
+                        .frame(width: 60, height: 72)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -134,7 +185,8 @@ struct AppearanceSettingsView: View {
                     .accessibilityAddTraits(appAccentColor == theme.rawValue ? [.isSelected] : [])
                 }
             }
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 16)
+            }
         }
     }
 
