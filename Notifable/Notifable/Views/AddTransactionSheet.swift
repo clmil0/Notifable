@@ -271,6 +271,7 @@ struct AddTransactionSheet: View {
         quickExpenseRow
 
         merchantField
+        descriptionField
 
         if !merchantSuggestions.isEmpty {
             chipRow {
@@ -498,6 +499,26 @@ struct AddTransactionSheet: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
+        .padding(.horizontal, 16)
+    }
+
+    /// Descripción opcional, debajo del nombre — sirve igual para un gasto que
+    /// para un ingreso, así que vive en `draft.notes` sin distinción de tipo.
+    private var descriptionField: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "note.text")
+                .font(.system(size: 19))
+                .foregroundStyle(palette.secondaryLabel)
+
+            TextField("Descripción (opcional)", text: $draft.notes)
+                .font(.subheadline)
+                .textInputAutocapitalization(.sentences)
+                .submitLabel(.done)
+                .focused($focused, equals: .text)
+                .onSubmit { focused = nil }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 40)
         .padding(.horizontal, 16)
     }
 
@@ -850,6 +871,29 @@ struct AddTransactionSheet: View {
 
             Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 14)
 
+            HStack(spacing: 10) {
+                Image(systemName: "note.text")
+                    .font(.system(size: 17))
+                    .foregroundStyle(palette.secondaryLabel)
+
+                TextField("Descripción", text: $draft.notes)
+                    .font(.subheadline)
+                    .textInputAutocapitalization(.sentences)
+                    .submitLabel(.done)
+                    .focused($focused, equals: .text)
+                    .onSubmit { focused = nil }
+
+                if draft.notes.isEmpty {
+                    Text("Opcional")
+                        .font(.footnote)
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 40)
+
+            Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 14)
+
             dateRow
         }
         .background(palette.surface)
@@ -930,8 +974,6 @@ struct AddTransactionSheet: View {
             if draft.selectedDebt != nil {
                 Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 14)
                 balanceRow
-                Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 14)
-                debtAmountChips
             }
         }
         .background(palette.surface)
@@ -1002,10 +1044,13 @@ struct AddTransactionSheet: View {
             + Money.format(debt.amount, currency: debt.currency) + " original"
     }
 
-    /// Saldo actual → lo que quedaría. El `Picker` anterior mostraba el saldo
-    /// dentro del texto de la opción y desaparecía en cuanto elegías.
+    /// Saldo actual → lo que quedaría, con "Saldar" a la derecha para marcar
+    /// que este abono cierra la deuda aunque no cubra el saldo completo. Antes
+    /// había tres atajos para el monto ("Todo el saldo"/"Mitad"/"Otro monto");
+    /// el monto ya se escribe arriba con el teclado, así que sólo hacía falta
+    /// una forma de decir "esto es lo último que va a pagar".
     private var balanceRow: some View {
-        let remainder = draft.debtRemainder ?? 0
+        let remainder = draft.cancelsDebt ? 0 : (draft.debtRemainder ?? 0)
         let currency = draft.selectedDebt?.currency ?? draft.currency
 
         return HStack(spacing: 12) {
@@ -1032,39 +1077,41 @@ struct AddTransactionSheet: View {
             }
 
             Spacer(minLength: 0)
+
+            settleToggle
         }
         .padding(.horizontal, 14)
         .frame(minHeight: 58)
     }
 
-    private var debtAmountChips: some View {
-        HStack(spacing: 8) {
-            Button { setAmount(draft.debtOutstanding ?? 0) } label: {
-                chipLabel("Todo el saldo", tint: accentText, selected: false)
-            }
-            .buttonStyle(.plain)
+    /// Se apaga solo cuando el abono ya cubre el saldo completo: forzarlo ahí
+    /// no cambiaría nada, así que se muestra marcado pero sin poder tocarse.
+    private var debtIsNaturallySettled: Bool { Money.isZero(draft.debtRemainder ?? 0) }
 
-            Button { setAmount(Money.divide(draft.debtOutstanding ?? 0, by: 2)) } label: {
-                chipLabel("Mitad", tint: palette.secondaryLabel, selected: false)
+    private var settleToggle: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { draft.forceCancelsDebt.toggle() }
+        } label: {
+            VStack(spacing: 4) {
+                ZStack {
+                    Circle()
+                        .strokeBorder(draft.cancelsDebt ? palette.positive : palette.secondaryLabel.opacity(0.6), lineWidth: 1.6)
+                        .background(Circle().fill(draft.cancelsDebt ? palette.positive : Color.clear))
+                        .frame(width: 24, height: 24)
+                    if draft.cancelsDebt {
+                        Image(systemName: "checkmark")
+                            .font(.caption2.weight(.bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                Text("Saldar")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(palette.secondaryLabel)
             }
-            .buttonStyle(.plain)
-
-            Button { draft.amountText = "" } label: {
-                chipLabel("Otro monto", tint: palette.secondaryLabel, selected: false)
-            }
-            .buttonStyle(.plain)
-
-            Spacer(minLength: 0)
         }
-        .padding(.horizontal, 14)
-        .frame(minHeight: 54)
-    }
-
-    private func setAmount(_ value: Double) {
-        withAnimation(.easeInOut(duration: 0.15)) {
-            draft.amountText = String(format: "%.2f", Money.normalized(value))
-            if let debt = draft.selectedDebt { draft.currency = debt.currency }
-        }
+        .buttonStyle(.plain)
+        .disabled(debtIsNaturallySettled)
+        .opacity(debtIsNaturallySettled ? 0.5 : 1)
     }
 
     private func cancelBanner(_ debt: Expense) -> some View {

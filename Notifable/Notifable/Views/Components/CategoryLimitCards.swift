@@ -177,10 +177,10 @@ struct OverLimitAlert: View {
 /// La fila de "Nueva categoría", al final de Mis Categorías.
 ///
 /// Mismas medidas que `UnifiedCategoryRow` —igual ancho, igual radio, igual
-/// bloque de icono de 36 pt— para que caiga en la misma columna que las demás;
-/// lo que la distingue es el borde discontinuo, el "+" y el tinte de acento, no
-/// un tamaño distinto. Antes era un botón suelto más bajo y más estrecho que
-/// las tarjetas, y parecía de otra pantalla.
+/// bloque de icono de 48 pt, mismo `padding`— para que caiga en la misma
+/// columna que las demás, con el mismo alto de fila que Actividad Reciente
+/// (`2e`). Lo que la distingue es el borde discontinuo, el "+" y el tinte de
+/// acento, no un tamaño distinto.
 struct NewCategoryRow: View {
 
     var onTap: () -> Void
@@ -193,13 +193,12 @@ struct NewCategoryRow: View {
 
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
+            HStack(spacing: 16) {
+                Circle()
                     .fill(accent.color.opacity(0.18))
-                    .frame(width: 36, height: 36)
+                    .frame(width: 48, height: 48)
                     .overlay(
                         Image(systemName: "plus")
-                            .font(.footnote.weight(.bold))
                             .foregroundStyle(accent.color)
                     )
 
@@ -215,14 +214,13 @@ struct NewCategoryRow: View {
 
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
+            .padding(16)
             .contentShape(Rectangle())
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(accent.color.opacity(scheme == .dark ? 0.10 : 0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(accent.color.opacity(0.5),
                                   style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
             )
@@ -270,8 +268,8 @@ struct UnifiedCategoryRow: View {
                          paceFraction: status.elapsedFraction,
                          color: status.level.color(palette),
                          height: 6)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 13)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
             }
 
             if isExpanded {
@@ -279,24 +277,28 @@ struct UnifiedCategoryRow: View {
             }
         }
         .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
         .opacity(isDim ? 0.45 : 1)
         .padding(.horizontal, 16)
     }
 
+    /// Cabecera al ancho y alto de una fila de Actividad Reciente (`2e`):
+    /// ícono circular de 48 pt, el mismo `padding` de 16 y el monto grande a
+    /// la derecha en vez de metido en el subtítulo. Antes el gasto y el
+    /// estado del límite compartían una sola línea bajo el nombre; separarlos
+    /// deja al monto el mismo peso visual que tiene en Actividad Reciente.
     private var header: some View {
         Button(action: onToggleExpand) {
-            HStack(spacing: 12) {
-                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(color.opacity(0.22))
-                    .frame(width: 36, height: 36)
+            HStack(spacing: 16) {
+                Circle()
+                    .fill(color.opacity(0.2))
+                    .frame(width: 48, height: 48)
                     .overlay(
                         Image(systemName: CategoryStyle.icon(for: category))
-                            .font(.footnote)
                             .foregroundStyle(color)
                     )
 
@@ -304,47 +306,48 @@ struct UnifiedCategoryRow: View {
                     Text(category)
                         .font(.headline)
                         .foregroundStyle(palette.label)
-                    Text(subtitle)
+                    Text(metaLine)
                         .font(.footnote)
-                        .foregroundStyle(status.hasLimit ? status.level.color(palette) : palette.secondaryLabel)
+                        .foregroundStyle(palette.secondaryLabel)
                         .lineLimit(1)
                 }
 
                 Spacer(minLength: 0)
 
-                if status.hasLimit {
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(palette.secondaryLabel)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                } else {
-                    Button(action: onEditLimit) {
-                        Text("Poner límite")
-                            .font(.footnote.weight(.semibold))
-                            .foregroundStyle(accent.onSurface(scheme))
-                            .padding(.horizontal, 11)
-                            .padding(.vertical, 6)
-                            .overlay(
-                                Capsule().stroke(accent.onSurface(scheme).opacity(0.5), lineWidth: 0.5)
-                            )
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(Money.format(spent))
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(status.hasLimit ? status.level.color(palette) : palette.label)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    if status.hasLimit {
+                        Text(status.shortLabel)
+                            .font(.caption2)
+                            .foregroundStyle(status.level.color(palette))
+                    } else {
+                        Button(action: onEditLimit) {
+                            Text("Poner límite")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(accent.onSurface(scheme))
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 13)
+            .padding(16)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    private var subtitle: String {
-        guard status.hasLimit else {
-            return Money.isZero(spent)
-                ? "Sin gasto este mes · sin límite"
-                : Money.formatCompact(spent) + " este mes · sin límite"
-        }
-        return status.longLabel
+    /// Segunda línea bajo el nombre: cuántos comercios aportan a la categoría
+    /// este periodo — antes ese espacio lo ocupaba el monto, que ahora vive a
+    /// la derecha.
+    private var metaLine: String {
+        let count = merchants.count
+        if count == 0 { return "Sin movimientos este periodo" }
+        return count == 1 ? "1 comercio" : "\(count) comercios"
     }
 
     private var expandedContent: some View {
@@ -417,8 +420,8 @@ struct UnifiedCategoryRow: View {
             }
             .padding(.top, 2)
         }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 13)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 16)
         .alert("¿Eliminar categoría?", isPresented: $confirmingDelete) {
             Button("Cancelar", role: .cancel) { }
             Button("Eliminar", role: .destructive, action: onDeleteCategory)

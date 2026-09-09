@@ -1,70 +1,8 @@
 import SwiftUI
 
-/// Cuánto llevas clasificado y el atajo para acabar de una vez.
-struct InboxProgressCard: View {
-
-    let classified: Int
-    let total: Int
-    var onClassifyAll: () -> Void
-
-    @Environment(\.colorScheme) private var scheme
-    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
-
-    private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
-    private var palette: Palette { Palette(scheme) }
-    private var pending: Int { max(0, total - classified) }
-    private var fraction: Double {
-        guard total > 0 else { return 0 }
-        return Double(classified) / Double(total)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("\(classified) de \(total) comercios clasificados")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(palette.label)
-                Spacer()
-                Text("\(Int((fraction * 100).rounded()))%")
-                    .font(.subheadline.weight(.bold))
-                    .foregroundStyle(accent.onSurface(scheme))
-            }
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(palette.track)
-                    Capsule()
-                        .fill(accent.color)
-                        .frame(width: geo.size.width * CGFloat(fraction))
-                }
-            }
-            .frame(height: 8)
-            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: fraction)
-
-            if pending > 0 {
-                Button(action: onClassifyAll) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "bolt.fill")
-                        Text(pending == 1 ? "Clasificar el que queda" : "Clasificar los \(pending) restantes")
-                    }
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(accent.color)
-                    .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .surfaceCard(radius: 20)
-        .padding(.horizontal, 16)
-    }
-}
-
 /// Un lote de comercios a los que el motor propone la misma categoría con
-/// confianza alta. Aparece sólo con 2 o más: con uno solo ya está la fila de
-/// sugerencia normal, no hace falta un bloque aparte.
+/// confianza alta. Aparece sólo con 2 o más: con uno solo ya está el rayo de
+/// sugerencia en su propia tarjeta, no hace falta agruparlo.
 struct SuggestionBucket: Identifiable {
     let category: String
     let merchants: [InboxGroup]
@@ -72,54 +10,36 @@ struct SuggestionBucket: Identifiable {
     var total: Double { Money.sum(merchants) { $0.total } }
 }
 
-struct SuggestionBucketCard: View {
+/// Aviso delgado de una sola línea (`2d`): antes "EL MOTOR PROPONE" eran
+/// varias tarjetas, una por categoría sugerida, cada una con su propio botón
+/// "Aceptar N". Ahora es un solo aviso con un único "Aceptar todas" que
+/// resuelve todos los lotes de una vez — el detalle de qué va a dónde ya lo
+/// anuncia el rayo en la esquina de cada tarjeta.
+struct EngineSuggestionRow: View {
 
-    let bucket: SuggestionBucket
-    var onAccept: () -> Void
+    let merchantCount: Int
+    var onAcceptAll: () -> Void
 
     @Environment(\.colorScheme) private var scheme
     private var palette: Palette { Palette(scheme) }
 
-    private var names: String {
-        bucket.merchants.prefix(3).map { Accounting.displayName($0.merchant) }.joined(separator: ", ")
-    }
-
     var body: some View {
-        HStack(spacing: 11) {
+        HStack(spacing: 8) {
             Image(systemName: "bolt.fill")
+                .font(.caption)
                 .foregroundStyle(palette.positive)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(bucket.merchants.count) comercios parecen \(bucket.category)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(palette.label)
-                Text(names + " · " + Money.format(bucket.total))
-                    .font(.caption)
-                    .foregroundStyle(palette.secondaryLabel)
-                    .lineLimit(1)
-            }
-
+            Text(merchantCount == 1
+                 ? "1 comercio con sugerencia fuerte"
+                 : "\(merchantCount) comercios con sugerencia fuerte")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(palette.secondaryLabel)
             Spacer(minLength: 0)
-
-            Button(action: onAccept) {
-                Text("Aceptar \(bucket.merchants.count)")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 7)
-                    .background(palette.positive)
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
+            Button("Aceptar todas", action: onAcceptAll)
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(palette.positive)
         }
-        .padding(12)
-        .background(palette.positive.opacity(scheme == .dark ? 0.12 : 0.09))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(palette.positive.opacity(0.4), lineWidth: 0.5)
-        )
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 4)
     }
 }
 
@@ -157,17 +77,12 @@ struct InboxMerchantCard: View {
     private var palette: Palette { Palette(scheme) }
 
     /// Por debajo de este umbral la sugerencia no se muestra: proponer con poca
-    /// confianza enseña al usuario a desconfiar del botón.
+    /// confianza enseña al usuario a desconfiar del rayo.
     private var showsSuggestion: Bool { (suggestion?.confidence ?? 0) >= 0.45 }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-
-            if showsSuggestion, let suggestion {
-                suggestionRow(suggestion)
-            }
-
             chips
 
             if isExpanded {
@@ -302,53 +217,22 @@ struct InboxMerchantCard: View {
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    // MARK: - Sugerencia
-
-    private func suggestionRow(_ suggestion: CategorySuggestion) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "bolt.fill")
-                .font(.footnote.weight(.bold))
-                .foregroundStyle(palette.positive)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(suggestion.category)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(palette.label)
-                Text(suggestion.reason)
-                    .font(.caption)
-                    .foregroundStyle(palette.secondaryLabel)
-                    .lineLimit(2)
-            }
-
-            Spacer(minLength: 0)
-
-            Button {
-                onPick(suggestion.category)
-            } label: {
-                Text("Aplicar")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(palette.positive)
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(10)
-        .background(palette.positive.opacity(scheme == .dark ? 0.16 : 0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(palette.positive.opacity(0.5), lineWidth: 0.5)
-        )
-    }
-
     // MARK: - Chips
 
+    /// El chip de la sugerencia va primero y resaltado — con el rayo ya en la
+    /// esquina de la tarjeta, confirmarla sigue siendo un solo toque, sólo que
+    /// ahora en la misma fila que el resto de categorías en vez de en un
+    /// bloque aparte.
     private var chips: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                if showsSuggestion, let suggestion {
+                    Button { onPick(suggestion.category) } label: {
+                        suggestedChipLabel(suggestion.category)
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 ForEach(frequentCategories, id: \.self) { category in
                     Button { onPick(category) } label: {
                         chipLabel(category, filled: false)
@@ -373,6 +257,20 @@ struct InboxMerchantCard: View {
             .padding(.vertical, 7)
             .background(filled ? accent.softFill(scheme) : palette.track)
             .clipShape(Capsule())
+    }
+
+    private func suggestedChipLabel(_ text: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "bolt.fill")
+                .font(.caption2)
+            Text(text)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(palette.positive)
+        .clipShape(Capsule())
     }
 
     // MARK: - Movimientos

@@ -39,6 +39,10 @@ struct CategorySettingsView: View {
     @State private var confirmingDelete = false
     @State private var merchants: [String] = []
     @State private var loaded = false
+    /// No-nil mientras renombrar/fusionar/eliminar recorre todo el historial
+    /// de la categoría — sin esto no hay ningún aviso de que el toque se
+    /// registró (`Batching`).
+    @State private var processingLabel: String?
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
@@ -64,8 +68,12 @@ struct CategorySettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
-                Button("Listo") { finish() }
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                if processingLabel != nil {
+                    ProgressView()
+                } else {
+                    Button("Listo") { finish() }
+                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
             }
         }
         .sheet(isPresented: $showingIcons) { iconPicker }
@@ -77,6 +85,24 @@ struct CategorySettingsView: View {
             Button("Eliminar", role: .destructive) { deleteCategory() }
         } message: {
             Text(deleteMessage)
+        }
+        .overlay {
+            if let label = processingLabel {
+                ZStack {
+                    Color.black.opacity(0.15).ignoresSafeArea()
+                    VStack(spacing: 10) {
+                        ProgressView()
+                        Text(label)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(palette.label)
+                    }
+                    .padding(20)
+                    .background(palette.surfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .shadow(color: .black.opacity(0.2), radius: 12, y: 6)
+                }
+                .transition(.opacity)
+            }
         }
         .onAppear(perform: load)
     }
@@ -147,7 +173,13 @@ struct CategorySettingsView: View {
                     .font(.title.bold())
                     .foregroundStyle(palette.label)
                     .disabled(!isNew && CategoryCatalog.isSystem(currentName))
-                    .onSubmit(renameIfNeeded)
+                    .onSubmit {
+                        processingLabel = "Guardando…"
+                        Task {
+                            await renameIfNeeded()
+                            processingLabel = nil
+                        }
+                    }
 
                 colorRow
             }
@@ -533,9 +565,13 @@ struct CategorySettingsView: View {
     }
 
     private func deleteCategory() {
-        CategoryEditor.delete(currentName, in: history)
-        try? modelContext.save()
-        dismiss()
+        processingLabel = "Eliminando…"
+        Task {
+            await CategoryEditor.delete(currentName, in: history)
+            try? modelContext.save()
+            processingLabel = nil
+            dismiss()
+        }
     }
 
     // MARK: - Sheets
@@ -564,9 +600,13 @@ struct CategorySettingsView: View {
         CategoryMergePicker(source: currentName,
                             options: mergeOptions,
                             history: history) { target in
-            CategoryEditor.merge(currentName, into: target, in: history)
-            try? modelContext.save()
-            dismiss()
+            processingLabel = "Fusionando…"
+            Task {
+                await CategoryEditor.merge(currentName, into: target, in: history)
+                try? modelContext.save()
+                processingLabel = nil
+                dismiss()
+            }
         }
     }
 
@@ -590,10 +630,10 @@ struct CategorySettingsView: View {
             .padding(.horizontal, 32)
     }
 
-    private func renameIfNeeded() {
+    private func renameIfNeeded() async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != currentName, !isNew else { return }
-        CategoryEditor.rename(currentName, to: trimmed, in: history)
+        await CategoryEditor.rename(currentName, to: trimmed, in: history)
         try? modelContext.save()
         currentName = trimmed
         if var budget = draft {
@@ -615,7 +655,9 @@ struct CategorySettingsView: View {
     }
 
     /// "Listo": para una categoría existente sólo cierra —ya está todo escrito—;
-    /// para una nueva es el momento en que se crea.
+    /// para una nueva es el momento en que se crea. Renombrar puede tocar todo
+    /// el historial de la categoría, así que es lo único que corre en un
+    /// `Task` con aviso — crear una categoría nueva no toca ningún gasto.
     private func finish() {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -626,11 +668,17 @@ struct CategorySettingsView: View {
                 budget.category = trimmed
                 budgets.save(budget)
             }
+            onDone?(trimmed)
+            dismiss()
         } else {
-            renameIfNeeded()
+            processingLabel = "Guardando…"
+            Task {
+                await renameIfNeeded()
+                processingLabel = nil
+                onDone?(currentName)
+                dismiss()
+            }
         }
-        onDone?(isNew ? trimmed : currentName)
-        dismiss()
     }
 }
 

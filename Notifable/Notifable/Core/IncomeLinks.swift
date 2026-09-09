@@ -70,6 +70,16 @@ enum IncomeLinkStore {
         defaults.removeObject(forKey: key)
     }
 
+    /// Se anota al desvincular un cobro (`2b`: "Ingreso libre" o reasignar a
+    /// otra deuda). Sin esto, la próxima relectura del correo —o
+    /// `apply(in:)`— volvería a atar el ingreso a la deuda que el usuario ya
+    /// quitó a mano.
+    static func remove(incomeID: UUID, defaults: UserDefaults = .standard) {
+        var current = all(defaults)
+        current.removeValue(forKey: incomeID)
+        persist(current, defaults: defaults)
+    }
+
     private static func persist(_ links: [UUID: IncomeLink], defaults: UserDefaults) {
         let encoded = (try? JSONEncoder().encode(links.values.sorted { $0.incomeID.uuidString < $1.incomeID.uuidString })) ?? Data()
         defaults.set(encoded, forKey: key)

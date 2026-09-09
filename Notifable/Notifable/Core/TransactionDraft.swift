@@ -22,6 +22,9 @@ struct TransactionDraft {
     var currency: String = "PEN"
     var date: Date = Date()
 
+    /// Descripción opcional, debajo del nombre en ambos formularios.
+    var notes: String = ""
+
     // Gasto
     var merchant: String = ""
     var category: String = "Otros"
@@ -30,7 +33,6 @@ struct TransactionDraft {
     // Ingreso
     var source: String = "Transferencia"
     var title: String = ""
-    var notes: String = ""
     var isDebtPayment: Bool = false
 
     /// La deuda elegida y **su saldo en el momento de elegirla**.
@@ -47,10 +49,19 @@ struct TransactionDraft {
     private(set) var selectedDebt: Expense? = nil
     private(set) var selectedDebtOutstanding: Double = 0
 
+    /// Marca manual: el usuario decide que este abono deja saldada la deuda
+    /// aunque no cubra el saldo completo, perdonando lo que falte en vez de
+    /// dejarlo pendiente. Sin esto, la única forma de saldar era pagar
+    /// exacto — pagar de más ya está bloqueado por validación.
+    var forceCancelsDebt: Bool = false
+
     /// Único camino para elegir deuda: así el saldo nunca queda sin capturar.
     mutating func selectDebt(_ debt: Expense?) {
         selectedDebt = debt
         selectedDebtOutstanding = debt.map { Accounting.outstanding(of: $0) } ?? 0
+        // Saldar es una decisión sobre ESTA deuda; cambiar de elegida no debe
+        // arrastrarla a la siguiente.
+        forceCancelsDebt = false
     }
 
     // MARK: - Monto
@@ -79,12 +90,12 @@ struct TransactionDraft {
         return Money.clampedToZero(Money.subtract(saldo, amount))
     }
 
-    /// El abono cancela la deuda. **Se deduce, no se pregunta:** el toggle
-    /// "Es el último pago" del diseño anterior permitía cancelar una deuda con
-    /// un abono parcial, dejando saldo pendiente en una deuda ya cerrada.
+    /// El abono cancela la deuda: solo, si cubre el saldo completo, o a
+    /// propósito, si el usuario marcó `forceCancelsDebt` para perdonar lo que
+    /// falte y no dejarlo pendiente.
     var cancelsDebt: Bool {
         guard isDebtPayment, let remainder = debtRemainder else { return false }
-        return Money.isZero(remainder)
+        return Money.isZero(remainder) || forceCancelsDebt
     }
 
     // MARK: - Validación
@@ -227,6 +238,7 @@ struct TransactionDraft {
             merchant: merchant.trimmed,
             date: date,
             category: category,
+            notes: notes.trimmed.isEmpty ? nil : notes.trimmed,
             isSubscription: isSubscription,
             currency: currency
         )

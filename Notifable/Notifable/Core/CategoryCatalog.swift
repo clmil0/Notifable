@@ -170,16 +170,19 @@ enum CategoryEditor {
             .sorted { Accounting.displayName($0) < Accounting.displayName($1) }
     }
 
+    /// `async` — quien llama corre esto dentro de un `Task` y muestra un
+    /// indicador mientras dura, en vez de congelar la pantalla: una categoría
+    /// con años de historial puede ser miles de gastos.
     static func rename(_ category: String,
                        to newName: String,
                        in expenses: [Expense],
                        catalog: CategoryCatalog = .shared,
                        budgets: CategoryBudgetStore = .shared,
-                       defaults: UserDefaults = .standard) {
+                       defaults: UserDefaults = .standard) async {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != category, !CategoryCatalog.isSystem(category) else { return }
 
-        for expense in expenses where expense.category == category {
+        await Batching.run(expenses.filter { $0.category == category }) { expense in
             expense.category = trimmed
         }
         for (merchant, target) in MerchantRules.all(defaults) where target == category {
@@ -196,10 +199,10 @@ enum CategoryEditor {
                       in expenses: [Expense],
                       catalog: CategoryCatalog = .shared,
                       budgets: CategoryBudgetStore = .shared,
-                      defaults: UserDefaults = .standard) {
+                      defaults: UserDefaults = .standard) async {
         guard source != target else { return }
 
-        for expense in expenses where expense.category == source {
+        await Batching.run(expenses.filter { $0.category == source }) { expense in
             expense.category = target
         }
         for (merchant, category) in MerchantRules.all(defaults) where category == source {
@@ -216,10 +219,10 @@ enum CategoryEditor {
                        in expenses: [Expense],
                        catalog: CategoryCatalog = .shared,
                        budgets: CategoryBudgetStore = .shared,
-                       defaults: UserDefaults = .standard) {
+                       defaults: UserDefaults = .standard) async {
         guard !CategoryCatalog.isSystem(category) else { return }
 
-        for expense in expenses where expense.category == category {
+        await Batching.run(expenses.filter { $0.category == category }) { expense in
             expense.category = Accounting.unclassified
         }
         for (merchant, target) in MerchantRules.all(defaults) where target == category {

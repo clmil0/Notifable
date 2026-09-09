@@ -127,29 +127,6 @@ extension MerchantRules {
                          previousRules: [merchant: previousRule])
     }
 
-    /// Aplica una categoría a varios comercios completos de una vez ("Aceptar N"
-    /// de un lote de sugerencias), con un único `UndoToken` para el conjunto.
-    @discardableResult
-    static func applyBatch(_ category: String,
-                           to merchants: [String],
-                           in expenses: [Expense],
-                           defaults: UserDefaults = .standard) -> UndoToken {
-        var previousCategories: [UUID: String] = [:]
-        var previousRules: [String: String?] = [:]
-        for merchant in merchants {
-            let (previous, previousRule) = applyRule(category, to: merchant, in: expenses, defaults: defaults)
-            previousCategories.merge(previous) { current, _ in current }
-            previousRules[merchant] = previousRule
-        }
-        let summary = merchants.count == 1
-            ? Accounting.displayName(merchants[0]) + " → " + category
-            : "\(merchants.count) comercios → " + category
-        return UndoToken(summary: summary,
-                         category: category,
-                         previousCategories: previousCategories,
-                         previousRules: previousRules)
-    }
-
     static func undo(_ token: UndoToken, in expenses: [Expense], defaults: UserDefaults = .standard) {
         for expense in expenses where token.previousCategories[expense.id] != nil {
             expense.category = token.previousCategories[expense.id] ?? Accounting.unclassified
