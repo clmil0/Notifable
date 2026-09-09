@@ -34,8 +34,15 @@ struct ContentView: View {
     @State private var didResolveRecurring = false
     @State private var selectedTab: AppTab = .home
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    /// En `AppStorage` porque el banner de Resumen necesita dejarlo en
+    /// Pendientes antes de navegar hasta Categorías (`onOpenInbox`); por eso
+    /// sobrevive de por sí a cambiar de pestaña. Tocar el ícono de Categorías
+    /// desde la barra inferior, en cambio, siempre debe abrir Mis Categorías
+    /// — nunca dejarte donde estabas la última vez.
+    @AppStorage("categoriesSegment") private var categoriesSegment = CategoryTab.misCategorias
     
-    var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
+    var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
+    var themeColor: Color { accent.color }
     @State private var showSettings = false
 
     /// Red de seguridad de la cadena de vinculación: normalmente la presenta
@@ -171,7 +178,7 @@ struct ContentView: View {
 
                             addOption(title: "Ingreso",
                                       icon: "arrow.down.left.circle.fill",
-                                      tint: .green,
+                                      tint: accent.incomeColor,
                                       type: .ingreso)
                         }
                         .background(.regularMaterial)
@@ -185,6 +192,23 @@ struct ContentView: View {
             }
 
             
+            // Blindaje instantáneo: montado siempre, sin `.task` ni
+            // transición — sólo cambia opacidad. `LockScreenView` reacciona a
+            // `appLock.isLocked` a través de `@Published`, y SwiftUI puede
+            // tardar un fotograma en montarla la primera vez; si ese
+            // fotograma justo coincide con el que iOS fotografía para el
+            // conmutador de apps (lo típico es pasar a segundo plano al
+            // toque de haber desbloqueado, con la vista recién reconstruida),
+            // el contenido de verdad queda expuesto ahí. Esta capa, al no
+            // tener que montarse desde cero, sólo cambia una opacidad sobre
+            // una vista que ya existe — lo que sí alcanza a dibujarse a
+            // tiempo — y cubre mientras la pantalla interactiva llega.
+            privacyShield
+                .opacity(appLock.isLocked ? 1 : 0)
+                .allowsHitTesting(false)
+                .animation(nil, value: appLock.isLocked)
+                .zIndex(9)
+
             // La puerta va por encima de todo lo de esta pantalla, y por
             // debajo del splash: al abrir se ve primero la marca y luego el
             // bloqueo, no los dos peleándose.
@@ -207,6 +231,19 @@ struct ContentView: View {
         }
     }
     
+    // MARK: - Blindaje de privacidad
+
+    /// Fondo + ícono, nada interactivo. A propósito no es `LockScreenView`:
+    /// esa arranca Face ID en `.task` al aparecer, y esta vista está montada
+    /// todo el tiempo — dispararía el diálogo del sistema con la app en
+    /// segundo plano. Sólo tapa hasta que la pantalla de verdad llega.
+    private var privacyShield: some View {
+        ZStack {
+            Palette(systemScheme).background.ignoresSafeArea()
+            AppIconTile(size: 64, accent: themeColor, coinFace: .white, detail: false)
+        }
+    }
+
     // MARK: - Top Header
     private var topHeader: some View {
         HStack {
@@ -271,6 +308,9 @@ struct ContentView: View {
                         if selectedTab == tab {
                             scrollToTopTrigger.toggle()
                         } else {
+                            if tab == .categories {
+                                categoriesSegment = .misCategorias
+                            }
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
                                 selectedTab = tab
                             }

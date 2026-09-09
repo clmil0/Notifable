@@ -31,6 +31,11 @@ enum TransactionItem: Identifiable {
 /// queda en el periodo visible. Al filtrar por año se cargará un año; antes se
 /// cargaba todo igualmente.
 struct DashboardView: View {
+    /// Ajustes › Apariencia decide si tocar el nombre de un movimiento filtra
+    /// Actividad Reciente por ese comercio, o abre el detalle igual que el
+    /// resto de la fila.
+    static let tapTitleFiltersKey = "activityTitleTapFilters"
+
     /// Lleva a la pestaña Categorías. Lo resuelve `ContentView`, que es quien
     /// tiene la pestaña seleccionada.
     var onOpenInbox: () -> Void = {}
@@ -76,6 +81,7 @@ private struct DashboardContent: View {
     @StateObject private var exchangeRateService = ExchangeRateService.shared
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(DashboardView.tapTitleFiltersKey) private var tapTitleFilters = true
 
     init(onOpenInbox: @escaping () -> Void,
          period: Binding<Period>,
@@ -95,7 +101,8 @@ private struct DashboardContent: View {
                          sort: \Income.date, order: .reverse)
     }
     
-    var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
+    var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
+    var themeColor: Color { accent.color }
 
     /// Paleta con contraste verificado. Sustituye a `Color.primary.opacity(0.05)`,
     /// que en modo claro es #F2F2F2 sobre blanco: 4 % de diferencia de luminancia,
@@ -111,9 +118,7 @@ private struct DashboardContent: View {
     @State private var selectedExpenseForDetails: Expense? = nil
     @State private var showBudgetSheet = false
     @State private var showPendingSheet = false
-    /// Un ingreso no tiene pantalla de detalle; al tocarlo se ofrece la única
-    /// acción que tenía en el menú.
-    @State private var incomeToActOn: Income?
+    @State private var selectedIncomeForDetails: Income?
     /// La tira de ingresos filtra la actividad reciente a sólo ingresos.
     @State private var showsIncomesOnly = false
 
@@ -306,13 +311,22 @@ private struct DashboardContent: View {
                                     .padding(.top, 10)
                                     .frame(maxWidth: .infinity, alignment: .center)
                             } else {
-                                ForEach(Array(paged.enumerated()), id: \.element.id) { index, item in
-                                    transactionCard(for: item)
-                                        .onAppear {
-                                            loadMoreIfNeeded(index: index,
-                                                             pageCount: paged.count,
-                                                             totalCount: transactions.count)
-                                        }
+                                // `LazyVStack`, no `VStack`: con un `VStack` normal
+                                // las 50 (y luego 100, 150…) filas cargadas se
+                                // montaban y disponían TODAS en cada dibujado,
+                                // aunque casi ninguna estuviera en pantalla. Con
+                                // `LazyVStack` sólo se construyen las filas cerca
+                                // del viewport, que es lo que hace que deslizar no
+                                // se sienta más pesado a medida que la lista crece.
+                                LazyVStack(spacing: 12) {
+                                    ForEach(Array(paged.enumerated()), id: \.element.id) { index, item in
+                                        transactionCard(for: item)
+                                            .onAppear {
+                                                loadMoreIfNeeded(index: index,
+                                                                 pageCount: paged.count,
+                                                                 totalCount: transactions.count)
+                                            }
+                                    }
                                 }
                             }
                             
@@ -334,22 +348,14 @@ private struct DashboardContent: View {
         .sheet(item: $selectedExpenseForDetails) { expense in
             ExpenseDetailsView(expense: expense)
         }
+        .sheet(item: $selectedIncomeForDetails) { income in
+            IncomeDetailsView(income: income)
+        }
         .sheet(isPresented: $showBudgetSheet) {
             BudgetSheet()
         }
         .sheet(isPresented: $showPendingSheet) {
             PendingConfirmationView()
-        }
-        .confirmationDialog(incomeDialogTitle,
-                            isPresented: incomeDialogBinding,
-                            titleVisibility: .visible) {
-            Button("Eliminar ingreso", role: .destructive) {
-                if let income = incomeToActOn {
-                    withAnimation { modelContext.delete(income) }
-                }
-                incomeToActOn = nil
-            }
-            Button("Cancelar", role: .cancel) { incomeToActOn = nil }
         }
     }
     
@@ -408,7 +414,6 @@ private struct DashboardContent: View {
     /// La Bandeja es trabajo pendiente: se anuncia donde el usuario mira, no
     /// escondida en otra pestaña.
     private func inboxBanner(totals: PeriodTotals) -> some View {
-        let accent = AppThemeColor(rawValue: appAccentColor) ?? .purple
         let merchants = totals.unclassifiedMerchantCount
         
         return HStack(spacing: 12) {
@@ -456,9 +461,21 @@ private struct DashboardContent: View {
         .padding(.horizontal, 16)
     }
 
+    /// Temas pastel de dos colores: Acento 2 sólido, para que la barra
+    /// contraste con el resto de la pantalla (que ya está en Acento 1). En
+    /// temas de un color no hay segundo acento, así que la barra usa un
+    /// degradado del mismo acento para no verse plana.
+    private var topMerchantBarFill: AnyShapeStyle {
+        if accent.isDuotone {
+            return AnyShapeStyle(accent.secondaryColor)
+        }
+        return AnyShapeStyle(LinearGradient(colors: [accent.color, accent.color.opacity(0.45)],
+                                             startPoint: .leading, endPoint: .trailing))
+    }
+
     private func chartCard(merchants expensesByMerchant: [PeriodTotals.MerchantTotal]) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Top Comercios")
+            Text("Top Movimientos")
                 .font(.headline)
             
             let maxTotal = expensesByMerchant.map { $0.total }.max() ?? 0
@@ -476,7 +493,7 @@ private struct DashboardContent: View {
                             Text(displayName)
                                 .font(.subheadline)
                                 .fontWeight(.medium)
-                                .foregroundColor(.accentColor)
+                                .foregroundColor(accent.secondaryOnSurface(colorScheme))
                                 .lineLimit(1)
                         }
                         .buttonStyle(.plain)
@@ -488,7 +505,7 @@ private struct DashboardContent: View {
                                 let width = CGFloat(ratio) * (geo.size.width - 80) // 80pt reservados para el texto
                                 
                                 RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.accentColor.opacity(0.8))
+                                    .fill(topMerchantBarFill)
                                     .frame(width: max(width, 4), height: 6) // Barra delgada
                                 
                                 // Valor a la derecha
@@ -509,26 +526,19 @@ private struct DashboardContent: View {
         .padding(.horizontal)
     }
     
+    /// `@ViewBuilder`, no `AnyView`: el borrado de tipo de `AnyView` le quita a
+    /// SwiftUI la identidad concreta de cada fila, y con cientos de filas en
+    /// una `LazyVStack` eso le cuesta más diffing del que hace falta.
+    @ViewBuilder
     private func transactionCard(for item: TransactionItem) -> some View {
         switch item {
         case .expense(let expense):
-            return AnyView(expenseCard(for: expense))
+            expenseCard(for: expense)
         case .income(let income):
-            return AnyView(incomeCard(for: income))
+            incomeCard(for: income)
         }
     }
     
-    private var incomeDialogBinding: Binding<Bool> {
-        Binding(get: { incomeToActOn != nil },
-                set: { if !$0 { incomeToActOn = nil } })
-    }
-
-    private var incomeDialogTitle: String {
-        guard let income = incomeToActOn else { return "" }
-        let name = income.title ?? income.source
-        return name + " · " + Money.format(income.amount, currency: income.currency)
-    }
-
     /// Una fila de movimiento. Partida en piezas: los ternarios de color dentro
     /// de `.fill()` y `.background()` obligan al comprobador de tipos a probar
     /// todas las sobrecargas de ShapeStyle, y en una expresión larga se rinde.
@@ -600,7 +610,13 @@ private struct DashboardContent: View {
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Button {
-                    withAnimation { searchText = displayName }
+                    withAnimation {
+                        if tapTitleFilters {
+                            searchText = displayName
+                        } else {
+                            selectedExpenseForDetails = expense
+                        }
+                    }
                 } label: {
                     Text(displayName)
                         .font(.headline)
@@ -687,8 +703,8 @@ private struct DashboardContent: View {
     private func incomeCard(for income: Income) -> some View {
         HStack(spacing: 16) {
             ZStack {
-                let (baseColor, icon) = incomeIconAndColor(for: income)
-                
+                let (baseColor, icon) = IncomeStyle.iconAndColor(for: income, accent: accent.incomeColor)
+
                 Circle()
                     .fill(colorScheme == .light ? baseColor : baseColor.opacity(0.15))
                     .frame(width: 48, height: 48)
@@ -710,7 +726,11 @@ private struct DashboardContent: View {
                     let displayTitle = income.title ?? income.source
                     Button {
                         withAnimation {
-                            searchText = income.source
+                            if tapTitleFilters {
+                                searchText = income.source
+                            } else {
+                                selectedIncomeForDetails = income
+                            }
                         }
                     } label: {
                         Text(displayTitle)
@@ -723,7 +743,7 @@ private struct DashboardContent: View {
                 
                 HStack(spacing: 6) {
                     let isDebtPayment = income.isDebtPayment
-                    let (baseColor, _) = incomeIconAndColor(for: income)
+                    let (baseColor, _) = IncomeStyle.iconAndColor(for: income, accent: accent.incomeColor)
                     let tagColor = isDebtPayment ? Color.orange : baseColor
                     let tagText = isDebtPayment ? "Cobro" : income.source
                     
@@ -752,12 +772,12 @@ private struct DashboardContent: View {
             Text(Money.format(income.amount, currency: income.currency))
                 .font(.title3)
                 .fontWeight(.bold)
-                .foregroundStyle(isDebtPayment ? Color.orange : .green)
+                .foregroundStyle(isDebtPayment ? Color.orange : accent.incomeColor)
         }
         .surfaceCard(radius: 16)
         .padding(.horizontal)
         .contentShape(Rectangle())
-        .onTapGesture { incomeToActOn = income }
+        .onTapGesture { selectedIncomeForDetails = income }
     }
     
     // MARK: - Helpers
@@ -785,21 +805,6 @@ private struct DashboardContent: View {
         if expense.merchant.lowercased().contains("apple") { return colorScheme == .dark ? .white : .black }
 
         return CategoryStyle.color(for: expense.category, accent: themeColor)
-    }
-    
-    private func incomeIconAndColor(for income: Income) -> (Color, String) {
-        switch income.source {
-        case "Plin":
-            return (Color(red: 0, green: 0.7, blue: 0.9), "plin_icon")
-        case "Yape":
-            return (Color(red: 0.5, green: 0, blue: 0.5), "yape_icon")
-        case "BBVA":
-            return (Color(red: 0.0, green: 0.27, blue: 0.51), "bbva_icon")
-        case "Efectivo":
-            return (.yellow, "banknote.fill")
-        default:
-            return (.green, "arrow.down.left.circle.fill")
-        }
     }
 }
 

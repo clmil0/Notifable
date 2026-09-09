@@ -28,6 +28,10 @@ struct InboxGroup: Identifiable {
     let expenses: [Expense]
     let total: Double
     var id: String { merchant }
+
+    /// `expenses` siempre llega ordenado por fecha descendente, así que el
+    /// primero es el más reciente — lo que decide el orden de Pendientes.
+    var mostRecentDate: Date { expenses.first?.date ?? .distantPast }
 }
 
 /// Una fila de "Mis Categorías": el estado de su límite más lo que hace falta
@@ -69,7 +73,8 @@ struct CategoriesView: View {
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
-    var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
+    var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
+    var themeColor: Color { accent.color }
 
     /// Paleta con contraste verificado. Sustituye a `Color.primary.opacity(0.05)`,
     /// que en modo claro es #F2F2F2 sobre blanco: 4 % de diferencia de luminancia,
@@ -115,6 +120,11 @@ struct CategoriesView: View {
     /// color y sin límite, y había que volver a entrar a configurarlas.
     @State private var creatingCategory = false
 
+    /// No-nil mientras corre una reclasificación en bloque o una edición de
+    /// categoría que toca todo el historial — el overlay con el spinner es la
+    /// única señal de que el toque sí se registró (`Batching`).
+    @State private var bulkOperationLabel: String?
+
     @StateObject private var budgets = CategoryBudgetStore.shared
     @StateObject private var catalog = CategoryCatalog.shared
 
@@ -157,6 +167,29 @@ struct CategoriesView: View {
     /// `Period.spanishMonthName`.
     private var limitMonthLabel: String { Period.spanishMonthName(for: limitReferenceDate) }
 
+    /// Nombra el periodo visible con la misma granularidad que Resumen: si el
+    /// filtro es "Día" o "Semana", la pestaña de alcance de Pendientes no
+    /// puede seguir diciendo "Este mes" — diría algo que no es lo que se está
+    /// mirando. `Period.title` ya resuelve "Hoy"/"Ayer"/el rango de semana;
+    /// aquí sólo se prefiere "Esta semana"/"Este mes"/"Este año" cuando el
+    /// periodo elegido es, de hecho, el actual.
+    private var periodScopeLabel: String {
+        let cal = Period.calendar
+        let now = Date()
+        switch period.granularity {
+        case .dia:
+            return cal.isDateInToday(period.reference) ? "Hoy" : period.title
+        case .semana:
+            return cal.isDate(period.reference, equalTo: now, toGranularity: .weekOfYear) ? "Esta semana" : period.title
+        case .mes:
+            return cal.isDate(period.reference, equalTo: now, toGranularity: .month) ? "Este mes" : period.title
+        case .anio:
+            return cal.isDate(period.reference, equalTo: now, toGranularity: .year) ? "Este año" : period.title
+        case .rango:
+            return period.title
+        }
+    }
+
     // MARK: - Pendientes (bandeja)
 
     /// Comercios sin clasificar del periodo filtrado.
@@ -175,8 +208,8 @@ struct CategoriesView: View {
                                      total: totalByMerchant[merchant]?.total ?? 0))
         }
         return result.sorted { lhs, rhs in
-            if lhs.expenses.count == rhs.expenses.count { return lhs.merchant < rhs.merchant }
-            return lhs.expenses.count > rhs.expenses.count
+            if lhs.mostRecentDate == rhs.mostRecentDate { return lhs.merchant < rhs.merchant }
+            return lhs.mostRecentDate > rhs.mostRecentDate
         }
     }
 
@@ -196,9 +229,9 @@ struct CategoriesView: View {
                                   total: Money.value(cents))
             }
             .sorted {
-                $0.expenses.count == $1.expenses.count
+                $0.mostRecentDate == $1.mostRecentDate
                     ? $0.merchant < $1.merchant
-                    : $0.expenses.count > $1.expenses.count
+                    : $0.mostRecentDate > $1.mostRecentDate
             }
     }
 
@@ -248,8 +281,28 @@ struct CategoriesView: View {
 
     private var outOfPeriodTotal: Double { Money.sum(outOfPeriodGroups) { $0.total } }
 
+    // MARK: - Progreso de Pendientes (`2d`)
+    //
+    // Numerador y denominador se leen siempre de la **misma** fuente —el
+    // alcance elegido, `pendingScope`— para no repetir el bug que hizo
+    // retirar `InboxProgressCard`: contar "clasificados" sobre todo el
+    // historial mientras la lista de abajo mostraba sólo el periodo filtrado.
 
+    private var scopedMerchantCount: Int {
+        let source = pendingScope == .period ? filteredExpenses : expenses
+        return Set(source.map(\.merchant)).count
+    }
 
+    private var scopedPendingCount: Int {
+        pendingScope == .period ? inboxGroups.count : pendingGroups.count
+    }
+
+    private var scopedClassifiedCount: Int { max(0, scopedMerchantCount - scopedPendingCount) }
+
+    private var scopedProgress: Double {
+        guard scopedMerchantCount > 0 else { return 0 }
+        return Double(scopedClassifiedCount) / Double(scopedMerchantCount)
+    }
 
 
     private func assignContext(for merchant: String) -> AssignCategoryContext {
@@ -260,9 +313,7 @@ struct CategoriesView: View {
     }
 
     func suggestion(for group: InboxGroup) -> CategorySuggestion? {
-        SuggestionEngine.suggest(for: group.merchant,
-                                 rules: MerchantRules.all(),
-                                 history: expenses)
+        SuggestionEngine.suggest(for: group.merchant, rules: MerchantRules.all())
     }
 
     func frequentCategories(excluding suggestion: CategorySuggestion?) -> [String] {
@@ -358,30 +409,6 @@ struct CategoriesView: View {
         return "Clasificar \(selectionCount) elementos"
     }
 
-    private var selectionCategories: [String] { CategoryStyle.selectable(history: expenses) }
-
-    private var selectionStatuses: [String: CategoryLimitStatus] {
-        let statuses = budgets.statuses(for: selectionCategories,
-                                        expenses: snapshots,
-                                        on: limitReferenceDate,
-                                        usdToPen: exchangeRateService.usdToPenRate)
-        return Dictionary(uniqueKeysWithValues: statuses.map { ($0.category, $0) })
-    }
-
-    /// La etiqueta "sugerida" sólo aparece si **todos** los comercios de la
-    /// selección coinciden en la misma propuesta — una sugerencia a medias
-    /// confundiría más de lo que ayuda.
-    private var selectionSuggestedCategory: String? {
-        guard !selectedMerchants.isEmpty else { return nil }
-        let picks = selectedMerchants.compactMap { merchant -> String? in
-            guard let group = pendingGroups.first(where: { $0.merchant == merchant }) else { return nil }
-            let hint = suggestion(for: group)
-            return (hint?.confidence ?? 0) >= 0.45 ? hint?.category : nil
-        }
-        guard picks.count == selectedMerchants.count, let first = picks.first, Set(picks).count == 1 else { return nil }
-        return first
-    }
-
     private var merchantTotalsByName: [String: PeriodTotals.MerchantTotal] {
         var map: [String: PeriodTotals.MerchantTotal] = [:]
         for item in totals.byMerchant { map[item.merchant] = item }
@@ -445,25 +472,54 @@ struct CategoriesView: View {
         presentUndo(token)
     }
 
-    /// "Aceptar N" de un lote de sugerencias: crea/actualiza la regla de cada
-    /// comercio del lote en una sola acción, con un solo toast para deshacer.
-    func applyBatch(_ category: String, to merchants: [String]) {
-        let token = MerchantRules.applyBatch(category, to: merchants, in: expenses)
+    /// "Aceptar todas" (`2d`): resuelve todos los lotes fuertes del motor de
+    /// una sola vez, cada uno con su propia categoría, en un solo toast con
+    /// deshacer. Antes cada lote tenía su propio "Aceptar N" — `presentUndo`
+    /// sólo guarda un token a la vez, así que aceptar dos lotes por separado
+    /// hacía que deshacer el segundo dejara el primero aplicado sin aviso.
+    /// Fusionando los diccionarios de "antes" en un único `UndoToken` antes de
+    /// presentarlo, deshacer revierte los dos lotes juntos.
+    ///
+    /// `async` + `Batching`: con decenas de comercios en varios lotes, aplicar
+    /// todo de un tirón congelaba la pantalla sin ningún aviso.
+    func applyAllSuggestionBuckets() async {
+        let buckets = suggestionBuckets
+        guard !buckets.isEmpty else { return }
+
+        var previousCategories: [UUID: String] = [:]
+        var previousRules: [String: String?] = [:]
+        let entries = buckets.flatMap { bucket in bucket.merchants.map { (bucket.category, $0.merchant) } }
+
+        await Batching.run(entries, chunkSize: 20) { category, merchant in
+            let (previous, rule) = MerchantRules.applyRule(category, to: merchant, in: expenses)
+            previousCategories.merge(previous) { current, _ in current }
+            previousRules[merchant] = rule
+        }
         try? modelContext.save()
-        limitNote = assignmentNote(for: category)
+
+        let merchantCount = entries.count
+        let summary = merchantCount == 1 ? "1 comercio clasificado" : "\(merchantCount) comercios clasificados"
+
         refreshLimitNotices()
-        presentUndo(token)
+        presentUndo(UndoToken(summary: summary,
+                              category: buckets.first?.category ?? "",
+                              previousCategories: previousCategories,
+                              previousRules: previousRules))
     }
 
     /// Aplica la categoría a la selección mixta de Pendientes: los comercios
     /// completos crean/actualizan su regla; los movimientos sueltos —los que no
     /// pertenecen a un comercio también seleccionado— se reclasifican sin regla,
     /// para que el próximo movimiento del mismo comercio vuelva a Pendientes.
-    func applySelection(category: String) {
+    ///
+    /// `async` + `Batching`: "Seleccionar todos" en Pendientes puede juntar
+    /// cientos de comercios distintos; sin ceder el hilo entre ellos, la
+    /// pantalla se congelaba justo cuando el usuario acababa de tocar "Asignar".
+    func applySelection(category: String) async {
         var previousCategories: [UUID: String] = [:]
         var previousRules: [String: String?] = [:]
 
-        for merchant in selectedMerchants {
+        await Batching.run(Array(selectedMerchants), chunkSize: 20) { merchant in
             let (previous, rule) = MerchantRules.applyRule(category, to: merchant, in: expenses)
             previousCategories.merge(previous) { current, _ in current }
             previousRules[merchant] = rule
@@ -781,13 +837,21 @@ struct CategoriesView: View {
             .presentationCornerRadius(28)
         }
         .sheet(isPresented: $showAssignSelection) {
-            AssignSelectionSheet(title: selectionSheetTitle,
-                                 subtitle: Money.format(selectionTotalAmount) + " en total",
-                                 categories: selectionCategories,
-                                 statuses: selectionStatuses,
-                                 suggestedCategory: selectionSuggestedCategory) { category in
-                applySelection(category: category)
+            // El mismo modal que "Otra +" en una fila suelta: cuadrícula de
+            // categorías + crear una nueva, en vez de la lista aparte que
+            // tenía la selección múltiple hasta ahora.
+            AssignCategorySheet(context: .selection(title: selectionSheetTitle, amount: selectionTotalAmount),
+                                history: expenses) { category, _ in
+                let count = selectionCount
+                bulkOperationLabel = count == 1 ? "Clasificando…" : "Clasificando \(count) elementos…"
+                Task {
+                    await applySelection(category: category)
+                    bulkOperationLabel = nil
+                }
             }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
         }
         .sheet(item: $editingCategory) { wrapper in
             NavigationStack {
@@ -812,6 +876,32 @@ struct CategoriesView: View {
                 Text("¿Estás seguro de que deseas enviar los gastos de \(target.merchant) a Sin Clasificar?")
             }
         }
+        .overlay {
+            if let label = bulkOperationLabel {
+                bulkProcessingOverlay(label)
+            }
+        }
+    }
+
+    /// El único aviso de que un lote largo (reclasificar una selección, o
+    /// tocar todo el historial de una categoría) sigue corriendo: sin esto no
+    /// hay ninguna tarea de red que envolver en un spinner, así que sin
+    /// ceder el hilo entre lotes (`Batching`) tampoco habría dónde dibujarlo.
+    private func bulkProcessingOverlay(_ label: String) -> some View {
+        ZStack {
+            Color.black.opacity(0.15).ignoresSafeArea()
+            VStack(spacing: 10) {
+                ProgressView()
+                Text(label)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(palette.label)
+            }
+            .padding(20)
+            .background(palette.surfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .shadow(color: .black.opacity(0.2), radius: 12, y: 6)
+        }
+        .transition(.opacity)
     }
 
     // MARK: - Segmented control
@@ -829,7 +919,7 @@ struct CategoriesView: View {
                         if tab == .inbox, inboxGroups.count > 0 {
                             Text("\(inboxGroups.count)")
                                 .font(.caption2.weight(.bold))
-                                .foregroundStyle(selectedTab == tab ? themeColor : .white)
+                                .foregroundStyle(selectedTab == tab ? accent.secondaryColor : .white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
                                 .background(selectedTab == tab ? Color.white : Color.white.opacity(0.18))
@@ -991,8 +1081,12 @@ struct CategoriesView: View {
                                                withAnimation(.spring) { focusedCategory = row.category }
                                            },
                                            onDeleteCategory: {
-                                               CategoryEditor.delete(row.category, in: expenses)
-                                               try? modelContext.save()
+                                               bulkOperationLabel = "Eliminando categoría…"
+                                               Task {
+                                                   await CategoryEditor.delete(row.category, in: expenses)
+                                                   try? modelContext.save()
+                                                   bulkOperationLabel = nil
+                                               }
                                            })
                         .id(row.category)
                     }
@@ -1021,71 +1115,76 @@ struct CategoriesView: View {
 
     // MARK: - Pendientes
 
-    /// Sólo tiene sentido cuando hay algo que decir: comercios fuera del
-    /// periodo (alcance "este periodo"), o el recordatorio de que se está
-    /// viendo todo el historial (alcance "todos").
-    @ViewBuilder
-    private var scopeBanner: some View {
-        if pendingScope == .period {
-            if !outOfPeriodGroups.isEmpty {
-                HStack(spacing: 11) {
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(palette.warning.opacity(0.2))
-                        .frame(width: 26, height: 26)
-                        .overlay(Image(systemName: "tray.full.fill").font(.caption).foregroundStyle(palette.warning))
-                    Text("\(outOfPeriodGroups.count) comercios pendientes fuera de este periodo · " + Money.format(outOfPeriodTotal))
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(palette.warning)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    Button("Ver todos") {
-                        withAnimation(.spring) { pendingScope = .all }
-                    }
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 11)
-                    .padding(.vertical, 6)
-                    .background(palette.warning)
-                    .clipShape(Capsule())
-                }
-                .padding(12)
-                .background(palette.warning.opacity(colorScheme == .dark ? 0.12 : 0.09))
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(palette.warning.opacity(0.35), lineWidth: 0.5)
-                )
-                .padding(.horizontal, 16)
-            }
-        } else {
-            HStack(spacing: 11) {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(themeColor.opacity(0.22))
-                    .frame(width: 26, height: 26)
-                    .overlay(Image(systemName: "clock.arrow.circlepath").font(.caption).foregroundStyle(themeColor))
-                Text("Viendo todo el historial, no sólo " + limitMonthLabel + ".")
-                    .font(.footnote.weight(.semibold))
+    /// Cuánto llevas clasificado en el alcance elegido, con las pestañas para
+    /// cambiar de alcance ahí mismo (`2d`). Sustituye a `scopeBanner`, que
+    /// sólo aparecía para avisar del alcance y no decía nada del progreso.
+    private var pendingTaskCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(taskHeadline)
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(palette.label)
                 Spacer(minLength: 0)
-                Button("Sólo " + limitMonthLabel) {
-                    withAnimation(.spring) { pendingScope = .period }
-                }
-                .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 6)
-                .background(themeColor)
-                .clipShape(Capsule())
+                Text("\(Int((scopedProgress * 100).rounded()))%")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(themeColor)
             }
-            .padding(12)
-            .background(themeColor.opacity(0.10))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(themeColor.opacity(0.32), lineWidth: 0.5)
-            )
-            .padding(.horizontal, 16)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(palette.track)
+                    Capsule()
+                        .fill(themeColor)
+                        .frame(width: geo.size.width * CGFloat(scopedProgress))
+                }
+            }
+            .frame(height: 8)
+            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: scopedProgress)
+
+            HStack(spacing: 8) {
+                scopeChip(title: periodScopeLabel, isSelected: pendingScope == .period) { pendingScope = .period }
+                scopeChip(title: "Todo", isSelected: pendingScope == .all) { pendingScope = .all }
+            }
+
+            if let note = scopeNote {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
+            }
         }
+        .surfaceCard(radius: 20)
+        .padding(.horizontal, 16)
+    }
+
+    private var taskHeadline: String {
+        "\(scopedClassifiedCount) de \(scopedMerchantCount) operaciones clasificadas"
+    }
+
+    /// Sólo dice algo cuando hay algo que decir: operaciones pendientes fuera
+    /// del periodo (alcance "este mes"), o el recordatorio de que se está
+    /// viendo todo el historial (alcance "todo").
+    private var scopeNote: String? {
+        let label = periodScopeLabel.prefix(1).lowercased() + periodScopeLabel.dropFirst()
+        if pendingScope == .all {
+            return "Viendo todo el historial, no sólo " + label + "."
+        }
+        guard !outOfPeriodGroups.isEmpty else { return nil }
+        return "\(outOfPeriodGroups.count) operaciones pendientes de clasificar fuera de " + label + " · " + Money.format(outOfPeriodTotal)
+    }
+
+    private func scopeChip(title: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.spring) { action() }
+        } label: {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isSelected ? .white : palette.label)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(isSelected ? themeColor : palette.track)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private var selectAllRow: some View {
@@ -1109,7 +1208,7 @@ struct CategoriesView: View {
         HStack {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
-            TextField("Buscar comercio pendiente...", text: $searchText)
+            TextField("Buscar operación pendiente...", text: $searchText)
                 .disableAutocorrection(true)
 
             if !searchText.isEmpty {
@@ -1133,21 +1232,16 @@ struct CategoriesView: View {
                 ContentUnavailableView("Pendientes vacío", systemImage: "checkmark.circle.fill", description: Text("Todos tus gastos están clasificados."))
             } else {
                 VStack(spacing: 12) {
-                    scopeBanner
+                    pendingTaskCard
 
                     searchField
 
                     if !suggestionBuckets.isEmpty {
-                        VStack(alignment: .leading, spacing: 9) {
-                            Text("EL MOTOR PROPONE")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(palette.secondaryLabel)
-                                .padding(.horizontal, 16)
-
-                            ForEach(suggestionBuckets) { bucket in
-                                SuggestionBucketCard(bucket: bucket) {
-                                    applyBatch(bucket.category, to: bucket.merchants.map(\.merchant))
-                                }
+                        EngineSuggestionRow(merchantCount: suggestionBuckets.reduce(0) { $0 + $1.merchants.count }) {
+                            bulkOperationLabel = "Clasificando…"
+                            Task {
+                                await applyAllSuggestionBuckets()
+                                bulkOperationLabel = nil
                             }
                         }
                     }
@@ -1169,7 +1263,6 @@ struct CategoriesView: View {
                             .frame(height: CGFloat(6 - visiblePendingGroups.count) * 85)
                     }
                 }
-                .padding(.top)
             }
         }
     }

@@ -76,7 +76,10 @@ struct DayScrubber: View {
     private func fill(for day: PeriodTotals.DayTotal, isFuture: Bool) -> Color {
         if isSelected(day.date) { return accent.color }
         if isFuture { return palette.track }
-        if cal.isDateInToday(day.date) { return accent.color.opacity(0.55) }
+        // En temas de un solo color, "hoy" sigue siendo el acento atenuado
+        // (como antes); en los temas pastel de dos colores, el segundo
+        // acento ya es distinto del primero, así que no hace falta atenuarlo.
+        if cal.isDateInToday(day.date) { return accent.isDuotone ? accent.secondaryColor : accent.color.opacity(0.55) }
         return palette.track
     }
 

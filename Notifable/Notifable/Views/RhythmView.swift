@@ -109,7 +109,8 @@ private struct RhythmContent: View {
                 RhythmBarsChart(buckets: rhythm.chartBuckets,
                                 average: rhythm.averagePerBucket,
                                 grouping: rhythm.grouping,
-                                accent: accent.color)
+                                accent: accent.color,
+                                todayColor: accent.isDuotone ? accent.secondaryColor : accent.color.opacity(0.55))
 
                 twoCards
 
@@ -209,7 +210,8 @@ private struct RhythmContent: View {
             ForEach(rhythm.categoryChanges.prefix(6)) { change in
                 CategoryDeltaRow(change: change,
                                  largest: rhythm.largestChange,
-                                 palette: palette)
+                                 palette: palette,
+                                 downColor: accent.isDuotone ? accent.secondaryColor : palette.positive)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -229,7 +231,7 @@ private struct RhythmContent: View {
                 HStack {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.footnote)
-                        .foregroundStyle(accent.onSurface(colorScheme))
+                        .foregroundStyle(accent.secondaryOnSurface(colorScheme))
                     Text(Accounting.displayName(subscription.merchant))
                         .font(.subheadline)
                         .foregroundStyle(palette.label)
@@ -264,6 +266,7 @@ struct RhythmBarsChart: View {
     let average: Double
     let grouping: Rhythm.Grouping
     let accent: Color
+    let todayColor: Color
 
     @Environment(\.colorScheme) private var scheme
     private var palette: Palette { Palette(scheme) }
@@ -343,7 +346,7 @@ struct RhythmBarsChart: View {
     }
 
     private func color(for bucket: Rhythm.Bucket) -> Color {
-        if bucket.containsToday { return accent.opacity(0.55) }
+        if bucket.containsToday { return todayColor }
         return Money.isGreater(bucket.total, than: average) ? accent : palette.track
     }
 
@@ -387,6 +390,10 @@ struct CategoryDeltaRow: View {
     let change: Rhythm.CategoryChange
     let largest: Double
     let palette: Palette
+    /// Color de las categorías que bajaron (Acento 2 en temas pastel; el
+    /// verde semántico de siempre en los demás). Las que suben se quedan en
+    /// rojo siempre, para que "el gasto subió" se lea igual en cualquier tema.
+    let downColor: Color
 
     private var isUp: Bool { Money.cents(change.delta) > 0 }
     private var fraction: CGFloat {
@@ -410,7 +417,7 @@ struct CategoryDeltaRow: View {
                         .frame(width: 1)
 
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
-                        .fill(isUp ? palette.negative : palette.positive)
+                        .fill(isUp ? palette.negative : downColor)
                         .frame(width: max(2, half * fraction), height: 10)
                         .offset(x: offset(half: half))
                 }
@@ -420,7 +427,7 @@ struct CategoryDeltaRow: View {
 
             Text((isUp ? "+" : "−") + Money.format(abs(change.delta)))
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(isUp ? palette.negative : palette.positive)
+                .foregroundStyle(isUp ? palette.negative : downColor)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 .frame(width: 66, alignment: .trailing)
