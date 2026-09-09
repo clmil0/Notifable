@@ -149,7 +149,7 @@ struct AssignCategorySheet: View {
 
     private var suggestion: CategorySuggestion? {
         guard let merchant = context.merchant else { return nil }
-        return SuggestionEngine.suggest(for: merchant, rules: MerchantRules.all(), history: history)
+        return SuggestionEngine.suggest(for: merchant, rules: MerchantRules.all())
     }
 
     /// Movimientos pasados del mismo comercio: lo que la regla reclasificaría.
