@@ -234,6 +234,22 @@ struct ExpenseDetailsView: View {
 
             divider
 
+            Button { showingEditor = true } label: {
+                propertyRow(title: "Descripción") {
+                    HStack(spacing: 6) {
+                        Text(expense.notes?.isEmpty == false ? expense.notes! : "Agregar")
+                            .lineLimit(1)
+                            .foregroundStyle(expense.notes?.isEmpty == false ? accent.onSurface(colorScheme) : palette.secondaryLabel)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(palette.secondaryLabel)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            divider
+
             propertyRow(title: "Origen") {
                 Text(origin)
                     .foregroundStyle(palette.secondaryLabel)
@@ -472,6 +488,7 @@ struct EditExpenseSheet: View {
     @State private var amountText = ""
     @State private var merchant = ""
     @State private var date = Date()
+    @State private var notesText = ""
 
     var body: some View {
         NavigationStack {
@@ -487,6 +504,10 @@ struct EditExpenseSheet: View {
                 Section("Comercio") {
                     TextField("Comercio", text: $merchant)
                         .disableAutocorrection(true)
+                }
+                Section("Descripción") {
+                    TextField("Opcional", text: $notesText, axis: .vertical)
+                        .lineLimit(1...4)
                 }
                 Section("Fecha") {
                     DatePicker("Fecha", selection: $date)
@@ -508,11 +529,12 @@ struct EditExpenseSheet: View {
                 amountText = String(format: "%.2f", expense.amount)
                 merchant = expense.merchant
                 date = expense.date
+                notesText = expense.notes ?? ""
             }
             .appAppearance()
             .appTextSize()
         }
-        .presentationDetents([.medium])
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
 
@@ -525,6 +547,7 @@ struct EditExpenseSheet: View {
         let originalAmount = expense.amount
         let originalMerchant = expense.merchant
         let originalDate = expense.date
+        let originalNotes = expense.notes
 
         let cleaned = amountText.replacingOccurrences(of: ",", with: ".")
         if let value = Double(cleaned), value > 0 {
@@ -533,11 +556,17 @@ struct EditExpenseSheet: View {
         }
         expense.merchant = merchant.trimmingCharacters(in: .whitespaces)
         expense.date = date
+        let trimmedNotes = notesText.trimmingCharacters(in: .whitespacesAndNewlines)
+        expense.notes = trimmedNotes.isEmpty ? nil : trimmedNotes
 
         ExpenseEditStore.record(expense,
                                 merchant: expense.merchant != originalMerchant ? expense.merchant : nil,
                                 amount: Money.cents(expense.amount) != Money.cents(originalAmount) ? expense.amount : nil,
-                                occurredAt: expense.date != originalDate ? expense.date : nil)
+                                occurredAt: expense.date != originalDate ? expense.date : nil,
+                                // `""`, no `nil`: `nil` en `ExpenseEdit` significa
+                                // "no lo tocó", así que borrar la descripción
+                                // necesita un valor no-nulo para registrarse.
+                                notes: expense.notes != originalNotes ? (expense.notes ?? "") : nil)
         try? modelContext.save()
         dismiss()
     }
