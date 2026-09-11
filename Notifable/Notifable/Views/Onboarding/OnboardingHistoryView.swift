@@ -29,6 +29,11 @@ struct OnboardingHistoryView: View {
 
     @State private var showsCustom = false
     @State private var isStarting = false
+    @State private var showNoReadConfirm = false
+    /// Igual que en Gmail y bancos: `BankSource.isEnabled` escribe en
+    /// `UserDefaults` y no publica cambios por sí solo, así que la grilla
+    /// necesita este caché para redibujarse al tocar una tarjeta.
+    @State private var bankStates: [String: Bool] = [:]
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .blue }
     private var palette: Palette { Palette(scheme) }
@@ -65,12 +70,23 @@ struct OnboardingHistoryView: View {
                     .padding(.top, 24)
                     .padding(.horizontal, 20)
 
+                banksCard
+                    .padding(.top, 12)
+                    .padding(.horizontal, 20)
+
                 buttons
                     .padding(.top, 26)
                     .padding(.bottom, 36)
             }
         }
         .background(palette.background)
+        .onAppear(perform: loadBankStates)
+        .confirmationDialog("¿No leer tus correos?", isPresented: $showNoReadConfirm, titleVisibility: .visible) {
+            Button("No leer", role: .destructive) { onDone(nil) }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("AgruPay entrará vacío y tendrás que anotar tus gastos a mano. Puedes leerlos después en Ajustes → Gmail y bancos.")
+        }
     }
 
     // MARK: - El rango
@@ -116,13 +132,53 @@ struct OnboardingHistoryView: View {
                 .font(.caption)
                 .foregroundStyle(palette.secondaryLabel)
 
+            if readPeriodMonths >= 12 {
+                HStack(alignment: .top, spacing: 7) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 10))
+                        .foregroundStyle(palette.tertiaryLabel)
+                    Text("Un año tarda un poco más; puedes seguir usando la app mientras lee.")
+                        .font(.caption2)
+                        .foregroundStyle(palette.tertiaryLabel)
+                }
+            }
+        }
+        .padding(16)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - Qué bancos leemos
+
+    /// Los mismos `BankSource` de Gmail y bancos: lo que se elige aquí es lo
+    /// que se lee en el siguiente paso, y lo que queda marcado en Ajustes.
+    private var banksCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("QUÉ BANCOS LEEMOS")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(palette.tertiaryLabel)
+                Spacer()
+                Text(banksSummary)
+                    .font(.caption2)
+                    .foregroundStyle(palette.tertiaryLabel)
+            }
+
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
+                ForEach(BankSource.all) { bank in
+                    bankCard(bank)
+                }
+            }
+
             HStack(alignment: .top, spacing: 7) {
                 Image(systemName: "clock")
                     .font(.system(size: 10))
                     .foregroundStyle(palette.tertiaryLabel)
-                Text(readPeriodMonths >= 12
-                     ? "Un año tarda un poco más; puedes seguir usando la app mientras lee."
-                     : "Tarda unos segundos. Puedes ampliarlo después en Ajustes → Gmail y bancos.")
+                Text("Tarda unos segundos. Puedes ampliarlo después en Ajustes → Gmail y bancos.")
                     .font(.caption2)
                     .foregroundStyle(palette.tertiaryLabel)
             }
@@ -134,6 +190,62 @@ struct OnboardingHistoryView: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
+    }
+
+    private func bankCard(_ bank: BankSource) -> some View {
+        let isOn = bankStates[bank.storageKey] ?? bank.isEnabled
+
+        return Button {
+            let newValue = !isOn
+            bank.isEnabled = newValue
+            bankStates[bank.storageKey] = newValue
+        } label: {
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(isOn ? accent.color : .clear)
+                        .frame(width: 16, height: 16)
+                    Circle()
+                        .strokeBorder(isOn ? accent.color : palette.tertiaryLabel.opacity(0.4), lineWidth: 1.5)
+                        .frame(width: 16, height: 16)
+                    if isOn {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+                Image(bank.logoAsset)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 20, height: 20)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                Text(bank.name)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(palette.label)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 38)
+            .background(isOn ? accent.color.opacity(0.09) : palette.background)
+            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(isOn ? accent.color : palette.hairline, lineWidth: isOn ? 1 : 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func loadBankStates() {
+        for bank in BankSource.all where bankStates[bank.storageKey] == nil {
+            bankStates[bank.storageKey] = bank.isEnabled
+        }
+    }
+
+    private var banksSummary: String {
+        let active = BankSource.all.filter { bankStates[$0.storageKey] ?? $0.isEnabled }.count
+        return "\(active) de \(BankSource.all.count)"
     }
 
     /// Abreviado igual que en Gmail y bancos: cinco opciones tienen que caber
@@ -206,7 +318,7 @@ struct OnboardingHistoryView: View {
             .buttonStyle(.plain)
             .disabled(isStarting)
 
-            Button("No leer mis correos · empezar de cero") { onDone(nil) }
+            Button("No leer mis correos · empezar de cero") { showNoReadConfirm = true }
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(palette.secondaryLabel)
                 .disabled(isStarting)

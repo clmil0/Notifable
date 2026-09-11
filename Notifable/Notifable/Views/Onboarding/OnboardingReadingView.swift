@@ -30,51 +30,56 @@ struct OnboardingReadingView: View {
     private var found: Int { sync.expensesFoundByBank.values.reduce(0, +) }
     private var isFinished: Bool { !sync.isSyncing && total > 0 }
 
+    /// Sólo los bancos que se eligieron en "¿Cuánto correo miramos?": cada uno
+    /// mantiene su casilla aunque encuentre 0, así la grilla no salta de forma
+    /// mientras avanza la lectura.
+    private var selectedBanks: [BankSource] { BankSource.all.filter(\.isEnabled) }
+
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 40)
+        ScrollView {
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle()
+                        .fill(accent.color.opacity(0.16))
+                        .frame(width: 88, height: 88)
+                    Image(systemName: isFinished ? "checkmark" : "envelope.open.fill")
+                        .font(.system(size: 34))
+                        .foregroundStyle(accent.onSurface(scheme))
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .padding(.top, 40)
 
-            ZStack {
-                Circle()
-                    .fill(accent.color.opacity(0.16))
-                    .frame(width: 88, height: 88)
-                Image(systemName: isFinished ? "checkmark" : "envelope.open.fill")
-                    .font(.system(size: 34))
-                    .foregroundStyle(accent.onSurface(scheme))
-                    .contentTransition(.symbolEffect(.replace))
-            }
+                Text(isFinished ? "Listo" : "Leyendo tus correos")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(palette.label)
+                    .padding(.top, 20)
 
-            Text(isFinished ? "Listo" : "Leyendo tus correos")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(palette.label)
-                .padding(.top, 20)
-
-            Text(isFinished
-                 ? "Ya tienes tu historial de \(monthsLabel) armado."
-                 : "Estamos revisando los avisos de tu banco de \(monthsLabel). Tarda un momento y no hace falta que hagas nada.")
-                .font(.subheadline)
-                .foregroundStyle(palette.secondaryLabel)
-                .multilineTextAlignment(.center)
-                .padding(.top, 8)
-                .padding(.horizontal, 34)
-
-            progress
-                .padding(.top, 28)
-                .padding(.horizontal, 26)
-
-            if let error = sync.lastSyncError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundStyle(palette.negative)
+                Text(isFinished
+                     ? "Ya tienes tu historial de \(monthsLabel) armado."
+                     : "Estamos revisando los avisos de tu banco de \(monthsLabel). Tarda un momento y no hace falta que hagas nada.")
+                    .font(.subheadline)
+                    .foregroundStyle(palette.secondaryLabel)
                     .multilineTextAlignment(.center)
-                    .padding(.top, 14)
-                    .padding(.horizontal, 30)
+                    .padding(.top, 8)
+                    .padding(.horizontal, 34)
+
+                progress
+                    .padding(.top, 28)
+                    .padding(.horizontal, 26)
+
+                if let error = sync.lastSyncError {
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(palette.negative)
+                        .multilineTextAlignment(.center)
+                        .padding(.top, 14)
+                        .padding(.horizontal, 30)
+                }
+
+                buttons
+                    .padding(.top, 28)
+                    .padding(.bottom, 34)
             }
-
-            Spacer(minLength: 20)
-
-            buttons
-                .padding(.bottom, 34)
         }
         .background(palette.background)
         // Si la lectura termina sola, no se deja al usuario mirando una
@@ -118,21 +123,45 @@ struct OnboardingReadingView: View {
                 }
             }
 
-            if !sync.expensesFoundByBank.isEmpty {
-                HStack(spacing: 7) {
-                    ForEach(sync.expensesFoundByBank.sorted(by: { $0.key < $1.key }), id: \.key) { bank, count in
-                        Text("\(bank) \(count)")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(palette.secondaryLabel)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(palette.track)
-                            .clipShape(Capsule())
+            if !selectedBanks.isEmpty {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible())], spacing: 8) {
+                    ForEach(selectedBanks) { bank in
+                        bankProgressCard(bank)
                     }
-                    Spacer(minLength: 0)
                 }
+
+                Text("Cada banco mantiene su casilla aunque encuentre 0 o 1,240 gastos: el número crece dentro de su columna.")
+                    .font(.caption2)
+                    .foregroundStyle(palette.tertiaryLabel)
             }
         }
+    }
+
+    private func bankProgressCard(_ bank: BankSource) -> some View {
+        HStack(spacing: 8) {
+            Image(bank.logoAsset)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 22, height: 22)
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            Text(bank.name)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(palette.label)
+                .lineLimit(1)
+                .layoutPriority(1)
+            Spacer(minLength: 4)
+            Text("\(sync.expensesFoundByBank[bank.name] ?? 0)")
+                .font(.system(size: 12, weight: .bold).monospacedDigit())
+                .foregroundStyle(palette.positive)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 42)
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 0.5)
+        )
     }
 
     private var buttons: some View {

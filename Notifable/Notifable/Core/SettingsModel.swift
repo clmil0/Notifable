@@ -118,28 +118,35 @@ struct BankSource: Identifiable, Hashable {
     /// Limitación conocida, si la hay.
     let caveat: String?
     let storageKey: String
+    /// Nombre del asset en `Assets.xcassets` con el logo del banco.
+    let logoAsset: String
 
     static let all: [BankSource] = [
         BankSource(id: "bbva", name: "BBVA",
                    detects: "Plin, pagos automáticos, tarjeta física y en línea",
                    caveat: nil,
-                   storageKey: "syncBBVA"),
+                   storageKey: "syncBBVA",
+                   logoAsset: "bbva_icon"),
         BankSource(id: "bcp", name: "BCP",
                    detects: "Pagos con tarjeta y transferencias",
                    caveat: nil,
-                   storageKey: "syncBCP"),
+                   storageKey: "syncBCP",
+                   logoAsset: "bcp_icon"),
         BankSource(id: "yape", name: "Yape",
                    detects: "Yapeos recibidos y enviados",
                    caveat: "No detecta montos bajo S/ 10.",
-                   storageKey: "syncYape"),
+                   storageKey: "syncYape",
+                   logoAsset: "yape_icon"),
         BankSource(id: "interbank", name: "Interbank",
                    detects: "Pagos con tarjeta y transferencias",
                    caveat: nil,
-                   storageKey: "syncInterbank"),
+                   storageKey: "syncInterbank",
+                   logoAsset: "interbank_icon"),
         BankSource(id: "scotiabank", name: "Scotiabank",
                    detects: "Pagos con tarjeta y transferencias",
                    caveat: nil,
-                   storageKey: "syncScotiabank")
+                   storageKey: "syncScotiabank",
+                   logoAsset: "scotiabank_icon")
     ]
 
     var subtitle: String {
