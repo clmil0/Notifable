@@ -162,9 +162,20 @@ extension AppThemeColor {
         }
     }
 
-    /// Color de "esto es un ingreso" (monto, ícono genérico, tinte del botón
-    /// "Ingreso"). Verde de siempre en temas de un color; Acento 2 en pastel.
-    var incomeColor: Color { isDuotone ? secondaryColor : .green }
+    /// El pastel "crudo" (o verde) de siempre, sin ajustar por contraste: para
+    /// el relleno de un ícono o de un chip, donde ya hay un glifo o texto
+    /// blanco encima resolviendo el contraste por su cuenta.
+    var incomeFillColor: Color { isDuotone ? secondaryColor : .green }
+
+    /// Para texto o un ícono suelto directamente sobre la superficie —el
+    /// monto en Actividad Reciente, el botón "Ingreso"—: en claro, la
+    /// variante de más contraste del mismo tono (`secondaryOnSurface`). El
+    /// pastel crudo como texto sobre blanco casi no se lee; en oscuro sí
+    /// contrasta bien sobre el fondo negro, así que ahí se queda igual.
+    func incomeColor(_ scheme: ColorScheme) -> Color {
+        guard isDuotone else { return .green }
+        return scheme == .light ? secondaryOnSurface(scheme) : secondaryColor
+    }
 
     func secondarySoftFill(_ scheme: ColorScheme) -> Color {
         guard isDuotone else { return softFill(scheme) }

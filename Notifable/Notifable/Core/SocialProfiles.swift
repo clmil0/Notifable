@@ -30,6 +30,23 @@ struct FriendPreferences: Codable, Hashable {
     var sharedUpdatedAt: Date?
 }
 
+/// Los degradados de cabecera de "Tu perfil" (2h): cuatro fijos del sistema,
+/// no una foto — ningún amigo necesita subir nada para tener una cabecera.
+enum SocialGradients {
+    static let all: [[Color]] = [
+        [Color(red: 0.039, green: 0.518, blue: 1.0), Color(red: 0.196, green: 0.678, blue: 0.902)],   // Azul
+        [Color(red: 0.369, green: 0.361, blue: 0.902), Color(red: 0.686, green: 0.322, blue: 0.871)],  // Violeta
+        [Color(red: 0.204, green: 0.780, blue: 0.349), Color(red: 0.114, green: 0.498, blue: 0.235)],  // Verde
+        [Color(red: 1.0, green: 0.584, blue: 0.0), Color(red: 0.702, green: 0.416, blue: 0.0)]         // Naranja
+    ]
+
+    static func colors(_ index: Int?) -> [Color] { all[(index ?? 0) % all.count] }
+
+    static func gradient(_ index: Int?) -> LinearGradient {
+        LinearGradient(colors: colors(index), startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+}
+
 /// Los ocho colores de amigo del diseño, en el mismo orden.
 enum SocialPalette {
     static let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .teal, .indigo, .red]
@@ -58,6 +75,9 @@ final class SocialProfileStore {
         static let status = "socialStatus"
         /// Emoji de mi avatar; vacío = mi inicial.
         static let avatarEmoji = "socialAvatarEmoji"
+        /// Índice dentro de `SocialGradients.all` para mi cabecera. -1 = sin
+        /// elegir todavía (usa el primero).
+        static let bannerIndex = "socialBannerIndex"
         /// JSON `[idDeAmigo: FriendPreferences]`.
         static let friendPreferences = "socialFriendPreferences"
     }
@@ -87,12 +107,20 @@ final class SocialProfileStore {
         didSet { UserDefaults.standard.set(avatarEmoji ?? "", forKey: Keys.avatarEmoji) }
     }
 
+    /// Índice en `SocialGradients.all`. `nil` = todavía no elegido (se pinta
+    /// el primero, pero no cuenta como una elección que respaldar).
+    var bannerIndex: Int? {
+        didSet { UserDefaults.standard.set(bannerIndex ?? -1, forKey: Keys.bannerIndex) }
+    }
+
     private init() {
         let defaults = UserDefaults.standard
         displayName = defaults.string(forKey: Keys.displayName) ?? ""
         status = defaults.string(forKey: Keys.status) ?? ""
         let emoji = defaults.string(forKey: Keys.avatarEmoji) ?? ""
         avatarEmoji = emoji.isEmpty ? nil : emoji
+        let banner = defaults.object(forKey: Keys.bannerIndex) as? Int ?? -1
+        bannerIndex = banner < 0 ? nil : banner
         load()
     }
 
@@ -181,6 +209,8 @@ final class SocialProfileStore {
         status = defaults.string(forKey: Keys.status) ?? status
         let emoji = defaults.string(forKey: Keys.avatarEmoji) ?? ""
         avatarEmoji = emoji.isEmpty ? nil : emoji
+        let banner = defaults.object(forKey: Keys.bannerIndex) as? Int ?? -1
+        bannerIndex = banner < 0 ? nil : banner
         preferences = [:]
         load()
     }

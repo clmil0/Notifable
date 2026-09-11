@@ -112,8 +112,8 @@ struct IncomeDetailsView: View {
         return (income.title ?? income.source) + " · " + f.string(from: income.date)
     }
 
-    private var iconName: String { IncomeStyle.iconAndColor(for: income, accent: accent.incomeColor).1 }
-    private var iconColor: Color { IncomeStyle.iconAndColor(for: income, accent: accent.incomeColor).0 }
+    private var iconName: String { IncomeStyle.iconAndColor(for: income, accent: accent.incomeFillColor).1 }
+    private var iconColor: Color { IncomeStyle.iconAndColor(for: income, accent: accent.incomeFillColor).0 }
     private var isAssetIcon: Bool {
         ["plin_icon", "yape_icon", "bbva_icon"].contains(iconName)
     }

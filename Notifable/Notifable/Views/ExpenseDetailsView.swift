@@ -15,7 +15,20 @@ struct ExpenseDetailsView: View {
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
 
-    @Bindable var expense: Expense
+    /// `@State`, no `@Bindable`: nada aquí usa `$expense.algo` como binding,
+    /// y sí hace falta poder **reasignarlo** — tocar una barra del historial
+    /// del comercio cambia a esa transacción sin cerrar ni volver a abrir la
+    /// hoja.
+    @State private var expense: Expense
+    /// La transacción con la que se abrió esta hoja, fija aunque `expense`
+    /// cambie de una barra a otra — es lo que la flecha de "aquí empezaste"
+    /// necesita para no perderse.
+    private let originalExpenseID: UUID
+
+    init(expense: Expense) {
+        self._expense = State(initialValue: expense)
+        self.originalExpenseID = expense.id
+    }
 
     @Query private var allExpenses: [Expense]
 
@@ -346,9 +359,12 @@ struct ExpenseDetailsView: View {
                     .font(.subheadline)
                     .foregroundStyle(palette.positive)
                 Spacer()
-                Text("faltan " + Money.format(pending, currency: expense.currency))
+                // "Saldada" con saldo: ya no se persigue, pero el número no
+                // desaparece — sigue siendo lo que nunca volvió. "faltan" sólo
+                // aplica mientras sigue por cobrar; cerrado, es "sin cobrar".
+                Text(pendingLabel(pending))
                     .font(.subheadline)
-                    .foregroundStyle(Money.isZero(pending) ? palette.positive : palette.warning)
+                    .foregroundStyle(pendingColor(pending))
             }
 
             GeometryReader { geo in
@@ -383,6 +399,23 @@ struct ExpenseDetailsView: View {
         .padding(.horizontal, 16)
     }
 
+    /// Mientras sigue por cobrar: "faltan X" (ámbar, o verde si ya no falta
+    /// nada). Declarada "Saldada" con saldo: "sin cobrar X", en gris — ya no
+    /// se persigue, así que no tiene sentido seguir avisando en ámbar.
+    private func pendingLabel(_ pending: Double) -> String {
+        if expense.isDebt {
+            return "faltan " + Money.format(pending, currency: expense.currency)
+        }
+        return Money.isZero(pending) ? "saldada" : "sin cobrar " + Money.format(pending, currency: expense.currency)
+    }
+
+    private func pendingColor(_ pending: Double) -> Color {
+        if expense.isDebt {
+            return Money.isZero(pending) ? palette.positive : palette.warning
+        }
+        return Money.isZero(pending) ? palette.positive : palette.secondaryLabel
+    }
+
     // MARK: - Historial del comercio
 
     /// Las últimas compras del mismo comercio. Da contexto —"¿esto es lo normal
@@ -400,18 +433,44 @@ struct ExpenseDetailsView: View {
 
                 HStack(alignment: .bottom, spacing: 8) {
                     ForEach(recent) { item in
+                        // La flecha sólo aparece si ya te moviste de la
+                        // transacción con la que abriste — mientras la sigas
+                        // viendo, no hay "dónde empezaste" que señalar.
+                        let showsOrigin = item.id == originalExpenseID && expense.id != originalExpenseID
+                        let isSelected = item.id == expense.id
+
                         VStack(spacing: 4) {
+                            Image(systemName: "arrow.down")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(themeColor)
+                                .opacity(showsOrigin ? 1 : 0)
+
+                            Text(Money.formatCompact(item.amount))
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(isSelected ? themeColor : palette.secondaryLabel)
+                                .lineLimit(1)
+                                .fixedSize()
+
                             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(item.id == expense.id ? themeColor : palette.track)
+                                .fill(isSelected ? themeColor : palette.track)
                                 .frame(height: barHeight(item.amount, max: maxAmount))
-                            Text("\(Period.calendar.component(.day, from: item.date))")
+
+                            Text(dayMonthLabel(item.date))
                                 .font(.caption2)
                                 .foregroundStyle(palette.secondaryLabel)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
                         }
                         .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            guard !isSelected else { return }
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                expense = item
+                            }
+                        }
                     }
                 }
-                .frame(height: 76, alignment: .bottom)
 
                 Text(historySummary(recent))
                     .font(.footnote)
@@ -436,6 +495,15 @@ struct ExpenseDetailsView: View {
         return Swift.max(4, 60 * CGFloat(min(1, ratio)))
     }
 
+    /// "8 sept", "4 oct" — antes era sólo el número de día, y sin el mes no
+    /// se entendía cuando el historial cruzaba fin de mes.
+    private func dayMonthLabel(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_PE")
+        f.dateFormat = "d MMM"
+        return f.string(from: date)
+    }
+
     private func historySummary(_ recent: [Expense]) -> String {
         let count = recent.count
         let compras = count == 1 ? "1 compra" : "\(count) compras"
@@ -451,6 +519,12 @@ struct ExpenseDetailsView: View {
 
     // MARK: - Acciones
 
+    /// Este botón dice "Saldada" cuando el gasto sigue marcado por cobrar.
+    /// Declararla saldada con un saldo pendiente no lo pone en cero: ese saldo
+    /// es lo que nunca te devolvieron, y sigue apareciendo así en la fila. Lo
+    /// que sí cambia es `isDebt` — deja de ofrecerse como destino al abonar un
+    /// ingreso (`IncomeDestinoSheet`) y deja de sumar al total "por cobrar"
+    /// del mes, porque ya no se está esperando que se salde solo.
     private func toggleDebt() {
         withAnimation {
             expense.isDebt.toggle()

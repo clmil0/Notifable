@@ -70,6 +70,7 @@ enum AppPreferences {
         .init(key: SocialProfileStore.Keys.displayName, kind: .string, note: "Tu nombre en Amigos"),
         .init(key: SocialProfileStore.Keys.status, kind: .string, note: "Tu estado en Amigos"),
         .init(key: SocialProfileStore.Keys.avatarEmoji, kind: .string, note: "Emoji de tu avatar en Amigos"),
+        .init(key: SocialProfileStore.Keys.bannerIndex, kind: .int, note: "Cabecera de tu perfil en Amigos"),
         .init(key: SocialProfileStore.Keys.friendPreferences, kind: .string,
               note: "Apodo, color y qué compartes con cada amigo")
     ]

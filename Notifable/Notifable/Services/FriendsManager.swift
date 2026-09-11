@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import SwiftData
 
 /// Un amigo conectado: su nombre, el estado que él escribió, y las notas
 /// privadas que yo le puse (apodo, color, emoji), que salen de
@@ -12,6 +13,10 @@ struct Friend: Identifiable, Hashable {
     let displayName: String
     /// Su línea de estado, si el servidor ya la sirve.
     var status: String = ""
+    /// Cuándo se hicieron amigos (`friendships.created_at`). `nil` si esa
+    /// amistad viene de la caché local, de antes de que se empezara a pedir
+    /// la columna.
+    var friendSince: Date? = nil
 
     private var preferences: FriendPreferences { SocialProfileStore.shared.preferences(for: id) }
 
@@ -113,6 +118,82 @@ final class FriendsManager {
         return f.string(from: Date())
     }
 
+    // MARK: - Caché local
+
+    private var container: ModelContainer?
+
+    /// Se llama una sola vez, al arrancar la app. Pinta con lo último que se
+    /// vio **antes** de que exista sesión o red — así Amigos no vuelve a
+    /// empezar en blanco cada vez que se abre la app; sólo se actualiza con lo
+    /// que llegue después, por `refresh()` o por Realtime.
+    func configure(container: ModelContainer) {
+        guard self.container == nil else { return }
+        self.container = container
+        loadFromCache()
+    }
+
+    private func loadFromCache() {
+        guard let container else { return }
+        let context = ModelContext(container)
+
+        if let cached = try? context.fetch(FetchDescriptor<CachedFriend>()), !cached.isEmpty {
+            friends = cached.map { Friend(id: $0.id, displayName: $0.displayName, status: $0.status, friendSince: $0.friendSince) }
+            for row in cached {
+                profileNames[row.id] = row.displayName
+                profileStatuses[row.id] = row.status
+            }
+        }
+
+        guard let uid = auth.userID,
+              let cachedShares = try? context.fetch(FetchDescriptor<CachedFriendShare>()) else { return }
+        let rows = cachedShares.map { $0.asRow }
+        let asViewer = rows.filter { $0.viewerID == uid }
+        pendingIncoming = asViewer.filter { $0.viewerStatus == "pending" }
+        acceptedIncoming = asViewer.filter { $0.viewerStatus == "accepted" }
+        outgoing = rows.filter { $0.sharerID == uid }
+    }
+
+    /// Reemplaza la caché de amigos por `friends` tal como está ahora — el
+    /// servidor manda, esto sólo recuerda su última respuesta. El que ya no
+    /// aparece (amistad eliminada en otro dispositivo) se borra de aquí
+    /// también, si no la próxima apertura seguiría mostrándolo.
+    private func persistFriendsCache() {
+        guard let container else { return }
+        let context = ModelContext(container)
+        let existing = (try? context.fetch(FetchDescriptor<CachedFriend>())) ?? []
+        var stale = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        for friend in friends {
+            if let row = stale.removeValue(forKey: friend.id) {
+                row.displayName = friend.displayName
+                row.status = friend.status
+                row.friendSince = friend.friendSince
+            } else {
+                context.insert(CachedFriend(id: friend.id, displayName: friend.displayName,
+                                            status: friend.status, friendSince: friend.friendSince))
+            }
+        }
+        for leftover in stale.values { context.delete(leftover) }
+        try? context.save()
+    }
+
+    /// Igual que `persistFriendsCache()`, para las tres listas de compartidos
+    /// juntas (son la misma tabla del servidor, sólo filtrada distinto).
+    private func persistSharesCache() {
+        guard let container else { return }
+        let context = ModelContext(container)
+        let existing = (try? context.fetch(FetchDescriptor<CachedFriendShare>())) ?? []
+        var stale = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        for row in pendingIncoming + acceptedIncoming + outgoing {
+            if let cached = stale.removeValue(forKey: row.id) {
+                cached.update(from: row)
+            } else {
+                context.insert(CachedFriendShare(row: row))
+            }
+        }
+        for leftover in stale.values { context.delete(leftover) }
+        try? context.save()
+    }
+
     func refresh() async {
         guard auth.isReady else { return }
         isLoading = true
@@ -146,10 +227,10 @@ final class FriendsManager {
 
     private func loadFriendships() async {
         guard let uid = auth.userID else { return }
-        guard let url = URL(string: "\(baseURL)/rest/v1/friendships?or=(user_a.eq.\(uid),user_b.eq.\(uid))&select=user_a,user_b") else { return }
+        guard let url = URL(string: "\(baseURL)/rest/v1/friendships?or=(user_a.eq.\(uid),user_b.eq.\(uid))&select=user_a,user_b,created_at") else { return }
         guard let request = auth.authorizedRequest(url: url, method: "GET") else { return }
 
-        struct Row: Decodable { let user_a: String; let user_b: String }
+        struct Row: Decodable { let user_a: String; let user_b: String; let created_at: String }
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -159,7 +240,16 @@ final class FriendsManager {
             }
             let rows = try JSONDecoder().decode([Row].self, from: data)
             let friendIDs = rows.map { $0.user_a == uid ? $0.user_b : $0.user_a }
-            friends = await fetchProfiles(ids: friendIDs)
+            // "Amigos desde", en el perfil del amigo (`FriendProfileView`).
+            var since: [String: Date] = [:]
+            for row in rows {
+                let friendID = row.user_a == uid ? row.user_b : row.user_a
+                since[friendID] = ConfigBackupManager.parseDate(row.created_at)
+            }
+            var fetched = await fetchProfiles(ids: friendIDs)
+            for index in fetched.indices { fetched[index].friendSince = since[fetched[index].id] }
+            friends = fetched
+            persistFriendsCache()
         } catch {
             lastErrorMessage = "No se pudieron cargar tus amigos."
         }
@@ -221,13 +311,20 @@ final class FriendsManager {
         guard let uid = auth.userID else { return }
         let month = Self.currentMonthKey
 
+        var touched = false
         if let asViewer = await fetchShares(query: "viewer_id=eq.\(uid)&period_month=eq.\(month)") {
             pendingIncoming = asViewer.filter { $0.viewerStatus == "pending" }
             acceptedIncoming = asViewer.filter { $0.viewerStatus == "accepted" }
+            touched = true
         }
         if let asSharer = await fetchShares(query: "sharer_id=eq.\(uid)&period_month=eq.\(month)") {
             outgoing = asSharer
+            touched = true
         }
+        // Sólo si al menos una de las dos llamadas trajo algo de verdad: si
+        // ambas fallaron (sin red, por ejemplo), no hay nada nuevo que
+        // guardar y lo de la caché sigue siendo lo último confiable.
+        if touched { persistSharesCache() }
     }
 
     private func fetchShares(query: String) async -> [FriendShareRow]? {
@@ -249,24 +346,41 @@ final class FriendsManager {
 
     // MARK: - Invitaciones
 
-    /// Genera un código de invitación de un solo uso. `nil` si falló.
-    func generateInviteCode() async -> String? {
+    /// El código fijo de esta cuenta: uno solo por persona, no expira, y
+    /// cualquier cantidad de amigos puede usarlo para agregarte (ver
+    /// `agrupay_friends_v3_schema.sql`). El backend ya lo crea solo al crear
+    /// el perfil (trigger); el `POST` de aquí es sólo el respaldo defensivo
+    /// para una cuenta de antes de esa migración que todavía no tiene fila.
+    func myFriendCode() async -> String? {
         guard let uid = auth.userID else { return nil }
-        guard let url = URL(string: "\(baseURL)/rest/v1/invite_codes") else { return nil }
+        if let code = await fetchMyFriendCode(uid: uid) { return code }
+
+        guard let url = URL(string: "\(baseURL)/rest/v1/friend_codes") else { return nil }
         guard var request = auth.authorizedRequest(url: url, method: "POST") else { return nil }
         request.addValue("return=representation", forHTTPHeaderField: "Prefer")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["owner_id": uid])
 
         struct Row: Decodable { let code: String }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
-            let rows = try JSONDecoder().decode([Row].self, from: data)
+        if let (data, response) = try? await URLSession.shared.data(for: request),
+           let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+           let rows = try? JSONDecoder().decode([Row].self, from: data) {
             return rows.first?.code
-        } catch {
-            return nil
         }
+        // Si el POST falló porque otra llamada la creó justo antes (carrera
+        // improbable, pero posible), la fila ya existe: se busca de nuevo en
+        // vez de darlo por perdido.
+        return await fetchMyFriendCode(uid: uid)
+    }
+
+    private func fetchMyFriendCode(uid: String) async -> String? {
+        guard let url = URL(string: "\(baseURL)/rest/v1/friend_codes?owner_id=eq.\(uid)&select=code") else { return nil }
+        guard let request = auth.authorizedRequest(url: url, method: "GET") else { return nil }
+
+        struct Row: Decodable { let code: String }
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+              let rows = try? JSONDecoder().decode([Row].self, from: data) else { return nil }
+        return rows.first?.code
     }
 
     /// Canjea el código de un amigo: crea la amistad si es válido y devuelve
@@ -287,7 +401,7 @@ final class FriendsManager {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                lastErrorMessage = "Código inválido o vencido."
+                lastErrorMessage = "Código inválido."
                 return nil
             }
             let profile = try JSONDecoder().decode(OwnerProfile.self, from: data)
@@ -330,9 +444,14 @@ final class FriendsManager {
         guard let url = URL(string: "\(baseURL)/rest/v1/rpc/upsert_my_share") else { return }
         guard var request = auth.authorizedRequest(url: url, method: "POST") else { return }
 
-        let sentTotal = shareTotal ? totalAmount : nil
+        // `totalAmount`/`categoryTotals` llegan de sumar `Double` en
+        // `PeriodTotals` — con suficientes movimientos arrastran el error de
+        // punto flotante de siempre (ver `Money.swift`). Sin normalizar aquí,
+        // ese "4066.4000000000001" viajaba tal cual al `numeric` de Supabase,
+        // que sólo guarda lo que le llega, no lo corrige.
+        let sentTotal = shareTotal ? Money.normalized(totalAmount) : nil
         let sentCategories = categoryTotals.filter { categories.contains($0.name) }
-        let categoryPayload = sentCategories.map { ["name": $0.name, "amount": $0.amount] as [String: Any] }
+        let categoryPayload = sentCategories.map { ["name": $0.name, "amount": Money.normalized($0.amount)] as [String: Any] }
 
         var payload: [String: Any] = [
             "p_viewer_id": viewerID,

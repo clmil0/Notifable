@@ -178,7 +178,7 @@ struct ContentView: View {
 
                             addOption(title: "Ingreso",
                                       icon: "arrow.down.left.circle.fill",
-                                      tint: accent.incomeColor,
+                                      tint: accent.incomeColor(systemScheme),
                                       type: .ingreso)
                         }
                         .background(.regularMaterial)

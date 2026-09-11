@@ -57,6 +57,7 @@ final class SupabaseAuthManager {
         if let name = displayName {
             await pushProfile(name: name)
         }
+        await linkGmailIdentityIfNeeded()
         return true
     }
 
@@ -226,6 +227,21 @@ final class SupabaseAuthManager {
         } catch {
             return false
         }
+    }
+
+    /// Si hay un Gmail conectado (el mismo que usa la app para leer los
+    /// correos del banco), le dice al servidor cuál es. Si encuentra un
+    /// perfil de antes con ese mismo correo —de una reinstalación, por
+    /// ejemplo, donde la sesión anónima se perdió y quedó huérfano—, le
+    /// hereda sus amigos y su código, y lo da de baja. Ver
+    /// `agrupay_friends_v4_gmail_identity.sql` para el porqué y la
+    /// advertencia de seguridad de este enfoque.
+    private func linkGmailIdentityIfNeeded() async {
+        guard let email = GmailAuthService.shared.accountEmail, !email.isEmpty else { return }
+        guard let url = URL(string: "\(projectURL)/rest/v1/rpc/claim_profile_by_email") else { return }
+        guard var request = authorizedRequest(url: url, method: "POST") else { return }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_email": email])
+        _ = try? await URLSession.shared.data(for: request)
     }
 
     /// Base para que `FriendsManager` arme sus propias peticiones REST/RPC

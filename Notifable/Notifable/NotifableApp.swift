@@ -15,7 +15,9 @@ struct NotifableApp: App {
             Expense.self,
             Income.self,
             RecurringExpense.self,
-            QuickExpense.self
+            QuickExpense.self,
+            CachedFriend.self,
+            CachedFriendShare.self
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 
@@ -66,6 +68,9 @@ struct NotifableApp: App {
                     // A partir de aquí la sincronización se dispara sola con
                     // cada guardado; ninguna vista tiene que avisarle de nada.
                     backupManager.configure(container: sharedModelContainer)
+                    // Pinta Amigos con lo último que se vio, antes de que
+                    // AmigosHubView llegue a pedir nada por red.
+                    FriendsManager.shared.configure(container: sharedModelContainer)
                 }
                 // Presentación en cadena: primero el onboarding y sólo después,
                 // si esa cuenta ya tenía respaldo, la oferta de restaurarlo. Dos

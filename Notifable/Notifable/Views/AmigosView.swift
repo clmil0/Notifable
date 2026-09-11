@@ -1,19 +1,22 @@
 import SwiftUI
 import SwiftData
 
-/// Amigos: el hub del diseño `Social · Amigos.dc.html` (1a–1f).
+/// Amigos: el hub del diseño `Amigos · Perfil y lista.dc.html` (2b/2g/2h/2f).
 ///
 /// A diferencia de `SocialView`/`SyncManager` (el PoC de "Ver actividad de la
 /// comunidad" que sigue en Ajustes → Respaldo), aquí nunca sale un movimiento
 /// ni un comercio del teléfono: sólo los totales que el propio usuario marcó,
 /// por amigo, con permiso explícito y revocable en cualquier momento.
 ///
-/// Lo que suma el rediseño sobre la versión anterior:
-/// - una tarjeta de perfil arriba, con nombre y **estado** editables;
+/// Lo que suma este rediseño sobre la versión anterior:
+/// - una cabecera de perfil con banner de color, nombre y **estado** editables;
 /// - **apodo, color y emoji** por amigo, privados de este teléfono
 ///   (`SocialProfileStore`), que viajan en el respaldo de configuración;
-/// - lo que te comparten legible de un golpe, con su desglose;
-/// - un contador de "con cuántos de tus amigos estás compartiendo".
+/// - una sola lista de amigos, ordenada te comparten → sólo tú compartes →
+///   nadie comparte, con las categorías de quien te comparte desplegables ahí
+///   mismo en vez de exigir abrir su perfil;
+/// - un perfil de amigo de lectura (`FriendProfileView`) con la historia de la
+///   amistad, antes de entrar a decidir qué compartirle.
 struct AmigosHubView: View {
     /// Sólo el mes en curso, que es lo único que esta pantalla enseña.
     ///
@@ -49,13 +52,17 @@ struct AmigosHubView: View {
     @State private var showProfileSheet = false
 
     @State private var showInviteSheet = false
-    /// El amigo que se acaba de agregar: la fila en "Lo que tú compartes" lo
-    /// resalta unos segundos con "Nuevo · elige qué le compartes" en vez del
-    /// resumen normal. Se limpia solo — ver `flagRecentlyAdded`.
+    /// El amigo que se acaba de agregar: su fila en "Sin compartir" lo resalta
+    /// unos segundos con "Nuevo · elige qué le compartes" en vez del subtítulo
+    /// normal. Se limpia solo — ver `flagRecentlyAdded`.
     @State private var recentlyAddedFriendID: String?
 
     @State private var selectedFriend: Friend?
     @State private var friendToEdit: Friend?
+
+    /// Qué fila de "Te comparten" tiene sus categorías desplegadas (2g). Sólo
+    /// una a la vez: abrir otra cierra la anterior.
+    @State private var expandedFriendID: String?
 
     /// El mismo `Period` que Resumen, Categorías y Ritmo — el mes actual.
     private var period: Period { Period(granularity: .mes, reference: Date()) }
@@ -80,8 +87,7 @@ struct AmigosHubView: View {
     var body: some View {
         TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 22) {
-                header
-                profileCard
+                profileBanner
 
                 if !auth.isReady {
                     loadingCard
@@ -91,14 +97,14 @@ struct AmigosHubView: View {
                     if !friendsManager.pendingIncoming.isEmpty {
                         pendingIncomingSection
                     }
-                    if !friendsManager.acceptedIncoming.isEmpty {
-                        incomingSection
+                    if !friendEntries.isEmpty {
+                        friendsListSection
                     }
-                    outgoingSection
                     inviteCard
                 }
             }
             .padding(.horizontal, 16)
+            .padding(.top, 8)
             .padding(.bottom, 100)
         }
         .task {
@@ -118,7 +124,8 @@ struct AmigosHubView: View {
             AddFriendSheet(onJoined: flagRecentlyAdded)
         }
         .sheet(item: $selectedFriend) { friend in
-            AmigoDetailView(friend: friend, totals: totals)
+            FriendProfileView(friend: friend, totals: totals,
+                              incoming: friendsManager.acceptedIncoming.first { $0.sharerID == friend.id })
         }
         .sheet(item: $friendToEdit) { friend in
             FriendEditSheet(friend: friend)
@@ -127,46 +134,96 @@ struct AmigosHubView: View {
 
     // MARK: - Encabezado y perfil
 
-    private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("Amigos")
-                .font(.largeTitle.bold())
-            Spacer()
-            Text(Period.spanishMonthName(for: Date()))
-                .font(.subheadline)
-                .foregroundStyle(palette.secondaryLabel)
-        }
-        .padding(.top, 8)
-    }
+    /// 2b: quién soy para mis amigos, con banner de color. El estado va aquí y
+    /// no en Ajustes porque es lo único que ellos ven además del nombre.
+    private var profileBanner: some View {
+        VStack(spacing: 0) {
+            ZStack(alignment: .topTrailing) {
+                SocialGradients.gradient(social.bannerIndex)
+                    .frame(height: 78)
 
-    /// 1c en pequeño: quién soy para mis amigos. El estado va aquí y no en
-    /// Ajustes porque es lo único que ellos ven además del nombre.
-    private var profileCard: some View {
-        HStack(spacing: 12) {
-            avatar(glyph: social.avatarEmoji ?? SocialProfileStore.initial(of: social.displayName),
-                   tint: themeColor,
-                   size: 46,
-                   isEmoji: social.avatarEmoji != nil)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(social.displayName.isEmpty ? "Tu nombre" : social.displayName)
-                    .font(.headline)
-                    .foregroundStyle(palette.label)
-                Text(social.status.isEmpty ? "Añade tu estado" : social.status)
-                    .font(.footnote)
-                    .foregroundStyle(social.status.isEmpty ? palette.tertiaryLabel : palette.secondaryLabel)
-                    .lineLimit(2)
+                Button {
+                    showProfileSheet = true
+                } label: {
+                    Text("Editar")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.white.opacity(0.24), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .padding(12)
             }
 
-            Spacer(minLength: 8)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .bottom, spacing: 12) {
+                    // El aro es un círculo opaco detrás, no un trazo encima: un
+                    // emoji usa `tint.opacity(0.22)` como fondo, y esa
+                    // transparencia dejaba ver la costura entre el degradado y
+                    // el blanco justo donde el avatar cruza el borde del
+                    // banner — la mitad de arriba salía de un color y la de
+                    // abajo de otro.
+                    ZStack {
+                        Circle()
+                            .fill(palette.surface)
+                            .frame(width: 64 + 7, height: 64 + 7)
+                        avatar(glyph: social.avatarEmoji ?? SocialProfileStore.initial(of: social.displayName),
+                               tint: themeColor, size: 64, isEmoji: social.avatarEmoji != nil)
+                    }
+                    .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
 
-            Button("Editar") { showProfileSheet = true }
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(themeColor)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(social.displayName.isEmpty ? "Tu nombre" : social.displayName)
+                            .font(.title3.bold())
+                            .foregroundStyle(palette.label)
+                        Text(social.status.isEmpty ? "Añade tu estado" : social.status)
+                            .font(.subheadline)
+                            .foregroundStyle(social.status.isEmpty ? palette.tertiaryLabel : palette.secondaryLabel)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .offset(y: -26)
+                .padding(.bottom, -26)
+
+                bannerChips
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 14)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .surfaceCard()
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 0.5)
+        )
+    }
+
+    @ViewBuilder
+    private var bannerChips: some View {
+        if !friendsManager.friends.isEmpty || !friendsManager.acceptedIncoming.isEmpty {
+            HStack(spacing: 8) {
+                if !friendsManager.friends.isEmpty {
+                    Text("Compartes con \(sharingCount) de \(friendsManager.friends.count)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(colorScheme == .dark ? themeColor : .white)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 7)
+                        .background(colorScheme == .dark ? themeColor.opacity(0.12) : themeColor, in: Capsule())
+                }
+                if !friendsManager.acceptedIncoming.isEmpty {
+                    Text("\(friendsManager.acceptedIncoming.count) te comparten")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.secondaryLabel)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 7)
+                        .background(palette.track, in: Capsule())
+                }
+                Spacer(minLength: 0)
+            }
+        }
     }
 
     private var loadingCard: some View {
@@ -181,8 +238,8 @@ struct AmigosHubView: View {
         .surfaceCard()
     }
 
-    /// 1f: sin amigos, lo que hace falta no es una lista vacía sino saber qué
-    /// se gana y cómo empezar.
+    /// Sin amigos, lo que hace falta no es una lista vacía sino saber qué se
+    /// gana y cómo empezar.
     private var emptyState: some View {
         VStack(spacing: 14) {
             Image(systemName: "person.2.fill")
@@ -272,34 +329,214 @@ struct AmigosHubView: View {
         }
     }
 
-    // MARK: - Lo que te comparten
+    // MARK: - Lista única de amigos (2g)
 
-    private var incomingSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("Lo que te comparten")
+    private enum ShareBucket { case sharesWithMe, onlyIShare, none }
 
-            VStack(spacing: 0) {
-                ForEach(Array(friendsManager.acceptedIncoming.enumerated()), id: \.element.id) { index, row in
-                    if index > 0 {
-                        Divider().background(palette.separator).padding(.leading, 62)
-                    }
-                    incomingRow(row)
-                }
+    private struct FriendListEntry: Identifiable {
+        let friend: Friend
+        let bucket: ShareBucket
+        let incoming: FriendShareRow?
+        var id: String { friend.id }
+    }
+
+    /// Orden fijo: te comparten → sólo tú compartes → nadie comparte.
+    private var friendEntries: [FriendListEntry] {
+        friendsManager.friends.map { friend in
+            if let incoming = friendsManager.acceptedIncoming.first(where: { $0.sharerID == friend.id }) {
+                return FriendListEntry(friend: friend, bucket: .sharesWithMe, incoming: incoming)
+            } else if isSharing(with: friend) {
+                return FriendListEntry(friend: friend, bucket: .onlyIShare, incoming: nil)
+            } else {
+                return FriendListEntry(friend: friend, bucket: .none, incoming: nil)
             }
-            .surfaceCard()
         }
     }
 
-    private func incomingRow(_ row: FriendShareRow) -> some View {
+    private var sharesWithMeEntries: [FriendListEntry] { friendEntries.filter { $0.bucket == .sharesWithMe } }
+    private var onlyIShareEntries: [FriendListEntry] { friendEntries.filter { $0.bucket == .onlyIShare } }
+    private var noShareEntries: [FriendListEntry] { friendEntries.filter { $0.bucket == .none } }
+
+    private var friendsListSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("Amigos")
+
+            VStack(spacing: 0) {
+                if !sharesWithMeEntries.isEmpty {
+                    groupHeader("Te comparten", count: sharesWithMeEntries.count)
+                    groupedRows(sharesWithMeEntries, dividerLeading: 64, row: sharesWithMeRow)
+                }
+                if !onlyIShareEntries.isEmpty {
+                    groupHeader("Solo tú compartes", count: onlyIShareEntries.count)
+                    groupedRows(onlyIShareEntries, dividerLeading: 64, row: onlyIShareRow)
+                }
+                if !noShareEntries.isEmpty {
+                    groupHeader("Sin compartir", count: noShareEntries.count)
+                    groupedRows(noShareEntries, dividerLeading: 58, row: noShareRow)
+                }
+            }
+            .surfaceCard(padding: 0)
+        }
+    }
+
+    private func groupHeader(_ title: String, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .tracking(0.5)
+                .foregroundStyle(palette.secondaryLabel)
+            Text("· \(count)")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(palette.tertiaryLabel)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 7)
+    }
+
+    @ViewBuilder
+    private func groupedRows<RowContent: View>(_ entries: [FriendListEntry], dividerLeading: CGFloat,
+                                               @ViewBuilder row: @escaping (FriendListEntry) -> RowContent) -> some View {
+        ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+            if index > 0 {
+                Divider().background(palette.separator).padding(.leading, dividerLeading)
+            }
+            row(entry)
+        }
+    }
+
+    /// Fila de quien te comparte: nombre, hace cuántos días son amigos, y su
+    /// desglose si marcó categorías — desplegable ahí mismo (2g). Tocar el
+    /// nombre lleva a su perfil; tocar el `⌄` sólo despliega.
+    private func sharesWithMeRow(_ entry: FriendListEntry) -> some View {
+        guard let incoming = entry.incoming else { return AnyView(EmptyView()) }
+        let hasCategories = !incoming.categoryTotals.isEmpty
+        let isExpanded = expandedFriendID == entry.friend.id
+
+        return AnyView(
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 12) {
+                    colorBar(tint: entry.friend.tint, height: 56)
+                    friendAvatar(id: entry.friend.id, size: 44)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(friendsManager.displayName(for: entry.friend.id))
+                                .font(.subheadline.bold())
+                                .foregroundStyle(palette.label)
+                            if let badge = friendshipDaysBadge(entry.friend) {
+                                Text(badge)
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(entry.friend.tint)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(entry.friend.tint.opacity(0.16), in: Capsule())
+                            }
+                        }
+                        Text(rowSubtitle(for: entry.friend, bucket: .sharesWithMe, incoming: incoming))
+                            .font(.caption)
+                            .foregroundStyle(palette.secondaryLabel)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    VStack(alignment: .trailing, spacing: 2) {
+                        if let total = incoming.totalAmount {
+                            Text(Money.format(total))
+                                .font(.subheadline.bold())
+                                .foregroundStyle(palette.label)
+                        }
+                        if hasCategories {
+                            Text(incoming.categoryTotals.count == 1 ? "1 categoría" : "\(incoming.categoryTotals.count) categorías")
+                                .font(.caption2)
+                                .foregroundStyle(palette.tertiaryLabel)
+                        }
+                    }
+
+                    Button {
+                        if hasCategories {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                expandedFriendID = isExpanded ? nil : entry.friend.id
+                            }
+                        } else {
+                            selectedFriend = entry.friend
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(palette.tertiaryLabel)
+                            .rotationEffect(.degrees(hasCategories && isExpanded ? 180 : -90))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .contentShape(Rectangle())
+                .onTapGesture { selectedFriend = entry.friend }
+
+                if hasCategories && isExpanded {
+                    categoryBreakdown(incoming)
+                        .padding(.leading, 64)
+                        .padding(.trailing, 14)
+                        .padding(.bottom, 12)
+                }
+            }
+        )
+    }
+
+    private func categoryBreakdown(_ incoming: FriendShareRow) -> some View {
+        let largest = incoming.categoryTotals.map(\.amount).max() ?? 1
+        let shownTotal = Money.sum(incoming.categoryTotals) { $0.amount }
+        let hasRest = (incoming.totalAmount ?? 0) > 0 && Money.cents(incoming.totalAmount ?? 0) > Money.cents(shownTotal)
+
+        return VStack(alignment: .leading, spacing: 9) {
+            ForEach(incoming.categoryTotals, id: \.name) { entry in
+                HStack(spacing: 9) {
+                    Image(systemName: CategoryStyle.icon(for: entry.name))
+                        .font(.caption2)
+                        .foregroundStyle(palette.secondaryLabel)
+                        .frame(width: 18)
+                    Text(entry.name)
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryLabel)
+                    GeometryReader { geo in
+                        Capsule().fill(palette.track)
+                            .overlay(alignment: .leading) {
+                                Capsule().fill(themeColor)
+                                    .frame(width: geo.size.width * CGFloat(min(1, Money.ratio(entry.amount, to: largest) ?? 0)))
+                            }
+                    }
+                    .frame(height: 5)
+                    Text(Money.format(entry.amount))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(palette.label)
+                        .frame(minWidth: 52, alignment: .trailing)
+                }
+            }
+            if hasRest {
+                Text("El resto de su total no está desglosado.")
+                    .font(.caption2)
+                    .foregroundStyle(palette.tertiaryLabel)
+            }
+        }
+    }
+
+    /// Fila de a quien sólo tú compartes.
+    private func onlyIShareRow(_ entry: FriendListEntry) -> some View {
+        Button {
+            selectedFriend = entry.friend
+        } label: {
             HStack(spacing: 12) {
-                friendAvatar(id: row.sharerID, size: 40)
+                colorBar(tint: entry.friend.tint, height: 56)
+                friendAvatar(id: entry.friend.id, size: 44)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(friendsManager.displayName(for: row.sharerID))
+                    Text(friendsManager.displayName(for: entry.friend.id))
                         .font(.subheadline.bold())
                         .foregroundStyle(palette.label)
-                    Text(incomingSubtitle(row))
+                    Text(rowSubtitle(for: entry.friend, bucket: .onlyIShare, incoming: nil))
                         .font(.caption)
                         .foregroundStyle(palette.secondaryLabel)
                         .lineLimit(1)
@@ -307,40 +544,98 @@ struct AmigosHubView: View {
 
                 Spacer(minLength: 8)
 
-                if let total = row.totalAmount {
-                    Text(Money.format(total))
-                        .font(.subheadline.bold())
-                        .foregroundStyle(palette.label)
-                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.bold())
+                    .foregroundStyle(palette.tertiaryLabel)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button("Editar amigo") { friendToEdit = entry.friend }
+        }
+    }
+
+    /// Fila de con quien no se comparte nada todavía: un botón directo en vez
+    /// de sólo desvanecerse.
+    private func noShareRow(_ entry: FriendListEntry) -> some View {
+        let isNew = entry.friend.id == recentlyAddedFriendID
+        return HStack(spacing: 12) {
+            colorBar(tint: entry.friend.tint.opacity(0.55), height: 44)
+            friendAvatar(id: entry.friend.id, size: 38)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(friendsManager.displayName(for: entry.friend.id))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.secondaryLabel)
+                Text(isNew ? "Nuevo · elige qué le compartes" : rowSubtitle(for: entry.friend, bucket: .none, incoming: nil))
+                    .font(.caption2.weight(isNew ? .semibold : .regular))
+                    .foregroundStyle(isNew ? themeColor : palette.tertiaryLabel)
+                    .lineLimit(1)
             }
 
-            if !row.categoryTotals.isEmpty {
-                VStack(spacing: 7) {
-                    ForEach(row.categoryTotals, id: \.name) { entry in
-                        HStack(spacing: 9) {
-                            Image(systemName: CategoryStyle.icon(for: entry.name))
-                                .font(.caption2)
-                                .foregroundStyle(CategoryStyle.color(for: entry.name, accent: themeColor))
-                                .frame(width: 18)
-                            Text(entry.name)
-                                .font(.caption)
-                                .foregroundStyle(palette.secondaryLabel)
-                            Spacer()
-                            Text(Money.format(entry.amount))
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(palette.label)
-                        }
-                    }
-                }
-                .padding(.leading, 52)
+            Spacer(minLength: 8)
+
+            Button {
+                if isNew { recentlyAddedFriendID = nil }
+                selectedFriend = entry.friend
+            } label: {
+                Text("Compartir")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(colorScheme == .dark ? themeColor : .white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(colorScheme == .dark ? themeColor.opacity(0.12) : themeColor, in: Capsule())
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .background(isNew ? themeColor.opacity(0.1) : Color.clear)
+        .contentShape(Rectangle())
+        .animation(.easeOut(duration: 1.2), value: recentlyAddedFriendID)
+        .onTapGesture {
+            if isNew { recentlyAddedFriendID = nil }
+            selectedFriend = entry.friend
+        }
+        .contextMenu {
+            Button("Editar amigo") { friendToEdit = entry.friend }
+        }
     }
 
-    /// El nombre real acompaña al apodo: si yo la guardé como "Cami", conviene
-    /// que siga estando claro de quién es ese total.
+    /// El "lomo" de color: da el tinte del amigo sin ocupar ancho de la fila.
+    private func colorBar(tint: Color, height: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 2, style: .continuous)
+            .fill(LinearGradient(colors: [tint, tint.opacity(0.6)], startPoint: .top, endPoint: .bottom))
+            .frame(width: 4, height: height)
+    }
+
+    /// Prioridad: su estado, si lo escribió; si no, el detalle propio de cada
+    /// grupo — lo que comparte, hace cuánto le compartes, o desde cuándo son
+    /// amigos.
+    private func rowSubtitle(for friend: Friend, bucket: ShareBucket, incoming: FriendShareRow?) -> String {
+        if !friend.status.isEmpty { return friend.status }
+        switch bucket {
+        case .sharesWithMe:
+            guard let incoming else { return "Te comparte su gasto" }
+            return incomingSubtitle(incoming)
+        case .onlyIShare:
+            if let days = daysSharingWith(friend) {
+                return "Le compartes hace " + dayCount(days)
+            }
+            return shareSummary(for: friend)
+        case .none:
+            if let since = friend.friendSince {
+                return "Amigos desde " + Period.spanishMonthName(for: since).lowercased()
+            }
+            return "Sin compartir todavía"
+        }
+    }
+
+    /// El nombre real acompaña al detalle: si yo lo guardé como "Cami",
+    /// conviene que siga estando claro de quién es ese total.
     private func incomingSubtitle(_ row: FriendShareRow) -> String {
         let realName = friendsManager.name(for: row.sharerID)
         let hasNickname = friendsManager.displayName(for: row.sharerID) != realName
@@ -354,74 +649,20 @@ struct AmigosHubView: View {
         return hasNickname ? realName + " · " + detail : detail
     }
 
-    // MARK: - Lo que tú compartes
+    private func dayCount(_ days: Int) -> String { "\(days) día" + (days == 1 ? "" : "s") }
 
-    private var outgoingSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                sectionTitle("Lo que tú compartes")
-                Spacer()
-                if !friendsManager.friends.isEmpty {
-                    Text("\(sharingCount) de \(friendsManager.friends.count) amigos")
-                        .font(.caption)
-                        .foregroundStyle(palette.secondaryLabel)
-                }
-            }
+    /// Hace cuántos días toqué por última vez lo que le comparto — lo más
+    /// cercano a "desde cuándo" que este teléfono conoce de verdad.
+    private func daysSharingWith(_ friend: Friend) -> Int? {
+        guard let updatedAt = social.preferences(for: friend.id).sharedUpdatedAt else { return nil }
+        return max(0, Period.calendar.dateComponents([.day], from: updatedAt, to: Date()).day ?? 0)
+    }
 
-            if friendsManager.friends.isEmpty {
-                Text("Agrega a un amigo para empezar a compartir tu gasto con quien tú elijas.")
-                    .font(.subheadline)
-                    .foregroundStyle(palette.secondaryLabel)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(16)
-                    .surfaceCard()
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(friendsManager.friends.enumerated()), id: \.element.id) { index, friend in
-                        if index > 0 {
-                            Divider().background(palette.separator).padding(.leading, 62)
-                        }
-                        let isNew = friend.id == recentlyAddedFriendID
-                        Button {
-                            if isNew { recentlyAddedFriendID = nil }
-                            selectedFriend = friend
-                        } label: {
-                            HStack(spacing: 12) {
-                                friendAvatar(id: friend.id, size: 40)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(friend.name)
-                                        .font(.subheadline.bold())
-                                        .foregroundStyle(palette.label)
-                                    Text(isNew ? "Nuevo · elige qué le compartes" : shareSummary(for: friend))
-                                        .font(.caption.weight(isNew ? .semibold : .regular))
-                                        .foregroundStyle(isNew ? themeColor : (isSharing(with: friend) ? palette.secondaryLabel : palette.tertiaryLabel))
-                                        .lineLimit(1)
-                                }
-
-                                Spacer(minLength: 8)
-
-                                Image(systemName: "chevron.right")
-                                    .font(.caption.bold())
-                                    .foregroundStyle(palette.tertiaryLabel)
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .contentShape(Rectangle())
-                            .background(isNew ? themeColor.opacity(0.12) : Color.clear)
-                        }
-                        .buttonStyle(.plain)
-                        .animation(.easeOut(duration: 1.2), value: recentlyAddedFriendID)
-                        // Editar apodo y color sin tener que entrar al detalle:
-                        // es una nota rápida, no una decisión de privacidad.
-                        .contextMenu {
-                            Button("Editar amigo") { friendToEdit = friend }
-                        }
-                    }
-                }
-                .surfaceCard()
-            }
-        }
+    /// "N d" junto al nombre de quien te comparte: días desde que son amigos.
+    private func friendshipDaysBadge(_ friend: Friend) -> String? {
+        guard let since = friend.friendSince else { return nil }
+        let days = max(0, Period.calendar.dateComponents([.day], from: since, to: Date()).day ?? 0)
+        return "\(days) d"
     }
 
     /// Lo mismo que promete el diseño: "Total del mes + 2 categorías".
@@ -473,9 +714,9 @@ struct AmigosHubView: View {
             HStack(spacing: 12) {
                 Image(systemName: "person.badge.plus")
                     .font(.title3)
-                    .foregroundStyle(themeColor)
+                    .foregroundStyle(colorScheme == .dark ? themeColor : .white)
                     .frame(width: 40, height: 40)
-                    .background(themeColor.opacity(colorScheme == .dark ? 0.20 : 0.14), in: Circle())
+                    .background(colorScheme == .dark ? themeColor.opacity(0.20) : themeColor, in: Circle())
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Agregar un amigo")
@@ -501,7 +742,7 @@ struct AmigosHubView: View {
 
     // MARK: - Recién agregado
 
-    /// El "glow" de la fila lo hace la propia `.animation` de `outgoingSection`
+    /// El resaltado de la fila lo hace la propia `.animation` de `noShareRow`
     /// reaccionando a `recentlyAddedFriendID`: aquí sólo se agenda cuándo se
     /// apaga, para que no se quede resaltado para siempre si el usuario no
     /// toca la fila.
@@ -516,11 +757,11 @@ struct AmigosHubView: View {
     }
 }
 
-/// 1c — el flujo completo de "Agregar amigo": código propio listo al abrir,
+/// 2c — el flujo completo de "Agregar amigo": código propio listo al abrir,
 /// canjear el de un amigo con éxito animado, y la hoja se retira sola.
 ///
 /// `onJoined` avisa a `AmigosHubView` quién se acaba de agregar para que la
-/// fila en "Lo que tú compartes" lo resalte — esta hoja no toca esa lista
+/// fila en "Sin compartir" lo resalte — esta hoja no toca esa lista
 /// directamente, sólo reporta el id.
 struct AddFriendSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -600,18 +841,9 @@ struct AddFriendSheet: View {
 
     private var myCodeSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("TU CÓDIGO")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(palette.secondaryLabel)
-                Spacer()
-                Text("Vence en 7 días")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.14), in: Capsule())
-            }
+            Text("TU CÓDIGO")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(palette.secondaryLabel)
 
             codeCells
 
@@ -795,7 +1027,7 @@ struct AddFriendSheet: View {
     private func ensureCode(force: Bool = false) async {
         guard force || myCode == nil else { return }
         isGeneratingCode = true
-        myCode = await friendsManager.generateInviteCode()
+        myCode = await friendsManager.myFriendCode()
         isGeneratingCode = false
     }
 
@@ -818,7 +1050,7 @@ struct AddFriendSheet: View {
             let friend = await friendsManager.redeem(code: code)
             isRedeeming = false
             guard let friend else {
-                redeemError = friendsManager.lastErrorMessage ?? "Código inválido o vencido. Pídele uno nuevo."
+                redeemError = friendsManager.lastErrorMessage ?? "Código inválido. Revisa que esté bien escrito."
                 return
             }
             onJoined(friend.id)
@@ -829,9 +1061,10 @@ struct AddFriendSheet: View {
     }
 }
 
-/// 1c — Tu nombre y tu estado.
+/// 2h — Tu nombre, tu estado y la cabecera de tu perfil.
 ///
-/// Es lo único tuyo que sale del teléfono hacia tus amigos, así que la nota de
+/// Vista previa arriba y controles abajo: se edita viendo el resultado. Es lo
+/// único tuyo que sale del teléfono hacia tus amigos, así que la nota de
 /// privacidad va aquí y no en un ajuste aparte: se lee justo cuando se decide.
 struct MyProfileSheet: View {
 
@@ -845,6 +1078,7 @@ struct MyProfileSheet: View {
     @State private var nameDraft = ""
     @State private var statusDraft = ""
     @State private var emojiDraft: String?
+    @State private var bannerDraft = 0
     @State private var didLoad = false
 
     private var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
@@ -861,6 +1095,8 @@ struct MyProfileSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 22) {
+                    headerPreview
+                    bannerPicker
                     avatarPicker
 
                     field(title: "Tu nombre") {
@@ -912,7 +1148,7 @@ struct MyProfileSheet: View {
                         Image(systemName: "lock.fill")
                             .font(.caption2)
                             .foregroundStyle(palette.tertiaryLabel)
-                        Text("Tus amigos ven tu nombre y tu estado. Nunca tus movimientos ni tus comercios.")
+                        Text("Tus amigos ven tu nombre, tu ícono, tu cabecera y tu estado. Nunca tus movimientos ni tus comercios.")
                             .font(.caption)
                             .foregroundStyle(palette.secondaryLabel)
                     }
@@ -931,27 +1167,65 @@ struct MyProfileSheet: View {
         }
     }
 
-    private var avatarPicker: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Spacer()
+    /// Vista previa de la cabecera tal como la verán tus amigos.
+    private var headerPreview: some View {
+        ZStack(alignment: .bottomLeading) {
+            SocialGradients.gradient(bannerDraft)
+                .frame(height: 96)
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+
+            ZStack {
+                Circle()
+                    .fill(.white)
+                    .frame(width: 60 + 6, height: 60 + 6)
                 Text(emojiDraft ?? SocialProfileStore.initial(of: nameDraft))
-                    .font(emojiDraft == nil ? .system(size: 34, weight: .bold) : .system(size: 38))
+                    .font(emojiDraft == nil ? .system(size: 26, weight: .bold) : .system(size: 30))
                     .foregroundStyle(emojiDraft == nil ? Color.white : Color.primary)
-                    .frame(width: 84, height: 84)
+                    .frame(width: 60, height: 60)
                     .background(emojiDraft == nil ? themeColor : themeColor.opacity(0.22), in: Circle())
-                Spacer()
             }
+            .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
+            .padding(14)
+        }
+    }
+
+    private var bannerPicker: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("CABECERA")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(palette.tertiaryLabel)
+
+            HStack(spacing: 8) {
+                ForEach(SocialGradients.all.indices, id: \.self) { index in
+                    Button { bannerDraft = index } label: {
+                        SocialGradients.gradient(index)
+                            .frame(height: 44)
+                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                                    .stroke(bannerDraft == index ? themeColor : Color.clear, lineWidth: 2)
+                                    .padding(-2)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var avatarPicker: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("ÍCONO")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(palette.tertiaryLabel)
 
             HStack(spacing: 10) {
-                Spacer()
                 choiceChip(label: SocialProfileStore.initial(of: nameDraft), isSelected: emojiDraft == nil) {
                     emojiDraft = nil
                 }
                 ForEach(Self.emojis, id: \.self) { emoji in
                     choiceChip(label: emoji, isSelected: emojiDraft == emoji) { emojiDraft = emoji }
                 }
-                Spacer()
             }
         }
     }
@@ -992,11 +1266,13 @@ struct MyProfileSheet: View {
         nameDraft = social.displayName
         statusDraft = social.status
         emojiDraft = social.avatarEmoji
+        bannerDraft = social.bannerIndex ?? 0
     }
 
     private func save() {
         let name = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let status = statusDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        social.bannerIndex = bannerDraft
         Task {
             await auth.updateProfile(name: name.isEmpty ? "Amigo" : name,
                                      status: status,
@@ -1006,7 +1282,7 @@ struct MyProfileSheet: View {
     }
 }
 
-/// 1d — Editar amigo: apodo, color y avatar.
+/// 1d (sin cambios de diseño) — Editar amigo: apodo, color y avatar.
 ///
 /// Nada de esto sale del teléfono: es cómo yo lo veo. Por eso la nota bajo el
 /// apodo aclara que para él sigo siendo quien soy — un apodo no le renombra a
@@ -1257,7 +1533,333 @@ struct FriendEditSheet: View {
     }
 }
 
-/// 1e — Qué le muestro a un amigo.
+/// 2f — Perfil del amigo: su cabecera, la historia de la amistad, lo que te
+/// comparte y lo que tú le compartes. De lectura — cambiar lo que le
+/// compartes vive en `AmigoDetailView`, detrás de "Cambiar".
+struct FriendProfileView: View {
+    let friend: Friend
+    let totals: PeriodTotals
+    /// Su fila de `friend_shares` hacia mí este mes, si ya la aceptaste.
+    let incoming: FriendShareRow?
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
+
+    @State private var friendsManager = FriendsManager.shared
+    @State private var social = SocialProfileStore.shared
+
+    @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    private var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
+    private var palette: Palette { Palette(colorScheme) }
+
+    @State private var showEditSheet = false
+    @State private var showShareEditor = false
+    @State private var showStopConfirm = false
+    @State private var showDeleteConfirm = false
+    @State private var errorMessage: String?
+
+    private var shownName: String { social.name(for: friend.id, realName: friend.displayName) }
+    private var hasNickname: Bool { friend.hasNickname }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 0) {
+                    header
+                    VStack(spacing: 14) {
+                        if !friend.status.isEmpty { statusCard }
+                        statsRow
+                        if let incoming { theyShareCard(incoming) }
+                        weShareCard
+                        privacyNote
+                        destructiveActions
+                    }
+                    .padding(16)
+                }
+            }
+            .background(palette.background)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cerrar") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Editar") { showEditSheet = true }
+                }
+            }
+            .sheet(isPresented: $showEditSheet) {
+                FriendEditSheet(friend: friend)
+            }
+            .sheet(isPresented: $showShareEditor) {
+                AmigoDetailView(friend: friend, totals: totals)
+            }
+            .confirmationDialog("¿Dejar de compartir con " + shownName + "?",
+                                isPresented: $showStopConfirm,
+                                titleVisibility: .visible) {
+                Button("Dejar de compartir", role: .destructive) {
+                    Task {
+                        await friendsManager.stopSharing(viewerID: friend.id)
+                        dismiss()
+                    }
+                }
+                Button("Cancelar", role: .cancel) {}
+            }
+            .confirmationDialog("¿Eliminar a " + shownName + "?",
+                                isPresented: $showDeleteConfirm,
+                                titleVisibility: .visible) {
+                Button("Eliminar amigo", role: .destructive) { deleteFriend() }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Dejarán de verse el gasto el uno al otro. Puedes volver a agregarlo con un código.")
+            }
+        }
+    }
+
+    // MARK: - Cabecera
+
+    /// Como en 2f: el degradado no encierra el avatar, lo deja cruzar hacia el
+    /// contenido de abajo (`offset` + `padding.bottom` negativos, igual que
+    /// `profileBanner`). El respaldo circular opaco detrás del avatar —no un
+    /// trazo encima— es lo que evita que su propio fondo (`tint.opacity(0.22)`
+    /// para un emoji) deje ver la costura entre el degradado y el fondo de la
+    /// pantalla justo donde el avatar cruza ese borde.
+    private var header: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [friend.tint, friend.tint.opacity(0.65)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                .frame(height: 96)
+
+            HStack(alignment: .bottom, spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(palette.background)
+                        .frame(width: 76 + 8, height: 76 + 8)
+                    avatar
+                }
+                .shadow(color: .black.opacity(0.2), radius: 6, y: 3)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(shownName)
+                        .font(.title2.bold())
+                        .foregroundStyle(palette.label)
+                    if hasNickname {
+                        Text(friend.displayName + " · apodo solo tuyo")
+                            .font(.caption)
+                            .foregroundStyle(palette.secondaryLabel)
+                    }
+                }
+                .padding(.bottom, 8)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .offset(y: -34)
+            .padding(.bottom, -34)
+        }
+        .background(palette.background)
+    }
+
+    private var avatar: some View {
+        let preferences = social.preferences(for: friend.id)
+        let usesEmoji = preferences.emoji?.isEmpty == false
+        return Text(social.glyph(for: friend.id, realName: friend.displayName))
+            .font(usesEmoji ? .system(size: 34) : .system(size: 30, weight: .bold))
+            .foregroundStyle(usesEmoji ? Color.primary : Color.white)
+            .frame(width: 76, height: 76)
+            .background(usesEmoji ? friend.tint.opacity(0.22) : friend.tint, in: Circle())
+    }
+
+    // MARK: - Estado, estadísticas
+
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("SU ESTADO")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(friend.tint)
+            Text(friend.status)
+                .font(.body)
+                .foregroundStyle(palette.label)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(13)
+        .background(friend.tint.opacity(colorScheme == .dark ? 0.16 : 0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    /// Dos cifras y a propósito, las dos del mismo dato: la fecha en que se
+    /// hicieron amigos, y hace cuántos días es eso — el único momento que
+    /// este teléfono conoce con certeza (cuándo empezaron a *compartirse*
+    /// algo no se guarda por separado).
+    private var statsRow: some View {
+        HStack(spacing: 8) {
+            statCard(value: friendSinceText, label: "amigos desde")
+            statCard(value: friendSinceDaysText, label: "días de amistad", tint: friend.tint)
+        }
+    }
+
+    private func statCard(value: String, label: String, tint: Color? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value)
+                .font(.title3.bold())
+                .foregroundStyle(tint ?? palette.label)
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(palette.secondaryLabel)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .surfaceCard(padding: 0)
+        .padding(1)
+    }
+
+    private var friendSinceText: String {
+        guard let date = friend.friendSince else { return "—" }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd/MM/yyyy"
+        return formatter.string(from: date)
+    }
+
+    private var friendSinceDaysText: String {
+        guard let date = friend.friendSince else { return "—" }
+        let days = max(0, Period.calendar.dateComponents([.day], from: date, to: Date()).day ?? 0)
+        return "\(days) días"
+    }
+
+    // MARK: - Lo que te comparte / lo que tú le compartes
+
+    private func theyShareCard(_ incoming: FriendShareRow) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Lo que te comparte")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.label)
+                Spacer()
+                if let total = incoming.totalAmount {
+                    Text(Money.format(total))
+                        .font(.subheadline.bold())
+                        .foregroundStyle(palette.label)
+                }
+            }
+            .padding(13)
+
+            if !incoming.categoryTotals.isEmpty {
+                ForEach(incoming.categoryTotals, id: \.name) { entry in
+                    Divider().background(palette.separator).padding(.leading, 14)
+                    HStack {
+                        Text(entry.name)
+                            .font(.subheadline)
+                            .foregroundStyle(palette.secondaryLabel)
+                        Spacer()
+                        Text(Money.format(entry.amount))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(palette.label)
+                    }
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                }
+            }
+        }
+        .surfaceCard(padding: 0)
+    }
+
+    private var weShareCard: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Lo que tú le compartes")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.label)
+                Text(shareSummary)
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+            Spacer(minLength: 8)
+            Button("Cambiar") { showShareEditor = true }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(themeColor)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 7)
+                .background(themeColor.opacity(0.12), in: Capsule())
+                .buttonStyle(.plain)
+        }
+        .padding(13)
+        .surfaceCard(padding: 0)
+    }
+
+    private var shareSummary: String {
+        guard let share = friendsManager.myShare(toward: friend.id) else {
+            return "Sin compartir todavía"
+        }
+        let categories = share.shareCategories.count
+        let categoryLabel = categories == 1 ? "1 categoría" : "\(categories) categorías"
+        switch (share.shareTotal, categories) {
+        case (true, 0):  return "Solo el total del mes"
+        case (true, _):  return "Total del mes + " + categoryLabel
+        case (false, 0): return "Sin compartir todavía"
+        case (false, _): return categoryLabel
+        }
+    }
+
+    private var privacyNote: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "lock.fill")
+                .font(.caption2)
+                .foregroundStyle(palette.tertiaryLabel)
+            Text("Ve lo que marques y nada más. Nunca tus comercios ni tus movimientos.")
+                .font(.caption)
+                .foregroundStyle(palette.secondaryLabel)
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - Acciones destructivas
+
+    @ViewBuilder
+    private var destructiveActions: some View {
+        VStack(spacing: 10) {
+            if friendsManager.myShare(toward: friend.id) != nil {
+                Button(role: .destructive) { showStopConfirm = true } label: {
+                    Text("Dejar de compartir con " + shownName)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(palette.negative)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 48)
+                        .background(palette.negative.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+
+            Button(role: .destructive) { showDeleteConfirm = true } label: {
+                Text("Eliminar a " + shownName)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.negative)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+            }
+            .buttonStyle(.plain)
+
+            if let errorMessage {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(palette.negative)
+            }
+        }
+    }
+
+    private func deleteFriend() {
+        Task {
+            let removed = await friendsManager.removeFriend(friend.id)
+            if removed {
+                dismiss()
+            } else {
+                errorMessage = friendsManager.lastErrorMessage ?? "No se pudo eliminar la amistad."
+            }
+        }
+    }
+}
+
+/// 1e (sin cambios de diseño) — Qué le muestro a un amigo. Se abre desde
+/// `FriendProfileView` al tocar "Cambiar" en "Lo que tú le compartes".
 ///
 /// Las categorías salen de mis propios totales del periodo, no de lo que él ya
 /// ve: marcar o desmarcar tiene que ser inmediato y no depender de una segunda

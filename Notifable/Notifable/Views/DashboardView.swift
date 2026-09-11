@@ -542,14 +542,21 @@ private struct DashboardContent: View {
     /// Una fila de movimiento. Partida en piezas: los ternarios de color dentro
     /// de `.fill()` y `.background()` obligan al comprobador de tipos a probar
     /// todas las sobrecargas de ShapeStyle, y en una expresión larga se rinde.
+    ///
+    /// La fila nunca cambia de color por tratarse de una deuda: toda esa
+    /// información vive en `debtBand`, aparte, debajo del movimiento.
     private func expenseCard(for expense: Expense) -> some View {
-        HStack(spacing: 16) {
-            expenseIcon(for: expense)
-            expenseInfo(for: expense)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 16) {
+                expenseIcon(for: expense)
+                expenseInfo(for: expense)
 
-            Spacer()
+                Spacer()
 
-            expenseAmount(for: expense)
+                expenseAmount(for: expense)
+            }
+
+            debtBand(for: expense)
         }
         .surfaceCard(radius: 16)
         .padding(.horizontal)
@@ -564,41 +571,83 @@ private struct DashboardContent: View {
         let symbolTint: Color = colorScheme == .light ? Color.white : baseColor
         let icon = iconName(for: expense)
 
-        ZStack(alignment: .topTrailing) {
-            ZStack {
-                Circle()
-                    .fill(circleFill)
-                    .frame(width: 48, height: 48)
+        ZStack {
+            Circle()
+                .fill(circleFill)
+                .frame(width: 48, height: 48)
 
-                if icon == "plin_icon" || icon == "yape_icon" || icon == "bbva_icon" {
-                    Image(icon)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 28, height: 28)
-                        .clipShape(Circle())
-                } else {
-                    Image(systemName: icon)
-                        .foregroundStyle(symbolTint)
-                }
-            }
-
-            if expense.isDebt {
-                badge(systemName: "exclamationmark", tint: .orange)
-            } else if !(expense.payments ?? []).isEmpty {
-                badge(systemName: "checkmark", tint: .green)
+            if icon == "plin_icon" || icon == "yape_icon" || icon == "bbva_icon" {
+                Image(icon)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 28, height: 28)
+                    .clipShape(Circle())
+            } else {
+                Image(systemName: icon)
+                    .foregroundStyle(symbolTint)
             }
         }
     }
 
-    private func badge(systemName: String, tint: Color) -> some View {
-        ZStack {
-            Circle().fill(tint)
-            Image(systemName: systemName)
-                .font(.system(size: 10, weight: .bold))
-                .foregroundStyle(.white)
+    /// Banda bajo el movimiento con lo que falta cobrar, o lo que ya se
+    /// cerró. Aparece si el gasto sigue marcado "por cobrar" o si ya recibió
+    /// algún abono (aunque ya no esté marcado como deuda).
+    ///
+    /// "Saldada" no es "saldo en cero": es "dejé de esperar que me lo
+    /// devuelvan". Si sólo abonaron una parte y de ahí se declaró saldada, el
+    /// resto sigue apareciendo — es lo que de verdad nunca volvió — sólo que
+    /// en verde, porque ya no está pendiente de nadie.
+    @ViewBuilder
+    private func debtBand(for expense: Expense) -> some View {
+        let paid = Accounting.paid(of: expense)
+        if expense.isDebt || Money.cents(paid) > 0 {
+            let outstanding = Accounting.outstanding(of: expense)
+            let isOpen = expense.isDebt
+            let hasPartialPayment = isOpen && Money.cents(paid) > 0 && Money.cents(outstanding) > 0
+            let tint = isOpen ? palette.warning : palette.positive
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Text("Por cobrar")
+                        .font(.caption2.weight(.semibold))
+                        .tracking(0.4)
+                        .textCase(.uppercase)
+                        .foregroundStyle(tint)
+                    Spacer()
+                    Text(debtBandValue(isOpen: isOpen, hasPartialPayment: hasPartialPayment,
+                                       outstanding: outstanding, total: expense.amount, currency: expense.currency))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(tint)
+                }
+
+                if hasPartialPayment {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(palette.warning.opacity(0.18))
+                            Capsule().fill(palette.warning)
+                                .frame(width: geo.size.width * CGFloat(min(1, Money.ratio(paid, to: expense.amount) ?? 0)))
+                        }
+                    }
+                    .frame(height: 4)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, hasPartialPayment ? 8 : 7)
+            .background(tint.opacity(colorScheme == .dark ? 0.16 : 0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         }
-        .frame(width: 16, height: 16)
-        .offset(x: 2, y: -2)
+    }
+
+    private func debtBandValue(isOpen: Bool, hasPartialPayment: Bool,
+                               outstanding: Double, total: Double, currency: String) -> String {
+        if !isOpen {
+            guard !Money.isZero(outstanding) else { return "Saldada" }
+            return "Saldada · " + Money.format(outstanding, currency: currency) + " sin cobrar"
+        }
+        if hasPartialPayment {
+            return Money.format(outstanding, currency: currency) + " de " + Money.format(total, currency: currency)
+        }
+        return Money.format(outstanding, currency: currency) + " pendientes"
     }
 
     private func expenseInfo(for expense: Expense) -> some View {
@@ -653,131 +702,135 @@ private struct DashboardContent: View {
         }
     }
 
-    /// Lo gastado es `amount`. Lo que aún debes es otra cifra y se muestra
-    /// aparte, en vez de restarse del gasto (ACCOUNTING.md §2).
-    /// En un gasto normal el número es lo que gastaste. En uno marcado "por
-    /// cobrar" es **lo que falta que te devuelvan**: si prestaste 100 y ya te
-    /// devolvieron 50, la fila dice 50, no 100. El original sigue visible
-    /// debajo para no perder de dónde salió.
+    /// Lo gastado es `amount`. Lo que aún debes es otra cifra (ACCOUNTING.md
+    /// §2): en un gasto normal el número es lo que gastaste; en uno "por
+    /// cobrar" es **lo que falta que te devuelvan** — si prestaste 100 y ya te
+    /// devolvieron 50, la fila dice 50, no 100. El resto de la historia (el
+    /// original, cuánto falta, si ya se saldó) vive en `debtBand`, no aquí: la
+    /// cifra de la fila es la única que cambia de color en la app antigua, y
+    /// ahora se queda neutra igual que cualquier otro gasto.
     ///
     /// (El total del mes sigue contando el gasto completo: lo que cambia aquí
     /// es qué cifra encabeza la fila, no la contabilidad.)
-    @ViewBuilder
     private func expenseAmount(for expense: Expense) -> some View {
-        let isReceivable = expense.isDebt
         let paid = Accounting.paid(of: expense)
         let outstanding = Accounting.outstanding(of: expense)
-        let settled = isReceivable && Money.cents(outstanding) == 0
-        // La fila enseña lo que el gasto **costó**, igual que el total del mes:
-        // si te devolvieron algo, la cifra grande ya lo descuenta. Mostrar el
-        // importe bruto aquí y el neto arriba dejaba una lista que no sumaba lo
-        // que decía la cabecera.
-        let hasRefunds = Money.cents(paid) > 0
-        let displayed = (isReceivable || hasRefunds) ? outstanding : expense.amount
+        let hasPayments = Money.cents(paid) > 0
+        let displayed = (expense.isDebt || hasPayments) ? outstanding : expense.amount
 
-        VStack(alignment: .trailing, spacing: 2) {
-            Text("- " + Money.format(displayed, currency: expense.currency))
-                .font(.title3)
-                .fontWeight(.bold)
-                .foregroundStyle(settled ? palette.secondaryLabel : palette.label)
-                .strikethrough(settled, color: palette.secondaryLabel)
-
-            if settled {
-                Text("Saldada")
-                    .font(.caption2)
-                    .foregroundStyle(palette.positive)
-            } else if hasRefunds {
-                Text("de " + Money.format(expense.amount, currency: expense.currency)
-                     + " · te devolvieron " + Money.format(paid, currency: expense.currency))
-                    .font(.caption2)
-                    .foregroundStyle(palette.secondaryLabel)
-            } else if isReceivable {
-                Text("Por cobrar")
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-            }
-        }
+        return Text("- " + Money.format(displayed, currency: expense.currency))
+            .font(.title3)
+            .fontWeight(.bold)
+            .foregroundStyle(palette.label)
     }
 
     
+    /// Igual que `expenseCard`: un cobro no cambia de color por serlo — el tag
+    /// pasa a ser neutro ("Cobro" en vez de la fuente) y el vínculo con su
+    /// deuda vive en `debtPaymentBand`, aparte.
     private func incomeCard(for income: Income) -> some View {
-        HStack(spacing: 16) {
-            ZStack {
-                let (baseColor, icon) = IncomeStyle.iconAndColor(for: income, accent: accent.incomeColor)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 16) {
+                ZStack {
+                    let (baseColor, icon) = IncomeStyle.iconAndColor(for: income, accent: accent.incomeFillColor)
 
-                Circle()
-                    .fill(colorScheme == .light ? baseColor : baseColor.opacity(0.15))
-                    .frame(width: 48, height: 48)
-                
-                if icon == "plin_icon" || icon == "yape_icon" || icon == "bbva_icon" {
-                    Image(icon)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 28, height: 28)
-                        .clipShape(Circle())
-                } else {
-                    Image(systemName: icon)
-                        .foregroundStyle(colorScheme == .light ? .white : baseColor)
-                }
-            }
-            
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    let displayTitle = income.title ?? income.source
-                    Button {
-                        withAnimation {
-                            if tapTitleFilters {
-                                searchText = income.source
-                            } else {
-                                selectedIncomeForDetails = income
-                            }
-                        }
-                    } label: {
-                        Text(displayTitle)
-                            .font(.headline)
-                            .lineLimit(1)
-                            .foregroundColor(income.isDebtPayment ? .orange : .primary)
+                    Circle()
+                        .fill(colorScheme == .light ? baseColor : baseColor.opacity(0.15))
+                        .frame(width: 48, height: 48)
+
+                    if icon == "plin_icon" || icon == "yape_icon" || icon == "bbva_icon" {
+                        Image(icon)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 28, height: 28)
+                            .clipShape(Circle())
+                    } else {
+                        Image(systemName: icon)
+                            .foregroundStyle(colorScheme == .light ? .white : baseColor)
                     }
-                    .buttonStyle(.plain)
                 }
-                
-                HStack(spacing: 6) {
-                    let isDebtPayment = income.isDebtPayment
-                    let (baseColor, _) = IncomeStyle.iconAndColor(for: income, accent: accent.incomeColor)
-                    let tagColor = isDebtPayment ? Color.orange : baseColor
-                    let tagText = isDebtPayment ? "Cobro" : income.source
-                    
-                    Text(tagText)
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(colorScheme == .light ? tagColor : tagColor.opacity(0.2))
-                        .foregroundStyle(colorScheme == .light ? .white : tagColor)
-                        .clipShape(Capsule())
-                    
-                    Text(income.date.formatted(.dateTime.day().month().hour().minute()))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .layoutPriority(1)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        let displayTitle = income.title ?? income.source
+                        Button {
+                            withAnimation {
+                                if tapTitleFilters {
+                                    searchText = income.source
+                                } else {
+                                    selectedIncomeForDetails = income
+                                }
+                            }
+                        } label: {
+                            Text(displayTitle)
+                                .font(.headline)
+                                .lineLimit(1)
+                                .foregroundStyle(palette.label)
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    HStack(spacing: 6) {
+                        let isDebtPayment = income.isDebtPayment
+                        let (baseColor, _) = IncomeStyle.iconAndColor(for: income, accent: accent.incomeFillColor)
+                        let tagText = isDebtPayment ? "Cobro" : income.source
+
+                        Text(tagText)
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(isDebtPayment ? palette.track : (colorScheme == .light ? baseColor : baseColor.opacity(0.2)))
+                            .foregroundStyle(isDebtPayment ? palette.secondaryLabel : (colorScheme == .light ? .white : baseColor))
+                            .clipShape(Capsule())
+
+                        Text(income.date.formatted(.dateTime.day().month().hour().minute()))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+                    }
                 }
+
+                Spacer()
+
+                Text(Money.format(income.amount, currency: income.currency))
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundStyle(income.isDebtPayment ? palette.label : accent.incomeColor(colorScheme))
             }
-            
-            Spacer()
-            
-            let isDebtPayment = income.isDebtPayment
-            Text(Money.format(income.amount, currency: income.currency))
-                .font(.title3)
-                .fontWeight(.bold)
-                .foregroundStyle(isDebtPayment ? Color.orange : accent.incomeColor)
+
+            debtPaymentBand(for: income)
         }
         .surfaceCard(radius: 16)
         .padding(.horizontal)
         .contentShape(Rectangle())
         .onTapGesture { selectedIncomeForDetails = income }
+    }
+
+    /// Banda ámbar bajo el cobro: a qué deuda abona y si la saldó.
+    @ViewBuilder
+    private func debtPaymentBand(for income: Income) -> some View {
+        if let debt = income.debtReference {
+            let isFinal = income.isFinalDebtPayment == true
+            HStack(spacing: 8) {
+                Text("Abono a deuda")
+                    .font(.caption2.weight(.semibold))
+                    .tracking(0.4)
+                    .textCase(.uppercase)
+                    .foregroundStyle(palette.warning)
+                Spacer()
+                Text(Accounting.displayName(debt.merchant) + (isFinal ? " · saldada" : " · abono parcial"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(isFinal ? palette.positive : palette.warning)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(palette.warning.opacity(colorScheme == .dark ? 0.16 : 0.10))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        }
     }
     
     // MARK: - Helpers
