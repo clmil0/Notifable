@@ -11,6 +11,11 @@ struct Rhythm {
     let period: Period
     let current: PeriodTotals
     let previous: PeriodTotals
+    /// Sólo para Día: el mes que lo contiene, día por día. Un periodo de un
+    /// solo día no trae con qué dibujar "los dos días anteriores" ni con qué
+    /// comparar "tu miércoles típico" — hace falta ver más allá de `current`.
+    /// Vacío para el resto de granularidades, que no lo necesitan.
+    var monthDailySpent: [PeriodTotals.DayTotal] = []
 
     // MARK: - Promedios
 
@@ -118,6 +123,9 @@ struct Rhythm {
         let total: Double
         let label: String
         let containsToday: Bool
+        /// Todavía no llega: se dibuja con altura mínima (su total ya es 0,
+        /// así que la barra sale mínima sola) y la etiqueta del eje, apagada.
+        var isFuture: Bool = false
         var id: Date { date }
     }
 
@@ -153,31 +161,87 @@ struct Rhythm {
         }
     }
 
-    /// Las barras a dibujar, ya agrupadas y recortadas a lo transcurrido.
+    /// Las barras a dibujar, ya agrupadas.
+    ///
+    /// Mes y Semana dibujan el periodo **completo**, no sólo lo transcurrido:
+    /// los días que aún no llegan entran igual, con total 0 — lo que ya basta
+    /// para que salgan con altura mínima solas — para que se vea la forma
+    /// completa del periodo, no un gráfico que se va agrandando según avanza
+    /// el mes. Día es un caso aparte: su propio periodo es un solo día, así
+    /// que no hay con qué construir "los dos días anteriores" desde `current`
+    /// — sale de `monthDailySpent`, ver `dayViewBuckets`.
     var chartBuckets: [Bucket] {
+        guard period.granularity != .dia else { return dayViewBuckets }
+
         let cal = Period.calendar
-        let days = elapsedDays
+        let today = cal.startOfDay(for: Date())
 
         switch grouping {
         case .day:
-            return days.map {
+            // Mes y Semana: el periodo completo, no sólo lo transcurrido.
+            return current.dailySpent.map {
                 Bucket(date: $0.date,
                        total: $0.total,
                        label: "\(cal.component(.day, from: $0.date))",
-                       containsToday: cal.isDateInToday($0.date))
+                       containsToday: cal.isDateInToday($0.date),
+                       isFuture: cal.startOfDay(for: $0.date) > today)
             }
         case .week:
-            return group(days, by: .weekOfYear) { start in
+            // Año agrupado en semanas/meses: sigue recortado a lo
+            // transcurrido, sin cambios — esta vista no es parte de 2a/2b/2c.
+            return group(elapsedDays, by: .weekOfYear) { start in
                 "\(cal.component(.day, from: start))"
             }
         case .month:
-            return group(days, by: .month) { start in
+            return group(elapsedDays, by: .month) { start in
                 let f = DateFormatter()
                 f.locale = Locale(identifier: "es_PE")
                 f.dateFormat = "MMM"
                 return f.string(from: start).capitalizedFirst
             }
         }
+    }
+
+    /// Sólo Día: el día navegado y los dos anteriores, de `monthDailySpent`.
+    /// Con menos de dos días previos disponibles (los primeros días del
+    /// mes), muestra los que haya en vez de rellenar con algo inventado.
+    ///
+    /// `containsToday` marca el día **real** de hoy, no el navegado: al
+    /// retroceder a "Ayer" la barra de la derecha es ayer, y no debe decir
+    /// "hoy" ni pintarse con el acento de hoy — eso confundiría qué día es
+    /// cuál.
+    var dayViewBuckets: [Bucket] {
+        let cal = Period.calendar
+        let anchor = cal.startOfDay(for: period.reference)
+        let upToAnchor = monthDailySpent.filter { cal.startOfDay(for: $0.date) <= anchor }
+        return upToAnchor.suffix(3).map {
+            Bucket(date: $0.date,
+                   total: $0.total,
+                   label: "\(cal.component(.day, from: $0.date))",
+                   containsToday: cal.isDateInToday($0.date))
+        }
+    }
+
+    /// Sólo Día: el promedio de este mismo día de la semana, en lo que va del
+    /// mes, sin contar hoy. `nil` si todavía no se repitió este día de semana
+    /// —el primer lunes del mes, por ejemplo—, en vez de mostrar un promedio
+    /// de una sola muestra que no promedia nada.
+    var sameWeekdayAverage: Double? {
+        let cal = Period.calendar
+        let today = cal.startOfDay(for: period.reference)
+        let weekday = cal.component(.weekday, from: today)
+        let matches = monthDailySpent.filter {
+            cal.component(.weekday, from: $0.date) == weekday && cal.startOfDay(for: $0.date) < today
+        }
+        guard !matches.isEmpty else { return nil }
+        return Money.divide(Money.sum(matches) { $0.total }, by: matches.count)
+    }
+
+    /// Positivo = hoy gastaste más que tu promedio de este día de semana.
+    var sameWeekdayPercentDelta: Double? {
+        guard let average = sameWeekdayAverage,
+              let ratio = Money.ratio(current.spent, to: average) else { return nil }
+        return (ratio - 1) * 100
     }
 
     /// Suma en céntimos por grupo, para no perder ni inventar nada al agrupar:
@@ -206,9 +270,13 @@ struct Rhythm {
     }
 
     /// Media por barra, para la línea horizontal. Con el gráfico agrupado tiene
-    /// que ser la media del grupo, no la del día, o la línea queda al ras del suelo.
+    /// que ser la media del grupo, no la del día, o la línea queda al ras del
+    /// suelo. Sólo cuenta las barras ya transcurridas: Mes y Semana ahora
+    /// dibujan el periodo completo, y los días que faltan no pueden diluir el
+    /// promedio de los que sí pasaron.
     var averagePerBucket: Double {
-        Money.divide(current.spent, by: max(1, chartBuckets.count))
+        let elapsedCount = chartBuckets.filter { !$0.isFuture }.count
+        return Money.divide(current.spent, by: max(1, elapsedCount))
     }
 
     /// Día de la semana con mayor gasto medio.
