@@ -18,6 +18,10 @@ struct RecurringManagementView: View {
     @State private var editingQuick: QuickExpense?
     @State private var showQuickEditor = false
     @State private var ruleToDelete: RecurringExpense?
+    /// La regla que se tocó: el atajo ya abre su editor con "Eliminar atajo"
+    /// dentro, tocar aquí abre lo mismo pero en un menú — no hay una pantalla
+    /// de edición de reglas todavía.
+    @State private var ruleToManage: RecurringExpense?
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
@@ -44,6 +48,22 @@ struct RecurringManagementView: View {
         .sheet(isPresented: $showQuickEditor) {
             QuickExpenseEditor(quick: editingQuick)
         }
+        // Tocar la fila abre este menú — el mismo lugar donde ya se toca para
+        // hacer cualquier otra cosa con ella, en vez de exigir saber de
+        // antemano que existe un swipe.
+        .confirmationDialog(manageTitle, isPresented: manageDialogBinding, titleVisibility: .visible) {
+            if let rule = ruleToManage {
+                Button(rule.isPaused ? "Reanudar" : "Pausar") {
+                    togglePause(rule)
+                    ruleToManage = nil
+                }
+                Button("Eliminar", role: .destructive) {
+                    ruleToDelete = rule
+                    ruleToManage = nil
+                }
+            }
+            Button("Cancelar", role: .cancel) { ruleToManage = nil }
+        }
         .confirmationDialog("¿Eliminar esta programación?",
                             isPresented: deleteDialogBinding,
                             titleVisibility: .visible) {
@@ -60,6 +80,14 @@ struct RecurringManagementView: View {
 
     private var deleteDialogBinding: Binding<Bool> {
         Binding(get: { ruleToDelete != nil }, set: { if !$0 { ruleToDelete = nil } })
+    }
+
+    private var manageDialogBinding: Binding<Bool> {
+        Binding(get: { ruleToManage != nil }, set: { if !$0 { ruleToManage = nil } })
+    }
+
+    private var manageTitle: String {
+        ruleToManage.map { Accounting.displayName($0.merchant) } ?? ""
     }
 
     // MARK: - Compromiso mensual
@@ -152,17 +180,20 @@ struct RecurringManagementView: View {
                     .foregroundStyle(palette.secondaryLabel)
             } else {
                 ForEach(sortedRules) { rule in
-                    ruleRow(rule)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button(role: .destructive) { ruleToDelete = rule } label: {
-                                Label("Eliminar", systemImage: "trash")
-                            }
-                            Button { togglePause(rule) } label: {
-                                Label(rule.isPaused ? "Reanudar" : "Pausar",
-                                      systemImage: rule.isPaused ? "play.fill" : "pause.fill")
-                            }
-                            .tint(.orange)
+                    Button { ruleToManage = rule } label: {
+                        ruleRow(rule)
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) { ruleToDelete = rule } label: {
+                            Label("Eliminar", systemImage: "trash")
                         }
+                        Button { togglePause(rule) } label: {
+                            Label(rule.isPaused ? "Reanudar" : "Pausar",
+                                  systemImage: rule.isPaused ? "play.fill" : "pause.fill")
+                        }
+                        .tint(.orange)
+                    }
                 }
             }
         }
@@ -190,6 +221,7 @@ struct RecurringManagementView: View {
                 .foregroundStyle(palette.label)
         }
         .opacity(rule.isPaused ? 0.5 : 1)
+        .contentShape(Rectangle())
     }
 
     private func ruleIcon(_ rule: RecurringExpense) -> some View {
