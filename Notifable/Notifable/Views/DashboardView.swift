@@ -361,11 +361,12 @@ private struct DashboardContent: View {
             // quedó fuera de esa ventana.
             let history = (try? modelContext.fetch(FetchDescriptor<Expense>())) ?? expenses
             AssignCategorySheet(context: .expense(expense), history: history) { newCategory, createRule in
+                expense.category = newCategory
+                ExpenseEditStore.record(expense, category: newCategory)
+                // Sólo hacia adelante: desde una fila suelta no se toca el
+                // historial del comercio.
                 if createRule {
-                    MerchantRules.apply(newCategory, to: expense.merchant, in: history)
-                } else {
-                    expense.category = newCategory
-                    ExpenseEditStore.record(expense, category: newCategory)
+                    MerchantRules.set(newCategory, for: expense.merchant)
                 }
                 try? modelContext.save()
             }

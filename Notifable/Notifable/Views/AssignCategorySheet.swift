@@ -20,6 +20,19 @@ struct AssignCategoryContext: Equatable, Identifiable {
     var currency: String = "PEN"
     /// Categoría actual, para preseleccionarla.
     var current: String?
+    /// Qué ofrece el interruptor del pie. Ver `RuleScope`.
+    var ruleScope: RuleScope = .forward
+
+    /// Desde un movimiento suelto (Actividad reciente, detalle, alta) el
+    /// interruptor sólo decide lo que llegue: tocar el historial desde una fila
+    /// suelta sería una sorpresa. Desde Pendientes el usuario ya está
+    /// ordenando el comercio entero, así que ahí se ofrece arrastrar el pasado.
+    enum RuleScope: Equatable {
+        /// "No volver a preguntar": regla para lo que llegue, apagado por defecto.
+        case forward
+        /// "Asignar también los anteriores": encendido por defecto.
+        case past
+    }
 
     static func expense(_ expense: Expense) -> AssignCategoryContext {
         AssignCategoryContext(
@@ -39,7 +52,8 @@ struct AssignCategoryContext: Equatable, Identifiable {
             merchant: merchant,
             title: Accounting.displayName(merchant),
             subtitle: count + " · " + Money.format(total),
-            amount: nil
+            amount: nil,
+            ruleScope: .past
         )
     }
 
@@ -79,7 +93,10 @@ struct AssignCategorySheet: View {
 
     let context: AssignCategoryContext
     let history: [Expense]
-    /// Se llama con la categoría elegida y si hay que crear la regla del comercio.
+    /// Se llama con la categoría elegida y el estado del interruptor, cuyo
+    /// significado depende de `context.ruleScope`: en `.forward`, crear la
+    /// regla sólo para lo que llegue; en `.past`, reclasificar también el
+    /// historial del comercio.
     var onAssign: (String, Bool) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -184,9 +201,10 @@ struct AssignCategorySheet: View {
 
     private func prepare() {
         selected = context.current
-        // Encendido por defecto sólo si hay patrón: con un único movimiento no
-        // hay nada que generalizar.
-        ruleEnabled = context.merchant != nil && pastCount >= 2
+        switch context.ruleScope {
+        case .forward: ruleEnabled = false
+        case .past: ruleEnabled = context.merchant != nil
+        }
     }
 
     // MARK: - Cabecera
@@ -390,7 +408,7 @@ struct AssignCategorySheet: View {
 
     private var footer: some View {
         VStack(spacing: 11) {
-            if context.merchant != nil, pastCount > 0 {
+            if showsRuleToggle {
                 ruleToggle
             }
             primaryButton
@@ -406,10 +424,21 @@ struct AssignCategorySheet: View {
         }
     }
 
+    /// Sin comercio no hay regla. En `.forward` basta el comercio —la regla
+    /// vale aunque sea el primer movimiento—; en `.past` además tiene que
+    /// haber historial que arrastrar.
+    private var showsRuleToggle: Bool {
+        guard context.merchant != nil else { return false }
+        switch context.ruleScope {
+        case .forward: return true
+        case .past: return pastCount > 0
+        }
+    }
+
     private var ruleToggle: some View {
         Toggle(isOn: $ruleEnabled) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("No volver a preguntar por " + context.title)
+                Text(ruleTitle)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(palette.label)
                 Text(ruleDetail)
@@ -420,10 +449,22 @@ struct AssignCategorySheet: View {
         .tint(palette.positive)
     }
 
+    private var ruleTitle: String {
+        switch context.ruleScope {
+        case .forward: return "No volver a preguntar por " + context.title
+        case .past: return "Asignar también los anteriores"
+        }
+    }
+
     private var ruleDetail: String {
-        pastCount == 1
-            ? "Crea una regla y reclasifica el anterior"
-            : "Crea una regla y reclasifica los \(pastCount) anteriores"
+        switch context.ruleScope {
+        case .forward:
+            return "Los próximos movimientos irán a esta categoría"
+        case .past:
+            return pastCount == 1
+                ? "Reclasifica el movimiento de " + context.title
+                : "Reclasifica los \(pastCount) movimientos de " + context.title
+        }
     }
 
     private var primaryButton: some View {

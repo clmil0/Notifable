@@ -84,17 +84,15 @@ struct ExpenseDetailsView: View {
                 // `6a`: el mismo componente que la Bandeja y el modal de alta.
                 AssignCategorySheet(context: .expense(expense),
                                     history: allExpenses) { newCategory, createRule in
+                    expense.category = newCategory
+                    // Se anota aunque haya regla: la regla sólo mira hacia
+                    // adelante, y sin la anotación la próxima relectura del
+                    // correo devolvería este gasto a su categoría original.
+                    ExpenseEditStore.record(expense, category: newCategory)
                     if createRule {
-                        // La regla vale para el pasado y para lo que llegue: si
-                        // no, el siguiente correo del mismo comercio volvería a
-                        // caer sin clasificar.
-                        MerchantRules.apply(newCategory, to: expense.merchant, in: allExpenses)
-                    } else {
-                        expense.category = newCategory
-                        // Sin regla detrás, esto sólo vive aquí: si no se anota,
-                        // la próxima relectura del correo lo devuelve a su
-                        // categoría original y el cambio se pierde.
-                        ExpenseEditStore.record(expense, category: newCategory)
+                        // Sólo para lo que llegue: el historial del comercio
+                        // se reclasifica desde Pendientes, no desde aquí.
+                        MerchantRules.set(newCategory, for: expense.merchant)
                     }
                     try? modelContext.save()
                 }
