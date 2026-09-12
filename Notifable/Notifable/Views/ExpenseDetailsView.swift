@@ -58,6 +58,7 @@ struct ExpenseDetailsView: View {
 
                     if expense.isDebt || !(expense.payments ?? []).isEmpty {
                         paymentsSection
+                            .transition(.opacity)
                     }
 
                     merchantHistory
@@ -65,6 +66,11 @@ struct ExpenseDetailsView: View {
                     Spacer(minLength: 24)
                 }
                 .padding(.top, 24)
+                // Atada a `value`, no sólo al `withAnimation` del botón: así el
+                // alto de la sección se anima siempre que el estado cambie,
+                // sin depender de qué transacción disparó el cambio.
+                .animation(.spring(response: 0.4, dampingFraction: 0.86),
+                          value: expense.isDebt || !(expense.payments ?? []).isEmpty)
             }
             .background(palette.background)
             .navigationTitle("Movimiento")
@@ -526,14 +532,8 @@ struct ExpenseDetailsView: View {
     /// ingreso (`IncomeDestinoSheet`) y deja de sumar al total "por cobrar"
     /// del mes, porque ya no se está esperando que se salde solo.
     private func toggleDebt() {
-        withAnimation {
-            expense.isDebt.toggle()
-            ExpenseEditStore.record(expense, isDebt: expense.isDebt)
-            try? modelContext.save()
-
-            let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.isDebt == true })
-            let hasDebts = ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
-            NotificationManager.shared.updateDebtNotification(hasDebts: hasDebts)
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            expense.toggleDebt(in: modelContext)
         }
     }
 

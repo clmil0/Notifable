@@ -119,6 +119,9 @@ private struct DashboardContent: View {
     @State private var showBudgetSheet = false
     @State private var showPendingSheet = false
     @State private var selectedIncomeForDetails: Income?
+    /// Menú contextual (mantener presionado) de una fila de Actividad Reciente.
+    @State private var expenseForCategoryPicker: Expense? = nil
+    @State private var expenseForEditor: Expense? = nil
     /// La tira de ingresos filtra la actividad reciente a sólo ingresos.
     @State private var showsIncomesOnly = false
 
@@ -351,6 +354,28 @@ private struct DashboardContent: View {
         .sheet(item: $selectedIncomeForDetails) { income in
             IncomeDetailsView(income: income)
         }
+        .sheet(item: $expenseForCategoryPicker) { expense in
+            // Mismo componente que `ExpenseDetailsView`, pero con el historial
+            // completo recién pedido: `expenses` aquí es sólo el periodo
+            // visible, y una regla de comercio debe alcanzar también a lo que
+            // quedó fuera de esa ventana.
+            let history = (try? modelContext.fetch(FetchDescriptor<Expense>())) ?? expenses
+            AssignCategorySheet(context: .expense(expense), history: history) { newCategory, createRule in
+                if createRule {
+                    MerchantRules.apply(newCategory, to: expense.merchant, in: history)
+                } else {
+                    expense.category = newCategory
+                    ExpenseEditStore.record(expense, category: newCategory)
+                }
+                try? modelContext.save()
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationCornerRadius(28)
+        }
+        .sheet(item: $expenseForEditor) { expense in
+            EditExpenseSheet(expense: expense)
+        }
         .sheet(isPresented: $showBudgetSheet) {
             BudgetSheet()
         }
@@ -539,6 +564,10 @@ private struct DashboardContent: View {
         }
     }
     
+    /// Lo que tarda el menú contextual del sistema en cerrarse y devolver la
+    /// tarjeta a su sitio. No hay API que lo notifique, así que se espera.
+    private var contextMenuDismissDuration: TimeInterval { 0.45 }
+
     /// Una fila de movimiento. Partida en piezas: los ternarios de color dentro
     /// de `.fill()` y `.background()` obligan al comprobador de tipos a probar
     /// todas las sobrecargas de ShapeStyle, y en una expresión larga se rinde.
@@ -546,22 +575,87 @@ private struct DashboardContent: View {
     /// La fila nunca cambia de color por tratarse de una deuda: toda esa
     /// información vive en `debtBand`, aparte, debajo del movimiento.
     private func expenseCard(for expense: Expense) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 16) {
-                expenseIcon(for: expense)
-                expenseInfo(for: expense)
+        // `spacing: 0`: la separación con la banda vive dentro de
+        // `DebtBandSlot`, para que también crezca desde cero al abrirse.
+        VStack(alignment: .leading, spacing: 0) {
+            expenseRow(for: expense)
+                .contentShape(Rectangle())
+                .onTapGesture { selectedExpenseForDetails = expense }
+                // El menú envuelve **la fila, no la tarjeta entera**: el
+                // contenedor que monta `contextMenu` anima su tamaño pero no
+                // su posición, así que envolviendo a la tarjeta, al crecer la
+                // banda el icono, el nombre, la categoría, la fecha y el
+                // monto se desplazaban hacia arriba media altura (unos 15 pt)
+                // durante la animación y volvían de golpe al terminar.
+                // Envolviendo sólo la fila, que nunca cambia de alto, no hay
+                // nada que desplazar. La vista previa se pasa a mano para que
+                // el movimiento se siga levantando con su forma de tarjeta.
+                .contextMenu {
+                    Button {
+                        // El menú se cierra con su propia animación y con la
+                        // fila levantada en un overlay aparte: mutar aquí
+                        // hace crecer la fila real por debajo de ese overlay,
+                        // y lo que se ve al aterrizar es un salto ya
+                        // consumado. Esperamos a que el cierre termine y sólo
+                        // entonces se anima el alto.
+                        let expense = expense
+                        let context = modelContext
+                        DispatchQueue.main.asyncAfter(deadline: .now() + contextMenuDismissDuration) {
+                            expense.toggleDebt(in: context)
+                        }
+                    } label: {
+                        Label("Por Cobrar", systemImage: "exclamationmark.circle")
+                    }
 
-                Spacer()
+                    Button {
+                        expenseForCategoryPicker = expense
+                    } label: {
+                        Label("Categorizar", systemImage: "tag")
+                    }
 
-                expenseAmount(for: expense)
-            }
+                    Button {
+                        expenseForEditor = expense
+                    } label: {
+                        Label("Editar", systemImage: "pencil")
+                    }
+                } preview: {
+                    expenseRow(for: expense)
+                        .surfaceCard(radius: 16)
+                        .frame(width: cardPreviewWidth)
+                }
 
-            debtBand(for: expense)
+            // El toque para abrir el detalle va en cada pieza y no en la
+            // tarjeta entera: puesto fuera, se comía la pulsación larga de la
+            // fila y el menú dejaba de abrirse.
+            DebtBandSlot(info: debtBandInfo(for: expense))
+                .contentShape(Rectangle())
+                .onTapGesture { selectedExpenseForDetails = expense }
         }
         .surfaceCard(radius: 16)
         .padding(.horizontal)
-        .contentShape(Rectangle())
-        .onTapGesture { selectedExpenseForDetails = expense }
+    }
+
+    /// El movimiento en sí —icono, nombre, categoría, fecha y monto—, sin la
+    /// banda de deuda. De alto fijo, y por eso es lo que se le da al menú
+    /// contextual y a su vista previa.
+    private func expenseRow(for expense: Expense) -> some View {
+        HStack(spacing: 16) {
+            expenseIcon(for: expense)
+            expenseInfo(for: expense)
+
+            Spacer()
+
+            expenseAmount(for: expense)
+        }
+    }
+
+    /// Ancho de la tarjeta en la lista: la pantalla menos el margen que le
+    /// pone `.padding(.horizontal)` a cada lado. La vista previa no hereda el
+    /// ancho de la lista, hay que dárselo.
+    private var cardPreviewWidth: CGFloat {
+        (UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.keyWindow?.bounds.width }
+            .first ?? UIScreen.main.bounds.width) - 32
     }
 
     @ViewBuilder
@@ -597,45 +691,21 @@ private struct DashboardContent: View {
     /// devuelvan". Si sólo abonaron una parte y de ahí se declaró saldada, el
     /// resto sigue apareciendo — es lo que de verdad nunca volvió — sólo que
     /// en verde, porque ya no está pendiente de nadie.
-    @ViewBuilder
-    private func debtBand(for expense: Expense) -> some View {
+    private func debtBandInfo(for expense: Expense) -> DebtBandInfo? {
         let paid = Accounting.paid(of: expense)
-        if expense.isDebt || Money.cents(paid) > 0 {
-            let outstanding = Accounting.outstanding(of: expense)
-            let isOpen = expense.isDebt
-            let hasPartialPayment = isOpen && Money.cents(paid) > 0 && Money.cents(outstanding) > 0
-            let tint = isOpen ? palette.warning : palette.positive
+        guard expense.isDebt || Money.cents(paid) > 0 else { return nil }
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
-                    Text("Por cobrar")
-                        .font(.caption2.weight(.semibold))
-                        .tracking(0.4)
-                        .textCase(.uppercase)
-                        .foregroundStyle(tint)
-                    Spacer()
-                    Text(debtBandValue(isOpen: isOpen, hasPartialPayment: hasPartialPayment,
-                                       outstanding: outstanding, total: expense.amount, currency: expense.currency))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(tint)
-                }
+        let outstanding = Accounting.outstanding(of: expense)
+        let isOpen = expense.isDebt
+        let hasPartialPayment = isOpen && Money.cents(paid) > 0 && Money.cents(outstanding) > 0
 
-                if hasPartialPayment {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(palette.warning.opacity(0.18))
-                            Capsule().fill(palette.warning)
-                                .frame(width: geo.size.width * CGFloat(min(1, Money.ratio(paid, to: expense.amount) ?? 0)))
-                        }
-                    }
-                    .frame(height: 4)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, hasPartialPayment ? 8 : 7)
-            .background(tint.opacity(colorScheme == .dark ? 0.16 : 0.10))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        }
+        return DebtBandInfo(isOpen: isOpen,
+                            valueText: debtBandValue(isOpen: isOpen,
+                                                     hasPartialPayment: hasPartialPayment,
+                                                     outstanding: outstanding,
+                                                     total: expense.amount,
+                                                     currency: expense.currency),
+                            progress: hasPartialPayment ? (Money.ratio(paid, to: expense.amount) ?? 0) : nil)
     }
 
     private func debtBandValue(isOpen: Bool, hasPartialPayment: Bool,

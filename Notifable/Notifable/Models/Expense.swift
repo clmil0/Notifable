@@ -63,3 +63,24 @@ final class Expense {
             : (fxRateAtCapture ?? ExchangeRateService.storedRate)
     }
 }
+
+extension Expense {
+    /// Alterna "por cobrar". Un solo sitio para la lógica que usan el botón
+    /// del detalle (`ExpenseDetailsView`) y el menú contextual de Actividad
+    /// Reciente: declararla saldada con un saldo pendiente no lo pone en
+    /// cero (ver `debtBand`), lo único que cambia aquí es `isDebt`.
+    func toggleDebt(in modelContext: ModelContext) {
+        isDebt.toggle()
+        ExpenseEditStore.record(self, isDebt: isDebt)
+        try? modelContext.save()
+
+        // Fuera del fotograma en el que la fila empieza a crecer: contar las
+        // deudas y reprogramar el aviso es trabajo síncrono que, hecho aquí
+        // mismo, se come el primer paso de la animación de alto.
+        DispatchQueue.main.async {
+            let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.isDebt == true })
+            let hasDebts = ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
+            NotificationManager.shared.updateDebtNotification(hasDebts: hasDebts)
+        }
+    }
+}
