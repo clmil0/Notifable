@@ -14,7 +14,10 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
 
-    @Query private var expenses: [Expense]
+    /// Conteos de la raíz, pedidos a la base con `fetchCount` y no con un
+    /// `@Query` del historial entero: esa consulta se volvía a recorrer en cada
+    /// redibujado —p. ej. al cambiar de tema en Apariencia— sólo para contar.
+    @State private var counts = SettingsCounts()
     @Query private var recurringRules: [RecurringExpense]
     @Query private var quickExpenses: [QuickExpense]
 
@@ -75,6 +78,7 @@ struct SettingsView: View {
                 .padding(.vertical, 16)
             }
             .background(palette.background)
+            .onAppear(perform: refreshCounts)
             .searchable(text: $query, prompt: "Buscar en configuración")
             .navigationTitle("Configuración")
             .navigationBarTitleDisplayMode(.inline)
@@ -119,19 +123,18 @@ struct SettingsView: View {
             lastSync: gmailSync.lastSyncDate,
             activeBankCount: BankSource.activeCount,
             totalBankCount: BankSource.all.count,
-            expensesThisMonth: expensesThisMonth,
+            expensesThisMonth: counts.thisMonth,
             unclassifiedMerchants: unclassifiedMerchantCount,
             pendingRecurring: 0
         )
     }
 
-    private var expensesThisMonth: Int {
-        let period = Period(granularity: .mes, reference: Date())
-        return period.filter(expenses, by: \.date).count
-    }
+    private var unclassifiedMerchantCount: Int { counts.unclassifiedMerchants }
 
-    private var unclassifiedMerchantCount: Int {
-        Set(expenses.filter { $0.category == Accounting.unclassified }.map(\.merchant)).count
+    /// Se refresca al abrir la raíz y al volver a ella desde una pantalla
+    /// interior, que es donde se pueden borrar o importar datos.
+    private func refreshCounts() {
+        counts = SettingsCounts(context: modelContext)
     }
 
     /// La tarjeta entera lleva a Gmail y bancos, pero sólo cuando hay cuenta:
@@ -211,7 +214,7 @@ struct SettingsView: View {
             }
             SettingsSeparator()
             SettingsRow(title: "Datos y respaldo", icon: "externaldrive.fill",
-                        tint: .gray, value: "\(expenses.count) gastos") {
+                        tint: .gray, value: "\(counts.total) gastos") {
                 DataBackupView()
             }
         }
@@ -407,4 +410,28 @@ struct CategoryRulesScreen: View {
     SettingsView()
         .modelContainer(for: [Expense.self, Income.self, RecurringExpense.self, QuickExpense.self],
                         inMemory: true)
+}
+
+/// Los tres números de la raíz de Configuración, contados en la base.
+private struct SettingsCounts {
+    var total = 0
+    var thisMonth = 0
+    var unclassifiedMerchants = 0
+
+    init() {}
+
+    init(context: ModelContext) {
+        total = (try? context.fetchCount(FetchDescriptor<Expense>())) ?? 0
+
+        let month = Period(granularity: .mes, reference: Date()).interval
+        let start = month.start, end = month.end
+        thisMonth = (try? context.fetchCount(FetchDescriptor<Expense>(
+            predicate: #Predicate { $0.date >= start && $0.date < end }))) ?? 0
+
+        let unclassified = Accounting.unclassified
+        var pending = FetchDescriptor<Expense>(predicate: #Predicate { $0.category == unclassified })
+        pending.propertiesToFetch = [\.merchant]
+        let merchants = ((try? context.fetch(pending)) ?? []).map(\.merchant)
+        unclassifiedMerchants = Set(merchants).count
+    }
 }

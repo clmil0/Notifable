@@ -69,6 +69,9 @@ struct IncomeDetailsView: View {
         .appAppearance()
         .appTextSize()
         .presentationCornerRadius(32)
+        // Ver `ExpenseDetailsView`: sin esto, en oscuro la mitad inferior
+        // enseñaba el gris de la hoja del sistema.
+        .presentationBackground(palette.background)
     }
 
     // MARK: - Cabecera
@@ -377,6 +380,13 @@ struct IncomeDestinoSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    if let debt = income.debtReference {
+                        VStack(alignment: .leading, spacing: 8) {
+                            sectionHeader("DEUDA ASIGNADA")
+                            linkedDebtRow(debt)
+                        }
+                    }
+
                     Text("Un ingreso normal cuenta en tu balance. Un cobro no: sólo reduce lo que te deben.")
                         .font(.footnote)
                         .foregroundStyle(palette.secondaryLabel)
@@ -431,6 +441,7 @@ struct IncomeDestinoSheet: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .presentationBackground(palette.background)
     }
 
     private func sectionHeader(_ title: String) -> some View {
@@ -438,6 +449,51 @@ struct IncomeDestinoSheet: View {
             .font(.caption.weight(.semibold))
             .tracking(0.3)
             .foregroundStyle(palette.secondaryLabel)
+    }
+
+    /// Lleva a la deuda en Actividad Reciente: Resumen cierra estas hojas,
+    /// cambia al día del movimiento si hace falta y lo resalta.
+    private func linkedDebtRow(_ debt: Expense) -> some View {
+        let color = CategoryStyle.color(for: debt.category, accent: accent.color)
+        return Button {
+            ActivityFocus.request(transactionID: debt.id, date: debt.date)
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(color.opacity(0.2))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: CategoryStyle.icon(for: debt.category))
+                        .foregroundStyle(color)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Accounting.displayName(debt.merchant))
+                        .font(.headline)
+                        .foregroundStyle(palette.label)
+                        .lineLimit(1)
+                    Text(Money.format(debt.amount, currency: debt.currency) + " · "
+                         + debt.date.formatted(.dateTime.day().month()) + " · Ver en Actividad reciente")
+                        .font(.footnote)
+                        .foregroundStyle(palette.secondaryLabel)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.right")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(accent.onSurface(colorScheme))
+            }
+            .padding(14)
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(palette.hairline, lineWidth: 0.5)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Ver \(Accounting.displayName(debt.merchant)) en Actividad reciente")
     }
 
     private var noneRow: some View {

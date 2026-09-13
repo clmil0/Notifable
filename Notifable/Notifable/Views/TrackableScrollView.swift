@@ -16,10 +16,14 @@ import SwiftUI
 struct TrackableScrollView<Content: View>: View {
     let content: () -> Content
     @Binding var scrollToTopTrigger: Bool
+    /// Fila a la que desplazarse, centrada. Se vuelve a `nil` al llegar.
+    @Binding var scrollTarget: UUID?
 
     init(scrollToTopTrigger: Binding<Bool> = .constant(false),
+         scrollTarget: Binding<UUID?> = .constant(nil),
          @ViewBuilder content: @escaping () -> Content) {
         self._scrollToTopTrigger = scrollToTopTrigger
+        self._scrollTarget = scrollTarget
         self.content = content
     }
 
@@ -35,6 +39,13 @@ struct TrackableScrollView<Content: View>: View {
                 withAnimation {
                     proxy.scrollTo("top", anchor: .top)
                 }
+            }
+            .onChange(of: scrollTarget) { _, target in
+                guard let target else { return }
+                withAnimation(.easeInOut(duration: 0.45)) {
+                    proxy.scrollTo(target, anchor: .center)
+                }
+                scrollTarget = nil
             }
         }
     }

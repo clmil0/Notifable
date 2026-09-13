@@ -132,6 +132,18 @@ private struct DashboardContent: View {
     /// historial largo se siente lento y no aporta nada hasta que el usuario
     /// llega ahí abajo.
     @State private var visibleTransactionCount = 50
+
+    // MARK: Enfocar un movimiento (`ActivityFocus`)
+
+    /// El movimiento que se pidió enfocar, mientras se espera a que se cierren
+    /// las hojas y llegue la consulta del periodo nuevo.
+    @State private var pendingFocusID: UUID?
+    @State private var scrollTarget: UUID?
+    /// Resaltado durante 2 s tras llegar.
+    @State private var highlightedTransactionID: UUID?
+    /// Espacio extra al final para que un movimiento del fondo de la lista
+    /// pueda quedar centrado, por encima de la barra flotante, y tocarse.
+    @State private var focusBottomSpace: CGFloat = 0
     @AppStorage(BudgetStore.tracksIncomeKey) private var tracksIncome = true
     @AppStorage("categoriesSegment") private var categoriesSegment = CategoryTab.misCategorias
     
@@ -226,7 +238,7 @@ private struct DashboardContent: View {
         let paged = Array(transactions.prefix(visibleTransactionCount))
 
         return ZStack {
-            TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
+            TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger, scrollTarget: $scrollTarget) {
                 VStack(spacing: 24) {
                     
                     // Contenedor principal para no tapar el top header
@@ -327,6 +339,7 @@ private struct DashboardContent: View {
                                 LazyVStack(spacing: 12) {
                                     ForEach(Array(paged.enumerated()), id: \.element.id) { index, item in
                                         transactionCard(for: item)
+                                            .id(item.id)
                                             .onAppear {
                                                 loadMoreIfNeeded(index: index,
                                                                  pageCount: paged.count,
@@ -341,6 +354,10 @@ private struct DashboardContent: View {
                                 Color.clear
                                     .frame(height: CGFloat(6 - transactions.count) * 85)
                             }
+
+                            if focusBottomSpace > 0 {
+                                Color.clear.frame(height: focusBottomSpace)
+                            }
                         }
                         .padding(.top, 10)
                     }
@@ -348,9 +365,30 @@ private struct DashboardContent: View {
                 }
             }
         }
-        .onChange(of: searchText) { _, _ in visibleTransactionCount = 50 }
-        .onChange(of: period) { _, _ in visibleTransactionCount = 50 }
-        .onChange(of: showsIncomesOnly) { _, _ in visibleTransactionCount = 50 }
+        .onChange(of: searchText) { _, _ in visibleTransactionCount = 50; focusBottomSpace = 0 }
+        .onChange(of: period) { _, _ in visibleTransactionCount = 50; focusBottomSpace = 0 }
+        .onChange(of: showsIncomesOnly) { _, _ in visibleTransactionCount = 50; focusBottomSpace = 0 }
+        .onReceive(NotificationCenter.default.publisher(for: ActivityFocus.notification)) { note in
+            guard let id = note.userInfo?["id"] as? UUID,
+                  let date = note.userInfo?["date"] as? Date else { return }
+            beginFocus(on: id, date: date)
+        }
+        // `task(id:)` y no un `asyncAfter`: la tarea arranca desde el dibujado
+        // que ya tiene la consulta del periodo nuevo, así que la lista que lee
+        // incluye el movimiento aunque se haya cambiado de filtro.
+        .task(id: pendingFocusID) {
+            guard let id = pendingFocusID else { return }
+            // Lo que tardan en cerrarse las hojas.
+            try? await Task.sleep(for: .milliseconds(550))
+            guard !Task.isCancelled else { return }
+            revealFocus(id)
+        }
+        .task(id: highlightedTransactionID) {
+            guard highlightedTransactionID != nil else { return }
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.35)) { highlightedTransactionID = nil }
+        }
         .sheet(item: $selectedExpenseForDetails) { expense in
             ExpenseDetailsView(expense: expense)
         }
@@ -388,6 +426,51 @@ private struct DashboardContent: View {
         }
     }
     
+    // MARK: - Enfocar un movimiento
+
+    /// Cierra las hojas, quita búsqueda y filtro de ingresos, y si el
+    /// movimiento cae fuera del periodo visible cambia al día en que ocurrió.
+    private func beginFocus(on id: UUID, date: Date) {
+        selectedIncomeForDetails = nil
+        selectedExpenseForDetails = nil
+        searchText = ""
+        showsIncomesOnly = false
+        if !period.contains(date) {
+            period = Period(granularity: .dia, reference: date)
+        }
+        pendingFocusID = id
+    }
+
+    private func revealFocus(_ id: UUID) {
+        let items = searchedTransactions
+        guard let index = items.firstIndex(where: { $0.id == id }) else {
+            pendingFocusID = nil
+            return
+        }
+        // La fila tiene que estar montada para poder desplazarse a ella.
+        if index >= visibleTransactionCount {
+            visibleTransactionCount = index + 20
+        }
+        focusBottomSpace = 260
+        DispatchQueue.main.async {
+            scrollTarget = id
+            withAnimation(.easeInOut(duration: 0.25)) { highlightedTransactionID = id }
+            pendingFocusID = nil
+        }
+    }
+
+    /// Velo del acento sobre la tarjeta enfocada — el mismo resaltado que usa
+    /// Pendientes al llegar a un comercio.
+    private func focusHighlight(_ id: UUID) -> some View {
+        RoundedRectangle(cornerRadius: 16, style: .continuous)
+            .fill(accent.color.opacity(highlightedTransactionID == id ? 0.18 : 0))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(accent.color.opacity(highlightedTransactionID == id ? 0.9 : 0), lineWidth: 1.5)
+            )
+            .allowsHitTesting(false)
+    }
+
     // MARK: - Subviews
 
     /// Ocurrencias vencidas de reglas recurrentes esperando confirmación.
@@ -634,6 +717,7 @@ private struct DashboardContent: View {
                 .onTapGesture { selectedExpenseForDetails = expense }
         }
         .surfaceCard(radius: 16)
+        .overlay(focusHighlight(expense.id))
         .padding(.horizontal)
     }
 
@@ -877,16 +961,21 @@ private struct DashboardContent: View {
             debtPaymentBand(for: income)
         }
         .surfaceCard(radius: 16)
+        .overlay(focusHighlight(income.id))
         .padding(.horizontal)
         .contentShape(Rectangle())
         .onTapGesture { selectedIncomeForDetails = income }
     }
 
-    /// Banda ámbar bajo el cobro: a qué deuda abona y si la saldó.
+    /// Banda ámbar bajo el cobro: a qué deuda abona y si ya está saldada.
+    ///
+    /// "Saldada" sale de la deuda, no sólo del abono: si se abonó una parte y
+    /// luego la deuda se dio por saldada a mano, este abono también se ve en
+    /// verde, igual que el que la canceló completa.
     @ViewBuilder
     private func debtPaymentBand(for income: Income) -> some View {
         if let debt = income.debtReference {
-            let isFinal = income.isFinalDebtPayment == true
+            let isFinal = income.isFinalDebtPayment == true || !debt.isDebt
             HStack(spacing: 8) {
                 Text("Abono a deuda")
                     .font(.caption2.weight(.semibold))

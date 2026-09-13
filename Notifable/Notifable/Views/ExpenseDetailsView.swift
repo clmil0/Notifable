@@ -114,6 +114,9 @@ struct ExpenseDetailsView: View {
         .appAppearance()
             .appTextSize()
         .presentationCornerRadius(32)
+        // El fondo de la hoja, no sólo el del `ScrollView`: en oscuro, donde
+        // el contenido no llegaba, se veía el gris de la hoja del sistema.
+        .presentationBackground(palette.background)
     }
 
     // MARK: - Cabecera

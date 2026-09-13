@@ -274,6 +274,7 @@ struct ContentView: View {
                     .font(.title2)
                     .foregroundStyle(systemScheme == .dark ? .yellow : .orange)
             }
+            .accessibilityLabel(systemScheme == .dark ? "Cambiar a modo claro" : "Cambiar a modo oscuro")
             .background(
                 GeometryReader { geo in
                     Color.clear
@@ -292,6 +293,7 @@ struct ContentView: View {
                     .font(.title2)
                     .foregroundStyle(.gray)
             }
+            .accessibilityLabel("Configuración")
         }
         .padding(.horizontal, 24)
         .padding(.top, 16)

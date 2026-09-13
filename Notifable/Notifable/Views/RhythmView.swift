@@ -64,31 +64,42 @@ private struct RhythmContent: View {
 
     // MARK: - Datos
 
-    private var totals: PeriodTotals {
-        Accounting.totals(expenses: expenses, incomes: incomes, period: period, usdToPen: rate)
+    /// Los movimientos de la ventana traducidos a la contabilidad pura, **una
+    /// sola vez por dibujado**.
+    ///
+    /// Antes `rhythm` era una propiedad computada y el cuerpo la leía unas
+    /// veinte veces: cada lectura rehacía dos o tres `Accounting.totals` sobre
+    /// los dos meses de la ventana, y cada uno volvía a construir el snapshot de
+    /// cada gasto —con su relación `payments`—. Era la demora al abrir Ritmo.
+    private struct Snapshots {
+        let expenses: [ExpenseSnapshot]
+        let incomes: [IncomeSnapshot]
     }
 
-    private var rhythm: Rhythm {
+    private func makeSnapshots() -> Snapshots {
+        Snapshots(expenses: expenses.map(\.accountingSnapshot),
+                  incomes: incomes.map(\.accountingSnapshot))
+    }
+
+    private func totals(_ data: Snapshots, for period: Period) -> PeriodTotals {
+        Accounting.totals(expenses: data.expenses, incomes: data.incomes, period: period, usdToPen: rate)
+    }
+
+    private func makeRhythm(_ data: Snapshots) -> Rhythm {
         Rhythm(period: period,
-               current: totals,
-               previous: Accounting.totals(expenses: expenses, incomes: incomes,
-                                           period: period.previous, usdToPen: rate),
-               monthDailySpent: monthDailySpent)
+               current: totals(data, for: period),
+               previous: totals(data, for: period.previous),
+               monthDailySpent: monthDailySpent(data))
     }
 
     /// Sólo se calcula para Día: es lo único que lo necesita, y evita el
     /// costo de armar `PeriodTotals` del mes entero en las demás vistas.
     /// `dataWindow(includingPrevious:)` ya carga ese mes para Día (lo
     /// necesita el scrubber), así que `expenses`/`incomes` ya lo traen.
-    private var monthDailySpent: [PeriodTotals.DayTotal] {
+    private func monthDailySpent(_ data: Snapshots) -> [PeriodTotals.DayTotal] {
         guard period.granularity == .dia else { return [] }
         let monthPeriod = Period(granularity: .mes, reference: period.reference)
-        return Accounting.totals(expenses: expenses, incomes: incomes,
-                                 period: monthPeriod, usdToPen: rate).dailySpent
-    }
-
-    private func dailySpent(for period: Period) -> [PeriodTotals.DayTotal] {
-        Accounting.totals(expenses: expenses, incomes: incomes, period: period, usdToPen: rate).dailySpent
+        return totals(data, for: monthPeriod).dailySpent
     }
 
     /// Suscripciones del periodo, una fila por comercio.
@@ -119,11 +130,16 @@ private struct RhythmContent: View {
     // MARK: - Cuerpo
 
     var body: some View {
-        TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
-            VStack(spacing: 16) {
-                PeriodHeader(period: $period, dailySpent: dailySpent(for:))
+        // Todo lo caro, una sola vez por dibujado (ver `Snapshots`).
+        let data = makeSnapshots()
+        let rhythm = makeRhythm(data)
+        let subscriptions = self.subscriptions
 
-                headline
+        return TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
+            VStack(spacing: 16) {
+                PeriodHeader(period: $period, dailySpent: { totals(data, for: $0).dailySpent })
+
+                headline(rhythm)
 
                 RhythmBarsChart(buckets: rhythm.chartBuckets,
                                 average: rhythm.averagePerBucket,
@@ -133,14 +149,14 @@ private struct RhythmContent: View {
                                 todayColor: accent.isDuotone ? accent.secondaryColor : accent.color.opacity(0.55),
                                 averageLineColor: accent.isDuotone ? accent.secondaryColor.opacity(0.7) : accent.color.opacity(0.55))
 
-                twoCards
+                twoCards(rhythm, data: data)
 
                 if !rhythm.categoryChanges.isEmpty {
-                    categoryChanges
+                    categoryChanges(rhythm)
                 }
 
                 if !subscriptions.isEmpty {
-                    subscriptionsCard
+                    subscriptionsCard(subscriptions)
                 }
 
                 Spacer(minLength: 100)
@@ -150,7 +166,7 @@ private struct RhythmContent: View {
 
     // MARK: - Titular
 
-    private var headline: some View {
+    private func headline(_ rhythm: Rhythm) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(rhythm.headline)
                 .font(.title2.bold())
@@ -180,19 +196,19 @@ private struct RhythmContent: View {
         period.granularity == .dia
     }
 
-    private var twoCards: some View {
+    private func twoCards(_ rhythm: Rhythm, data: Snapshots) -> some View {
         HStack(spacing: 12) {
-            firstCard
+            firstCard(rhythm)
             if usesMonthAccumulatedCard {
                 smallCard(title: "Acumulado del mes",
-                          value: Money.format(monthToDateTotal),
+                          value: Money.format(monthToDateTotal(data)),
                           detail: "desde el 1 de " + Period.spanishMonthName(for: period.reference, abbreviated: true).lowercased(),
                           icon: "chart.line.uptrend.xyaxis",
                           tint: palette.positive)
             } else {
                 smallCard(title: "Días sin gastar",
                           value: "\(rhythm.daysWithoutSpending) de \(max(1, rhythm.elapsedDays.count))",
-                          detail: comparisonDetail,
+                          detail: comparisonDetail(rhythm),
                           icon: "moon.zzz.fill",
                           tint: accent.incomeColor(colorScheme))
             }
@@ -201,7 +217,7 @@ private struct RhythmContent: View {
     }
 
     @ViewBuilder
-    private var firstCard: some View {
+    private func firstCard(_ rhythm: Rhythm) -> some View {
         if period.granularity == .dia, let average = rhythm.sameWeekdayAverage {
             let percent = rhythm.sameWeekdayPercentDelta ?? 0
             let isMore = percent > 0
@@ -232,13 +248,11 @@ private struct RhythmContent: View {
     /// Sólo se calcula para Mes/Semana/Día: es lo único que la usa. Sale del
     /// mes calendario que contiene el periodo visible, no del periodo en sí
     /// — por eso el mismo número se ve igual en Mes, Semana y Día.
-    private var monthToDateTotal: Double {
-        let monthPeriod = Period(granularity: .mes, reference: period.reference)
-        return Accounting.totals(expenses: expenses, incomes: incomes,
-                                 period: monthPeriod, usdToPen: rate).spent
+    private func monthToDateTotal(_ data: Snapshots) -> Double {
+        totals(data, for: Period(granularity: .mes, reference: period.reference)).spent
     }
 
-    private var comparisonDetail: String {
+    private func comparisonDetail(_ rhythm: Rhythm) -> String {
         let previous = rhythm.previousDaysWithoutSpending
         guard previous > 0 || rhythm.daysWithoutSpending > 0 else { return "Sin datos" }
         let diff = rhythm.daysWithoutSpending - previous
@@ -274,7 +288,7 @@ private struct RhythmContent: View {
 
     // MARK: - Qué cambió
 
-    private var categoryChanges: some View {
+    private func categoryChanges(_ rhythm: Rhythm) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Qué cambió vs. " + period.granularity.previousLabel)
                 .font(.headline)
@@ -294,7 +308,7 @@ private struct RhythmContent: View {
 
     // MARK: - Suscripciones
 
-    private var subscriptionsCard: some View {
+    private func subscriptionsCard(_ subscriptions: [DetectedSubscription]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Suscripciones detectadas")
                 .font(.headline)
