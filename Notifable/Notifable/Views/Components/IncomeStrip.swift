@@ -13,8 +13,11 @@ struct IncomeStrip: View {
 
     @Environment(\.colorScheme) private var scheme
     @AppStorage(BudgetStore.tracksIncomeKey) private var tracksIncome = true
+    @AppStorage(AppThemeColor.storageKey) private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
-    private var palette: Palette { Palette(scheme) }
+    private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .blue }
+    private var palette: Palette { Palette(scheme, accent: accent) }
 
     var body: some View {
         Group {
@@ -32,7 +35,7 @@ struct IncomeStrip: View {
             HStack(spacing: 0) {
                 column(title: "Ingresos",
                        value: Money.format(totals.income),
-                       tint: Money.isZero(totals.income) ? palette.secondaryLabel : palette.positive)
+                       tint: Money.isZero(totals.income) ? palette.secondaryLabel : accent.incomeColor(scheme))
 
                 Rectangle()
                     .fill(palette.separator)

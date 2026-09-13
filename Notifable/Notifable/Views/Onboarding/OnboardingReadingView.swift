@@ -17,6 +17,7 @@ struct OnboardingReadingView: View {
     @StateObject private var sync = GmailSyncService.shared
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .blue }
     private var palette: Palette { Palette(scheme) }

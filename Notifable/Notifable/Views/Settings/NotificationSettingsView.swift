@@ -7,6 +7,7 @@ struct NotificationSettingsView: View {
 
     @Query private var expenses: [Expense]
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     @AppStorage(NotificationSettings.budgetKey) private var notificationsEnabled = true
     @AppStorage(NotificationSettings.recurringKey) private var remindRecurring = true

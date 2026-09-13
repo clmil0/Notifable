@@ -15,6 +15,7 @@ struct IncomeDetailsView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     @Bindable var income: Income
 
@@ -352,6 +353,7 @@ struct IncomeDestinoSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     @Bindable var income: Income
 

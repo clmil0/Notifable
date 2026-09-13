@@ -23,6 +23,7 @@ struct OnboardingHistoryView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     /// La misma clave que usa Gmail y bancos: lo que elija aquí es lo que verá
     /// por defecto la próxima vez que lea correo.
     @AppStorage("readPeriodMonths") private var readPeriodMonths = 3

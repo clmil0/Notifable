@@ -34,6 +34,7 @@ struct ContentView: View {
     @State private var didResolveRecurring = false
     @State private var selectedTab: AppTab = .home
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     /// En `AppStorage` porque el banner de Resumen necesita dejarlo en
     /// Pendientes antes de navegar hasta Categorías (`onOpenInbox`); por eso
     /// sobrevive de por sí a cambiar de pestaña. Tocar el ícono de Categorías
@@ -316,19 +317,24 @@ struct ContentView: View {
                             }
                         }
                     } label: {
+                        // Pestaña activa en pastilla sólida del acento (`1c`):
+                        // el ícono va en blanco dentro, y el título debajo en
+                        // la variante legible del acento — blanco sobre el
+                        // vidrio claro no se leería.
                         VStack(spacing: 4) {
                             Image(systemName: tab.icon)
                                 .font(.system(size: 22, weight: selectedTab == tab ? .semibold : .regular))
+                                .foregroundStyle(selectedTab == tab ? Color.white : Color.gray)
                                 .frame(width: 52, height: 32)
                                 .background(
                                     Capsule()
-                                        .fill(selectedTab == tab ? themeColor.opacity(0.25) : Color.clear)
+                                        .fill(selectedTab == tab ? themeColor : Color.clear)
                                 )
                             
                             Text(tab.title)
                                 .font(.system(size: 11, weight: selectedTab == tab ? .bold : .regular))
+                                .foregroundStyle(selectedTab == tab ? accent.onSurface(systemScheme) : Color.gray)
                         }
-                        .foregroundStyle(selectedTab == tab ? themeColor : Color.gray)
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
                     }

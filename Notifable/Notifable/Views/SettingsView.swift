@@ -26,6 +26,7 @@ struct SettingsView: View {
     @StateObject private var gmailSync = GmailSyncService.shared
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
     @AppStorage(BudgetStore.monthlyBudgetKey) private var monthlyBudget: Double = 0
     @AppStorage(BudgetStore.enabledKey) private var budgetEnabled = true
@@ -41,6 +42,7 @@ struct SettingsView: View {
     // Igual que los avisos: se lee aquí para que la fila de la raíz refleje el
     // valor sin tener que volver a entrar.
     @AppStorage(AppLock.enabledKey) private var lockEnabled = false
+    @AppStorage(DashboardView.tapTitleFiltersKey) private var tapTitleFilters = true
 
     @State private var query = ""
 
@@ -193,6 +195,11 @@ struct SettingsView: View {
                 AppearanceSettingsView()
             }
             SettingsSeparator()
+            SettingsRow(title: "A tu medida", icon: "slider.horizontal.3",
+                        tint: .orange, value: TailoredSettings.summary(tapTitleFilters: tapTitleFilters)) {
+                TailoredSettingsView()
+            }
+            SettingsSeparator()
             SettingsRow(title: "Notificaciones", icon: "bell.badge.fill",
                         tint: .orange, value: notificationsValue) {
                 NotificationSettingsView()
@@ -313,6 +320,7 @@ struct SettingsView: View {
         case "gmail":         GmailBanksView()
         case "range":         RangeSyncView()
         case "appearance":    AppearanceSettingsView()
+        case "tailored":      TailoredSettingsView()
         case "notifications": NotificationSettingsView()
         case "lock":          AppLockSettingsView()
         default:              DataBackupView()
@@ -334,6 +342,7 @@ struct SettingsView: View {
 /// que es donde estaba un ajuste financiero.
 struct BudgetScreen: View {
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     var body: some View {
         Form {

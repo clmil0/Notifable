@@ -16,6 +16,7 @@ struct BudgetHeroCard: View {
 
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     @AppStorage(BudgetStore.enabledKey) private var budgetEnabled = true
     @AppStorage(BudgetStore.monthlyBudgetKey) private var monthlyBudget: Double = 0
 
@@ -64,7 +65,7 @@ struct BudgetHeroCard: View {
         HStack {
             Text(period.spentHeadline)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(palette.secondaryLabel)
+                .foregroundStyle(accent.onSurface(scheme))
 
             Spacer()
 
@@ -107,7 +108,7 @@ struct BudgetHeroCard: View {
                     .fill(palette.track)
 
                 Capsule()
-                    .fill(barColor(pace))
+                    .fill(barFill(pace))
                     .frame(width: width * CGFloat(filled))
 
                 // La marca de ritmo. La sombra del color de la superficie es lo
@@ -123,11 +124,14 @@ struct BudgetHeroCard: View {
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: pace.usedFraction)
     }
 
-    private func barColor(_ pace: Pace) -> Color {
+    /// Dentro del ritmo, la barra es del color principal del tema, sólido;
+    /// fuera, el color de estado manda sobre el tema.
+    private func barFill(_ pace: Pace) -> AnyShapeStyle {
         switch pace.status {
-        case .ok: return accent.color
-        case .warning: return palette.warning
-        case .over: return palette.negative
+        case .ok:
+            return AnyShapeStyle(accent.color)
+        case .warning: return AnyShapeStyle(palette.warning)
+        case .over: return AnyShapeStyle(palette.negative)
         }
     }
 

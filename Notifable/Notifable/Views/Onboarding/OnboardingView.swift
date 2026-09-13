@@ -19,6 +19,7 @@ struct OnboardingView: View {
     /// pantalla a partir de ahí.
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     @Environment(\.colorScheme) private var scheme
 
     @StateObject private var gmailAuth = GmailAuthService.shared

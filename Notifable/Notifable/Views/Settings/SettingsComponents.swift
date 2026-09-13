@@ -17,6 +17,9 @@ struct SettingsRow<Destination: View>: View {
     @ViewBuilder let destination: () -> Destination
 
     @Environment(\.colorScheme) private var scheme
+    /// Sólo para redibujar al cambiar de tema: `Palette` tiñe la superficie.
+    @AppStorage(AppThemeColor.storageKey) private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     private var palette: Palette { Palette(scheme) }
 
     var body: some View {
@@ -81,6 +84,9 @@ struct SettingsSection<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     @Environment(\.colorScheme) private var scheme
+    /// Sólo para redibujar al cambiar de tema: `Palette` tiñe la superficie.
+    @AppStorage(AppThemeColor.storageKey) private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     private var palette: Palette { Palette(scheme) }
 
     var body: some View {
@@ -128,6 +134,9 @@ struct SettingsStatusCard: View {
     var onConnect: () -> Void
 
     @Environment(\.colorScheme) private var scheme
+    /// Sólo para redibujar al cambiar de tema: `Palette` tiñe la superficie.
+    @AppStorage(AppThemeColor.storageKey) private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     private var palette: Palette { Palette(scheme) }
 
     private var dotColor: Color {

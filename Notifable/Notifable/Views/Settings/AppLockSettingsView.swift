@@ -9,6 +9,7 @@ struct AppLockSettingsView: View {
 
     @StateObject private var lock = AppLock.shared
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     @State private var isWorking = false
     @State private var error: String?

@@ -35,6 +35,7 @@ private struct RhythmContent: View {
 
     @StateObject private var exchangeRateService = ExchangeRateService.shared
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     /// La ventana incluye el periodo anterior: `Rhythm` lo compara siempre, y
     /// sin él el titular diría "no hay con qué comparar" en vez de la frase.
@@ -129,7 +130,8 @@ private struct RhythmContent: View {
                                 grouping: rhythm.grouping,
                                 granularity: period.granularity,
                                 accent: accent.color,
-                                todayColor: accent.isDuotone ? accent.secondaryColor : accent.color.opacity(0.55))
+                                todayColor: accent.isDuotone ? accent.secondaryColor : accent.color.opacity(0.55),
+                                averageLineColor: accent.isDuotone ? accent.secondaryColor.opacity(0.7) : accent.color.opacity(0.55))
 
                 twoCards
 
@@ -192,7 +194,7 @@ private struct RhythmContent: View {
                           value: "\(rhythm.daysWithoutSpending) de \(max(1, rhythm.elapsedDays.count))",
                           detail: comparisonDetail,
                           icon: "moon.zzz.fill",
-                          tint: palette.positive)
+                          tint: accent.incomeColor(colorScheme))
             }
         }
         .padding(.horizontal, 16)
@@ -339,6 +341,7 @@ struct RhythmBarsChart: View {
     let granularity: PeriodGranularity
     let accent: Color
     let todayColor: Color
+    var averageLineColor: Color? = nil
 
     @Environment(\.colorScheme) private var scheme
     private var palette: Palette { Palette(scheme) }
@@ -422,7 +425,7 @@ struct RhythmBarsChart: View {
             if !Money.isZero(average), !Money.isZero(maxTotal) {
                 let ratio = Money.ratio(average, to: maxTotal) ?? 0
                 Rectangle()
-                    .fill(palette.secondaryLabel.opacity(0.6))
+                    .fill(averageLineColor ?? palette.secondaryLabel.opacity(0.6))
                     .frame(height: 1)
                     .offset(y: -barMaxHeight * CGFloat(min(1, ratio)))
             }

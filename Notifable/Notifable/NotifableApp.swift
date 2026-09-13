@@ -57,6 +57,7 @@ struct NotifableApp: App {
     /// la propia `OnboardingView` al terminar.
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     var body: some Scene {
         WindowGroup {

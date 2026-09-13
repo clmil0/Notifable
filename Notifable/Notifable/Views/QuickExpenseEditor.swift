@@ -14,6 +14,7 @@ struct QuickExpenseEditor: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     @Query(sort: \Expense.date, order: .reverse) private var history: [Expense]
     @Query(sort: \QuickExpense.sortIndex) private var existing: [QuickExpense]
@@ -86,7 +87,10 @@ struct QuickExpenseEditor: View {
 
                 if quick != nil {
                     Section {
-                        Button("Eliminar atajo", role: .destructive) { showDeleteDialog = true }
+                        Button(role: .destructive) { showDeleteDialog = true } label: {
+                            Label("Eliminar atajo", systemImage: "trash")
+                                .frame(maxWidth: .infinity)
+                        }
                     } footer: {
                         Text("Los gastos ya registrados con este atajo se conservan.")
                     }
@@ -103,11 +107,14 @@ struct QuickExpenseEditor: View {
                         .disabled(!isValid)
                 }
             }
-            .confirmationDialog("¿Eliminar este atajo?",
-                                isPresented: $showDeleteDialog,
-                                titleVisibility: .visible) {
+            // Alerta centrada, no `confirmationDialog`: dentro de la hoja el
+            // diálogo se anclaba al formulario entero y aparecía arriba,
+            // desfasado del botón.
+            .alert("¿Eliminar este atajo?", isPresented: $showDeleteDialog) {
                 Button("Eliminar", role: .destructive) { delete() }
                 Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Los gastos ya registrados con este atajo se conservan.")
             }
             .onAppear(perform: load)
             .appAppearance()

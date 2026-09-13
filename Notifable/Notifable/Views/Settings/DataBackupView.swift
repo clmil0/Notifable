@@ -9,6 +9,7 @@ struct DataBackupView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     @Query private var expenses: [Expense]
     @StateObject private var gmailSync = GmailSyncService.shared

@@ -34,7 +34,25 @@ enum CategoryStyle {
 
     static func color(for category: String, accent: Color) -> Color {
         if let custom = CategoryCatalog.shared.color(for: category) { return custom }
+        if AppThemeColor.usesThemedCategoryColors, let themed = themedColor(for: category) {
+            return themed
+        }
         return defaultColor(for: category, accent: accent)
+    }
+
+    /// Orden fijo en la rampa del tema para las categorías por defecto, así
+    /// las más comunes nunca comparten tono entre sí.
+    private static let rampOrder = ["Comida", "Supermercado", "Transporte", "Entretenimiento",
+                                    "Servicios", "Otros", "Salud", "Compras"]
+
+    /// Color de la rampa del tema (Ajustes › Apariencia). "Sin Clasificar" se
+    /// queda gris: es un estado, no una categoría.
+    static func themedColor(for category: String) -> Color? {
+        guard category != Accounting.unclassified else { return nil }
+        let ramp = AppThemeColor.current.categoryRamp(.light)
+        let index = rampOrder.firstIndex(of: category)
+            ?? category.unicodeScalars.reduce(0) { $0 + Int($1.value) }
+        return ramp[index % ramp.count]
     }
 
     static func defaultColor(for category: String, accent: Color) -> Color {

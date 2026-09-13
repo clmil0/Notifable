@@ -14,6 +14,7 @@ struct PeriodBar: View {
 
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     @State private var showRangePicker = false
     @State private var draftStart = Date()
@@ -116,7 +117,7 @@ struct PeriodBar: View {
                     .fill(accent.softFill(scheme))
                     .overlay(
                         RoundedRectangle(cornerRadius: radius, style: .continuous)
-                            .stroke(accent.color.opacity(0.5), lineWidth: 0.5)
+                            .stroke(intenseThemeTint ? Color.clear : accent.color.opacity(0.5), lineWidth: 0.5)
                     )
             )
         }

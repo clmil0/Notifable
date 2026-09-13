@@ -81,7 +81,10 @@ private struct DashboardContent: View {
     @StateObject private var exchangeRateService = ExchangeRateService.shared
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     @AppStorage(DashboardView.tapTitleFiltersKey) private var tapTitleFilters = true
+    /// Sólo para redibujar los colores de categoría al cambiar la opción.
+    @AppStorage(AppThemeColor.themedCategoryColorsKey) private var themedCategoryColors = false
 
     init(onOpenInbox: @escaping () -> Void,
          period: Binding<Period>,
@@ -480,29 +483,27 @@ private struct DashboardContent: View {
         .padding(12)
         .background(accent.softFill(colorScheme))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // Con el color intensificado basta el tinte; sin él, el borde de
+        // acento de siempre.
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(accent.color.opacity(0.4), lineWidth: 0.5)
+                .stroke(intenseThemeTint ? Color.clear : accent.color.opacity(0.4), lineWidth: 0.5)
         )
         .padding(.horizontal, 16)
     }
 
-    /// Temas pastel de dos colores: Acento 2 sólido, para que la barra
-    /// contraste con el resto de la pantalla (que ya está en Acento 1). En
-    /// temas de un color no hay segundo acento, así que la barra usa un
-    /// degradado del mismo acento para no verse plana.
+    /// Barras sólidas, sin degradado. En los temas de dos colores van en el
+    /// acento 2, para que la pantalla no se lea como de un solo color; en los
+    /// de un color, en el acento principal.
     private var topMerchantBarFill: AnyShapeStyle {
-        if accent.isDuotone {
-            return AnyShapeStyle(accent.secondaryColor)
-        }
-        return AnyShapeStyle(LinearGradient(colors: [accent.color, accent.color.opacity(0.45)],
-                                             startPoint: .leading, endPoint: .trailing))
+        AnyShapeStyle(accent.isDuotone ? accent.secondaryColor : accent.color)
     }
 
     private func chartCard(merchants expensesByMerchant: [PeriodTotals.MerchantTotal]) -> some View {
         VStack(alignment: .leading, spacing: 20) {
             Text("Top Movimientos")
                 .font(.headline)
+                .foregroundStyle(palette.label)
             
             let maxTotal = expensesByMerchant.map { $0.total }.max() ?? 0
             

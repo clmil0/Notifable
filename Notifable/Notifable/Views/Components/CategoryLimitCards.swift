@@ -28,6 +28,8 @@ struct SpendingDistributionCard: View {
     var onClearFocus: () -> Void
 
     @Environment(\.colorScheme) private var scheme
+    @AppStorage(AppThemeColor.storageKey) private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     private var palette: Palette { Palette(scheme) }
 
     private var scale: Double { max(total, 1) }
@@ -38,7 +40,7 @@ struct SpendingDistributionCard: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("GASTO DE " + monthLabel.uppercased())
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(palette.secondaryLabel)
+                        .foregroundStyle(accentColor)
                     Text(Money.format(total))
                         .font(.system(size: 25, weight: .bold, design: .rounded))
                         .foregroundStyle(palette.label)
@@ -123,7 +125,7 @@ struct SpendingDistributionCard: View {
     }
 
     private var accentColor: Color {
-        AppThemeColor(rawValue: UserDefaults.standard.string(forKey: "appAccentColor") ?? "")?.onSurface(scheme) ?? .purple
+        (AppThemeColor(rawValue: appAccentColor) ?? .blue).onSurface(scheme)
     }
 }
 
@@ -187,6 +189,7 @@ struct NewCategoryRow: View {
 
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
@@ -217,11 +220,14 @@ struct NewCategoryRow: View {
             .padding(16)
             .contentShape(Rectangle())
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(accent.color.opacity(scheme == .dark ? 0.10 : 0.06))
+            .background(accent.color.opacity(intenseThemeTint ? (scheme == .dark ? 0.12 : 0.07)
+                                                              : (scheme == .dark ? 0.10 : 0.06)))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            // Con el color intensificado, discontinuo en el hairline de la
+            // paleta; sin él, en el acento como siempre.
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(accent.color.opacity(0.5),
+                    .strokeBorder(intenseThemeTint ? palette.hairline : accent.color.opacity(0.5),
                                   style: StrokeStyle(lineWidth: 1, dash: [5, 4]))
             )
             .padding(.horizontal, 16)
@@ -251,6 +257,7 @@ struct UnifiedCategoryRow: View {
     @State private var confirmingDelete = false
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }

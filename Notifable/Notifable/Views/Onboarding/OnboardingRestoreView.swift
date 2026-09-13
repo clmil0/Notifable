@@ -15,6 +15,7 @@ struct OnboardingRestoreView: View {
     let onDone: (Bool) -> Void
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     @Environment(\.colorScheme) private var scheme
 
     @State private var isRestoring = false

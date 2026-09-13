@@ -72,6 +72,9 @@ struct CategoriesView: View {
     @AppStorage("period") private var period = Period()
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
+    /// Sólo para redibujar los colores de categoría al cambiar la opción.
+    @AppStorage(AppThemeColor.themedCategoryColorsKey) private var themedCategoryColors = false
 
     var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     var themeColor: Color { accent.color }
@@ -919,10 +922,10 @@ struct CategoriesView: View {
                         if tab == .inbox, inboxGroups.count > 0 {
                             Text("\(inboxGroups.count)")
                                 .font(.caption2.weight(.bold))
-                                .foregroundStyle(selectedTab == tab ? accent.secondaryColor : .white)
+                                .foregroundStyle(selectedTab == tab ? accent.color : .white)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
-                                .background(selectedTab == tab ? Color.white : Color.white.opacity(0.18))
+                                .background(selectedTab == tab ? Color.white : accent.secondaryColor)
                                 .clipShape(Capsule())
                         }
                     }
@@ -935,7 +938,7 @@ struct CategoriesView: View {
                         ZStack {
                             if selectedTab == tab {
                                 Capsule()
-                                    .fill(themeColor.opacity(0.8))
+                                    .fill(themeColor)
                                     .shadow(color: themeColor.opacity(0.3), radius: 8, x: 0, y: 4)
                                     .matchedGeometryEffect(id: "TAB", in: animation)
                             }

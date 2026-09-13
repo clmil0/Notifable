@@ -7,6 +7,7 @@ struct RecurringManagementView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     @AppStorage(BudgetStore.monthlyBudgetKey) private var monthlyBudget: Double = 0
     @AppStorage(BudgetStore.enabledKey) private var budgetEnabled = true
 
@@ -15,13 +16,17 @@ struct RecurringManagementView: View {
 
     @StateObject private var exchangeRateService = ExchangeRateService.shared
 
-    @State private var editingQuick: QuickExpense?
-    @State private var showQuickEditor = false
+    /// Qué abre el editor de atajos: uno nuevo o el que se tocó. Con
+    /// `sheet(item:)` el atajo viaja con la presentación; con `isPresented`
+    /// más un estado aparte, el primer toque podía abrir "Nuevo atajo".
+    @State private var quickSheet: QuickSheet?
+    /// Reordenar sólo en modo edición: con `onMove` siempre activo, mantener
+    /// presionada una fila la levantaba para arrastrarla y se veía desfasada.
+    @State private var isReorderingQuick = false
     @State private var ruleToDelete: RecurringExpense?
-    /// La regla que se tocó: el atajo ya abre su editor con "Eliminar atajo"
-    /// dentro, tocar aquí abre lo mismo pero en un menú — no hay una pantalla
-    /// de edición de reglas todavía.
-    @State private var ruleToManage: RecurringExpense?
+    /// El recurrente que se tocó: abre su editor, con pausar y eliminar
+    /// dentro, igual que un atajo.
+    @State private var editingRule: RecurringExpense?
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
@@ -37,36 +42,23 @@ struct RecurringManagementView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    editingQuick = nil
-                    showQuickEditor = true
+                    quickSheet = .new
                 } label: {
                     Image(systemName: "plus")
                 }
                 .accessibilityLabel("Nuevo atajo")
             }
         }
-        .sheet(isPresented: $showQuickEditor) {
-            QuickExpenseEditor(quick: editingQuick)
+        .environment(\.editMode, .constant(isReorderingQuick ? .active : .inactive))
+        .sheet(item: $quickSheet) { sheet in
+            QuickExpenseEditor(quick: sheet.quick)
         }
-        // Tocar la fila abre este menú — el mismo lugar donde ya se toca para
-        // hacer cualquier otra cosa con ella, en vez de exigir saber de
-        // antemano que existe un swipe.
-        .confirmationDialog(manageTitle, isPresented: manageDialogBinding, titleVisibility: .visible) {
-            if let rule = ruleToManage {
-                Button(rule.isPaused ? "Reanudar" : "Pausar") {
-                    togglePause(rule)
-                    ruleToManage = nil
-                }
-                Button("Eliminar", role: .destructive) {
-                    ruleToDelete = rule
-                    ruleToManage = nil
-                }
-            }
-            Button("Cancelar", role: .cancel) { ruleToManage = nil }
+        .sheet(item: $editingRule) { rule in
+            RecurringExpenseEditor(rule: rule)
         }
-        .confirmationDialog("¿Eliminar esta programación?",
-                            isPresented: deleteDialogBinding,
-                            titleVisibility: .visible) {
+        // Alerta centrada: el `confirmationDialog` se anclaba a la lista
+        // entera y aparecía desfasado, lejos de la fila.
+        .alert("¿Eliminar esta programación?", isPresented: deleteDialogBinding) {
             Button("Eliminar", role: .destructive) {
                 if let rule = ruleToDelete { modelContext.delete(rule) }
                 try? modelContext.save()
@@ -82,13 +74,6 @@ struct RecurringManagementView: View {
         Binding(get: { ruleToDelete != nil }, set: { if !$0 { ruleToDelete = nil } })
     }
 
-    private var manageDialogBinding: Binding<Bool> {
-        Binding(get: { ruleToManage != nil }, set: { if !$0 { ruleToManage = nil } })
-    }
-
-    private var manageTitle: String {
-        ruleToManage.map { Accounting.displayName($0.merchant) } ?? ""
-    }
 
     // MARK: - Compromiso mensual
 
@@ -173,14 +158,17 @@ struct RecurringManagementView: View {
 
     @ViewBuilder
     private var rulesSection: some View {
-        Section("Activos") {
+        Section {
             if rules.isEmpty {
                 Text("Nada programado todavía. Al crear un gasto, usa «Repetir».")
                     .font(.footnote)
                     .foregroundStyle(palette.secondaryLabel)
             } else {
                 ForEach(sortedRules) { rule in
-                    Button { ruleToManage = rule } label: {
+                    Button {
+                        guard !isReorderingQuick else { return }
+                        editingRule = rule
+                    } label: {
                         ruleRow(rule)
                     }
                     .buttonStyle(.plain)
@@ -195,6 +183,12 @@ struct RecurringManagementView: View {
                         .tint(.orange)
                     }
                 }
+            }
+        } header: {
+            Text("Activos")
+        } footer: {
+            if !rules.isEmpty {
+                Text("Toca uno para editar su monto, categoría o cuándo se repite, pausarlo o eliminarlo.")
             }
         }
     }
@@ -268,19 +262,31 @@ struct RecurringManagementView: View {
             } else {
                 ForEach(quickExpenses) { quick in
                     Button {
-                        editingQuick = quick
-                        showQuickEditor = true
+                        guard !isReorderingQuick else { return }
+                        quickSheet = .edit(quick)
                     } label: {
                         quickRow(quick)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                 }
-                .onMove(perform: move)
-                .onDelete(perform: deleteQuick)
+                .onMove(perform: isReorderingQuick ? move : nil)
             }
         } header: {
-            Text("Atajos")
+            HStack {
+                Text("Atajos")
+                Spacer()
+                if quickExpenses.count > 1 {
+                    Button(isReorderingQuick ? "Listo" : "Ordenar") {
+                        withAnimation { isReorderingQuick.toggle() }
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(accent.onSurface(scheme))
+                    .textCase(nil)
+                }
+            }
         } footer: {
-            Text("Los tres primeros aparecen en el modal de gasto. Toca uno para editar su monto o categoría.")
+            Text("Los tres primeros aparecen en el modal de gasto. Toca uno para editarlo o eliminarlo.")
         }
     }
 
@@ -322,8 +328,21 @@ struct RecurringManagementView: View {
         try? modelContext.save()
     }
 
-    private func deleteQuick(at offsets: IndexSet) {
-        for index in offsets { modelContext.delete(quickExpenses[index]) }
-        try? modelContext.save()
+}
+
+private enum QuickSheet: Identifiable {
+    case new
+    case edit(QuickExpense)
+
+    var id: String {
+        switch self {
+        case .new: return "new"
+        case .edit(let quick): return quick.id.uuidString
+        }
+    }
+
+    var quick: QuickExpense? {
+        if case .edit(let quick) = self { return quick }
+        return nil
     }
 }

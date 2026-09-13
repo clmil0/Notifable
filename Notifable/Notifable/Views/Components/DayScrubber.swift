@@ -15,6 +15,7 @@ struct DayScrubber: View {
 
     @Environment(\.colorScheme) private var scheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
@@ -80,7 +81,9 @@ struct DayScrubber: View {
         // (como antes); en los temas pastel de dos colores, el segundo
         // acento ya es distinto del primero, así que no hace falta atenuarlo.
         if cal.isDateInToday(day.date) { return accent.isDuotone ? accent.secondaryColor : accent.color.opacity(0.55) }
-        return palette.track
+        // Los días ya pasados llevan un velo del tema (`1c`); el gris queda
+        // para lo que todavía no ocurre.
+        return accent.color.opacity(0.30)
     }
 
     // MARK: - Celdas (Semana)

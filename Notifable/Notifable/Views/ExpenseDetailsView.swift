@@ -14,6 +14,7 @@ struct ExpenseDetailsView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     /// `@State`, no `@Bindable`: nada aquí usa `$expense.algo` como binding,
     /// y sí hace falta poder **reasignarlo** — tocar una barra del historial

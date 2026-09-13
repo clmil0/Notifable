@@ -45,6 +45,7 @@ struct AmigosHubView: View {
     @State private var social = SocialProfileStore.shared
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     private var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     private var palette: Palette { Palette(colorScheme) }
 
@@ -772,6 +773,7 @@ struct AddFriendSheet: View {
     @State private var friendsManager = FriendsManager.shared
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     private var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     private var palette: Palette { Palette(colorScheme) }
 
@@ -1071,6 +1073,7 @@ struct MyProfileSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     @State private var social = SocialProfileStore.shared
     @State private var auth = SupabaseAuthManager.shared
@@ -1294,6 +1297,7 @@ struct FriendEditSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
     @State private var social = SocialProfileStore.shared
     @State private var friendsManager = FriendsManager.shared
@@ -1549,6 +1553,7 @@ struct FriendProfileView: View {
     @State private var social = SocialProfileStore.shared
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     private var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     private var palette: Palette { Palette(colorScheme) }
 
@@ -1875,6 +1880,7 @@ struct AmigoDetailView: View {
     @State private var social = SocialProfileStore.shared
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     private var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     private var palette: Palette { Palette(colorScheme) }
 

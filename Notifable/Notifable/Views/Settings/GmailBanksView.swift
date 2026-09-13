@@ -10,6 +10,7 @@ struct GmailBanksView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
+    @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     /// Recuerda el último periodo elegido para que "Leer" no vuelva a "1 mes"
     /// cada vez que se abre la pantalla.
     @AppStorage("readPeriodMonths") private var readPeriodMonths = 1
