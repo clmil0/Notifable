@@ -17,6 +17,8 @@ struct Friend: Identifiable, Hashable {
     /// amistad viene de la caché local, de antes de que se empezara a pedir
     /// la columna.
     var friendSince: Date? = nil
+    /// El pingüino que él se armó, si el servidor ya lo sirve y lo guardó.
+    var penguin: PenguinLook? = nil
 
     private var preferences: FriendPreferences { SocialProfileStore.shared.preferences(for: id) }
 
@@ -103,6 +105,17 @@ final class FriendsManager {
 
     private var profileNames: [String: String] = [:]
     private var profileStatuses: [String: String] = [:]
+    private var profilePenguins: [String: PenguinLook] = [:]
+
+    private static func decodePenguin(_ json: String?) -> PenguinLook? {
+        guard let data = json?.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(PenguinLook.self, from: data)
+    }
+
+    private static func encodePenguin(_ look: PenguinLook?) -> String? {
+        guard let look, let data = try? JSONEncoder().encode(look) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
 
     /// Sólo se arma una vez por sesión: no hace falta re-suscribirse en cada
     /// `refresh()` (pull-to-refresh, reabrir la pestaña...), sólo la primera
@@ -137,10 +150,14 @@ final class FriendsManager {
         let context = ModelContext(container)
 
         if let cached = try? context.fetch(FetchDescriptor<CachedFriend>()), !cached.isEmpty {
-            friends = cached.map { Friend(id: $0.id, displayName: $0.displayName, status: $0.status, friendSince: $0.friendSince) }
-            for row in cached {
-                profileNames[row.id] = row.displayName
-                profileStatuses[row.id] = row.status
+            friends = cached.map {
+                Friend(id: $0.id, displayName: $0.displayName, status: $0.status,
+                       friendSince: $0.friendSince, penguin: Self.decodePenguin($0.penguinJSON))
+            }
+            for friend in friends {
+                profileNames[friend.id] = friend.displayName
+                profileStatuses[friend.id] = friend.status
+                profilePenguins[friend.id] = friend.penguin
             }
         }
 
@@ -167,9 +184,12 @@ final class FriendsManager {
                 row.displayName = friend.displayName
                 row.status = friend.status
                 row.friendSince = friend.friendSince
+                row.penguinJSON = Self.encodePenguin(friend.penguin)
             } else {
-                context.insert(CachedFriend(id: friend.id, displayName: friend.displayName,
-                                            status: friend.status, friendSince: friend.friendSince))
+                let row = CachedFriend(id: friend.id, displayName: friend.displayName,
+                                       status: friend.status, friendSince: friend.friendSince)
+                row.penguinJSON = Self.encodePenguin(friend.penguin)
+                context.insert(row)
             }
         }
         for leftover in stale.values { context.delete(leftover) }
@@ -221,6 +241,16 @@ final class FriendsManager {
         _ = realtime.subscribe(table: "friend_shares") { [weak self] _ in
             Task { await self?.loadShares() }
         }
+        // Estado, nombre o pingüino nuevo de un amigo. Llega todo cambio de
+        // `profiles` (su RLS deja leer todas las filas), así que se vuelve a
+        // pedir la lista sólo si el cambio es de alguien que ya es amigo.
+        _ = realtime.subscribe(table: "profiles") { [weak self] change in
+            guard let id = change.record["id"] as? String else { return }
+            Task { @MainActor in
+                guard let self, self.friends.contains(where: { $0.id == id }) else { return }
+                await self.loadFriendships()
+            }
+        }
     }
 
     // MARK: - Amistades
@@ -228,7 +258,7 @@ final class FriendsManager {
     private func loadFriendships() async {
         guard let uid = auth.userID else { return }
         guard let url = URL(string: "\(baseURL)/rest/v1/friendships?or=(user_a.eq.\(uid),user_b.eq.\(uid))&select=user_a,user_b,created_at") else { return }
-        guard let request = auth.authorizedRequest(url: url, method: "GET") else { return }
+        guard let request = await auth.authorizedRequest(url: url, method: "GET") else { return }
 
         struct Row: Decodable { let user_a: String; let user_b: String; let created_at: String }
 
@@ -246,7 +276,10 @@ final class FriendsManager {
                 let friendID = row.user_a == uid ? row.user_b : row.user_a
                 since[friendID] = ConfigBackupManager.parseDate(row.created_at)
             }
-            var fetched = await fetchProfiles(ids: friendIDs)
+            guard var fetched = await fetchProfiles(ids: friendIDs) else {
+                lastErrorMessage = "No se pudieron cargar tus amigos."
+                return
+            }
             for index in fetched.indices { fetched[index].friendSince = since[fetched[index].id] }
             friends = fetched
             persistFriendsCache()
@@ -255,25 +288,29 @@ final class FriendsManager {
         }
     }
 
-    /// Dos formas de la misma consulta: con el estado, y sin él para un
+    /// Tres formas de la misma consulta, de más a menos columnas, para un
     /// proyecto de Supabase al que todavía no se le ha corrido el SQL de las
     /// columnas nuevas. Sin el repliegue, no cargaría ni la lista de amigos.
-    private func fetchProfiles(ids: [String]) async -> [Friend] {
+    /// `nil` si ni la más básica respondió (sin red, por ejemplo): así quien
+    /// llama no pisa la caché con una lista vacía.
+    private func fetchProfiles(ids: [String]) async -> [Friend]? {
         guard !ids.isEmpty else { return [] }
-        if let friends = await fetchProfiles(ids: ids, includingStatus: true) { return friends }
-        return await fetchProfiles(ids: ids, includingStatus: false) ?? []
+        for columns in ["id,display_name,status,penguin", "id,display_name,status", "id,display_name"] {
+            if let friends = await fetchProfiles(ids: ids, columns: columns) { return friends }
+        }
+        return nil
     }
 
-    private func fetchProfiles(ids: [String], includingStatus: Bool) async -> [Friend]? {
+    private func fetchProfiles(ids: [String], columns: String) async -> [Friend]? {
         let list = ids.joined(separator: ",")
-        let columns = includingStatus ? "id,display_name,status" : "id,display_name"
         guard let url = URL(string: "\(baseURL)/rest/v1/profiles?id=in.(\(list))&select=\(columns)") else { return nil }
-        guard let request = auth.authorizedRequest(url: url, method: "GET") else { return nil }
+        guard let request = await auth.authorizedRequest(url: url, method: "GET") else { return nil }
 
         struct Row: Decodable {
             let id: String
             let display_name: String
             let status: String?
+            let penguin: PenguinLook?
         }
 
         do {
@@ -283,8 +320,9 @@ final class FriendsManager {
             for row in rows {
                 profileNames[row.id] = row.display_name
                 profileStatuses[row.id] = row.status ?? ""
+                profilePenguins[row.id] = row.penguin
             }
-            return rows.map { Friend(id: $0.id, displayName: $0.display_name, status: $0.status ?? "") }
+            return rows.map { Friend(id: $0.id, displayName: $0.display_name, status: $0.status ?? "", penguin: $0.penguin) }
         } catch {
             return nil
         }
@@ -300,9 +338,11 @@ final class FriendsManager {
 
     func status(for id: String) -> String { profileStatuses[id] ?? "" }
 
+    func penguin(for id: String) -> PenguinLook? { profilePenguins[id] }
+
     func friend(with id: String) -> Friend {
         friends.first { $0.id == id }
-            ?? Friend(id: id, displayName: name(for: id), status: status(for: id))
+            ?? Friend(id: id, displayName: name(for: id), status: status(for: id), penguin: penguin(for: id))
     }
 
     // MARK: - Compartidos
@@ -329,7 +369,7 @@ final class FriendsManager {
 
     private func fetchShares(query: String) async -> [FriendShareRow]? {
         guard let url = URL(string: "\(baseURL)/rest/v1/friend_shares?\(query)") else { return nil }
-        guard let request = auth.authorizedRequest(url: url, method: "GET") else { return nil }
+        guard let request = await auth.authorizedRequest(url: url, method: "GET") else { return nil }
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { return nil }
@@ -356,7 +396,7 @@ final class FriendsManager {
         if let code = await fetchMyFriendCode(uid: uid) { return code }
 
         guard let url = URL(string: "\(baseURL)/rest/v1/friend_codes") else { return nil }
-        guard var request = auth.authorizedRequest(url: url, method: "POST") else { return nil }
+        guard var request = await auth.authorizedRequest(url: url, method: "POST") else { return nil }
         request.addValue("return=representation", forHTTPHeaderField: "Prefer")
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["owner_id": uid])
 
@@ -374,7 +414,7 @@ final class FriendsManager {
 
     private func fetchMyFriendCode(uid: String) async -> String? {
         guard let url = URL(string: "\(baseURL)/rest/v1/friend_codes?owner_id=eq.\(uid)&select=code") else { return nil }
-        guard let request = auth.authorizedRequest(url: url, method: "GET") else { return nil }
+        guard let request = await auth.authorizedRequest(url: url, method: "GET") else { return nil }
 
         struct Row: Decodable { let code: String }
         guard let (data, response) = try? await URLSession.shared.data(for: request),
@@ -389,7 +429,7 @@ final class FriendsManager {
     @discardableResult
     func redeem(code: String) async -> Friend? {
         guard let url = URL(string: "\(baseURL)/rest/v1/rpc/redeem_invite_code") else { return nil }
-        guard var request = auth.authorizedRequest(url: url, method: "POST") else { return nil }
+        guard var request = await auth.authorizedRequest(url: url, method: "POST") else { return nil }
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_code": code])
 
         struct OwnerProfile: Decodable {
@@ -428,7 +468,7 @@ final class FriendsManager {
 
     private func respond(sharerID: String, status: String) async {
         guard let url = URL(string: "\(baseURL)/rest/v1/rpc/respond_to_share") else { return }
-        guard var request = auth.authorizedRequest(url: url, method: "POST") else { return }
+        guard var request = await auth.authorizedRequest(url: url, method: "POST") else { return }
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_sharer_id": sharerID, "p_status": status])
         _ = try? await URLSession.shared.data(for: request)
         await loadShares()
@@ -442,7 +482,7 @@ final class FriendsManager {
                   totalAmount: Double,
                   categoryTotals: [FriendShareRow.CategoryAmount]) async {
         guard let url = URL(string: "\(baseURL)/rest/v1/rpc/upsert_my_share") else { return }
-        guard var request = auth.authorizedRequest(url: url, method: "POST") else { return }
+        guard var request = await auth.authorizedRequest(url: url, method: "POST") else { return }
 
         // `totalAmount`/`categoryTotals` llegan de sumar `Double` en
         // `PeriodTotals` — con suficientes movimientos arrastran el error de
@@ -481,7 +521,7 @@ final class FriendsManager {
     @discardableResult
     func removeFriend(_ friendID: String) async -> Bool {
         guard let url = URL(string: "\(baseURL)/rest/v1/rpc/delete_friendship") else { return false }
-        guard var request = auth.authorizedRequest(url: url, method: "POST") else { return false }
+        guard var request = await auth.authorizedRequest(url: url, method: "POST") else { return false }
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_friend_id": friendID])
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
@@ -501,7 +541,7 @@ final class FriendsManager {
     /// Deja de compartir con un amigo puntual este mes.
     func stopSharing(viewerID: String) async {
         guard let url = URL(string: "\(baseURL)/rest/v1/rpc/stop_sharing") else { return }
-        guard var request = auth.authorizedRequest(url: url, method: "POST") else { return }
+        guard var request = await auth.authorizedRequest(url: url, method: "POST") else { return }
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_viewer_id": viewerID])
         _ = try? await URLSession.shared.data(for: request)
         SocialProfileStore.shared.forgetShare(friendID: viewerID)

@@ -69,6 +69,7 @@ final class SupabaseAuthManager {
     }
 
     /// Nombre, estado y emoji de una vez: es lo que guarda el modal de perfil.
+    /// El pingüino (`SocialProfileStore.penguin`) va con los demás campos.
     func updateProfile(name: String, status: String, avatarEmoji: String?) async {
         displayName = name
         SocialProfileStore.shared.displayName = name
@@ -191,26 +192,50 @@ final class SupabaseAuthManager {
         let sentStatus = status ?? store.status
         let sentEmoji = avatarEmoji ?? store.avatarEmoji
 
-        // Dos intentos como mucho: con los campos nuevos y, si el servidor no
-        // los conoce todavía (falta correr el SQL), sólo con el nombre. Sin
-        // esto, un proyecto sin migrar dejaría de guardar hasta el nombre.
+        // Tres intentos como mucho, de más a menos campos, por si el servidor
+        // todavía no tiene alguna columna (falta correr su SQL). Sólo se baja
+        // de nivel con un 400 — lo que devuelve PostgREST ante una columna
+        // desconocida —; un 401 o un fallo de red no dicen nada del esquema y
+        // antes apagaban el estado para toda la sesión.
+        var extended: [String: Any] = [
+            "display_name": name,
+            "status": sentStatus, "avatar_emoji": sentEmoji ?? ""
+        ]
+        if supportsProfileExtras && supportsPenguin,
+           let data = try? JSONEncoder().encode(store.penguin),
+           let penguin = try? JSONSerialization.jsonObject(with: data) {
+            var withPenguin = extended
+            withPenguin["penguin"] = penguin
+            let code = await postProfile(fields: withPenguin)
+            if Self.isSuccess(code) { return }
+            guard code == 400 else { return }
+            supportsPenguin = false
+            print("Amigos: `profiles` todavía no tiene `penguin` (agrupay_friends_v5_penguin.sql).")
+        }
         if supportsProfileExtras {
-            let extended: [String: String] = [
-                "id": "", "display_name": name,
-                "status": sentStatus, "avatar_emoji": sentEmoji ?? ""
-            ]
-            if await postProfile(fields: extended, name: name) { return }
+            let code = await postProfile(fields: extended)
+            if Self.isSuccess(code) { return }
+            guard code == 400 else { return }
             supportsProfileExtras = false
             print("Amigos: `profiles` todavía no tiene `status`/`avatar_emoji`; se sube sólo el nombre.")
         }
-        _ = await postProfile(fields: ["id": "", "display_name": name], name: name)
+        extended = ["display_name": name]
+        _ = await postProfile(fields: extended)
     }
 
-    /// `true` si el servidor lo aceptó. `fields` llega sin `id` resuelto: lo
-    /// pone aquí, que es donde se sabe que hay sesión.
-    private func postProfile(fields: [String: String], name: String) async -> Bool {
-        guard let userID, let accessToken else { return false }
-        guard let url = URL(string: "\(projectURL)/rest/v1/profiles") else { return false }
+    private static func isSuccess(_ code: Int?) -> Bool {
+        guard let code else { return false }
+        return (200...299).contains(code)
+    }
+
+    /// `false` mientras `profiles` no tenga la columna `penguin`.
+    private var supportsPenguin = true
+
+    /// El código HTTP con el que respondió el servidor, `nil` sin sesión o
+    /// sin red. El `id` se pone aquí, que es donde se sabe que hay sesión.
+    private func postProfile(fields: [String: Any]) async -> Int? {
+        guard let userID, let accessToken = await validAccessToken() else { return nil }
+        guard let url = URL(string: "\(projectURL)/rest/v1/profiles") else { return nil }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.addValue(apiKey, forHTTPHeaderField: "apikey")
@@ -222,10 +247,9 @@ final class SupabaseAuthManager {
         request.httpBody = try? JSONSerialization.data(withJSONObject: payload)
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return false }
-            return (200...299).contains(http.statusCode)
+            return (response as? HTTPURLResponse)?.statusCode
         } catch {
-            return false
+            return nil
         }
     }
 
@@ -239,15 +263,20 @@ final class SupabaseAuthManager {
     private func linkGmailIdentityIfNeeded() async {
         guard let email = GmailAuthService.shared.accountEmail, !email.isEmpty else { return }
         guard let url = URL(string: "\(projectURL)/rest/v1/rpc/claim_profile_by_email") else { return }
-        guard var request = authorizedRequest(url: url, method: "POST") else { return }
+        guard var request = await authorizedRequest(url: url, method: "POST") else { return }
         request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_email": email])
         _ = try? await URLSession.shared.data(for: request)
     }
 
     /// Base para que `FriendsManager` arme sus propias peticiones REST/RPC
     /// autenticadas, sin repetir las tres cabeceras en cada sitio.
-    func authorizedRequest(url: URL, method: String) -> URLRequest? {
-        guard let accessToken else { return nil }
+    ///
+    /// Pasa por `validAccessToken()`: antes leía `accessToken` directo y, pasada
+    /// la hora de vida del JWT, cada lectura y escritura de Amigos recibía 401
+    /// en silencio — la lista salía de la caché y el estado nuevo de un amigo
+    /// nunca llegaba.
+    func authorizedRequest(url: URL, method: String) async -> URLRequest? {
+        guard let accessToken = await validAccessToken() else { return nil }
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.addValue(apiKey, forHTTPHeaderField: "apikey")

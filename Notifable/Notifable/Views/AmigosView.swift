@@ -750,13 +750,19 @@ struct AmigosHubView: View {
 
     // MARK: - Avatares
 
+    /// Su pingüino, salvo que yo le haya puesto un emoji: esa nota privada manda.
+    @ViewBuilder
     private func friendAvatar(id: String, size: CGFloat) -> some View {
         let realName = friendsManager.name(for: id)
-        let preferences = social.preferences(for: id)
-        return avatar(glyph: social.glyph(for: id, realName: realName),
-                      tint: social.color(for: id),
-                      size: size,
-                      isEmoji: preferences.emoji?.isEmpty == false)
+        let usesEmoji = social.preferences(for: id).emoji?.isEmpty == false
+        if !usesEmoji, let penguin = friendsManager.penguin(for: id) {
+            PenguinAvatar(look: penguin, size: size, background: palette.surface)
+        } else {
+            avatar(glyph: social.glyph(for: id, realName: realName),
+                   tint: social.color(for: id),
+                   size: size,
+                   isEmoji: usesEmoji)
+        }
     }
 
     private func avatar(glyph: String, tint: Color, size: CGFloat, isEmoji: Bool) -> some View {
@@ -1875,14 +1881,19 @@ struct FriendProfileView: View {
         .background(palette.background)
     }
 
+    @ViewBuilder
     private var avatar: some View {
         let preferences = social.preferences(for: friend.id)
         let usesEmoji = preferences.emoji?.isEmpty == false
-        return Text(social.glyph(for: friend.id, realName: friend.displayName))
-            .font(usesEmoji ? .system(size: 34) : .system(size: 30, weight: .bold))
-            .foregroundStyle(usesEmoji ? Color.primary : Color.white)
-            .frame(width: 76, height: 76)
-            .background(usesEmoji ? friend.tint.opacity(0.22) : friend.tint, in: Circle())
+        if !usesEmoji, let penguin = friend.penguin {
+            PenguinAvatar(look: penguin, size: 76, background: palette.surface)
+        } else {
+            Text(social.glyph(for: friend.id, realName: friend.displayName))
+                .font(usesEmoji ? .system(size: 34) : .system(size: 30, weight: .bold))
+                .foregroundStyle(usesEmoji ? Color.primary : Color.white)
+                .frame(width: 76, height: 76)
+                .background(usesEmoji ? friend.tint.opacity(0.22) : friend.tint, in: Circle())
+        }
     }
 
     // MARK: - Estado, estadísticas

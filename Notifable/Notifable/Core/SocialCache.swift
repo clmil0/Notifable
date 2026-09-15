@@ -13,6 +13,8 @@ final class CachedFriend {
     var displayName: String
     var status: String
     var friendSince: Date?
+    /// JSON de `PenguinLook`; `nil` si él no tiene o el servidor no lo sirve.
+    var penguinJSON: String?
 
     init(id: String, displayName: String, status: String, friendSince: Date? = nil) {
         self.id = id
