@@ -14,6 +14,7 @@ struct BBVAParser: BankEmailParser {
         if let expense = parsePlinSent(cleanText) { return expense }
         if let expense = parseBBVATransfer(cleanText) { return expense }
         if let expense = parseBBVAAutomaticPayment(cleanText) { return expense }
+        if let expense = parseBBVAServicePayment(cleanText) { return expense }
         if let expense = parseBBVAStandard(cleanText) { return expense }
         return nil
     }
@@ -286,5 +287,64 @@ struct BBVAParser: BankEmailParser {
         
         // As it's an automatic payment, maybe mark it as subscription by default?
         return Expense(amount: amount, merchant: merchant, date: expenseDate, category: "Sin Clasificar", isSubscription: true, currency: currency, cardLastDigits: cardLastDigits)
+    }
+
+    /// Constancia «Pagar servicio» (pago manual desde la app: recargas, luz,
+    /// agua…). Mismo formato que el pago automático, pero sin "Pago autom", con
+    /// "S/ " sin punto, fecha "14 setiembre, 2026 08:59" y cargo en cuenta.
+    private func parseBBVAServicePayment(_ cleanText: String) -> Expense? {
+        guard cleanText.contains("Pagar servicio") || cleanText.contains("Pago de servicio") else {
+            return nil
+        }
+        let fullRange = NSRange(location: 0, length: cleanText.utf16.count)
+
+        let amountPattern = "Importe cargado\\s*(S/\\.?|US\\$|\\$|PEN|USD)\\s*([0-9.,]+)"
+        guard let amountRegex = try? NSRegularExpression(pattern: amountPattern, options: []),
+              let amtMatch = amountRegex.firstMatch(in: cleanText, options: [], range: fullRange),
+              let curRange = Range(amtMatch.range(at: 1), in: cleanText),
+              let amtRange = Range(amtMatch.range(at: 2), in: cleanText),
+              let amount = Double(String(cleanText[amtRange]).replacingOccurrences(of: ",", with: "")) else {
+            return nil
+        }
+        let curStr = String(cleanText[curRange])
+        let currency = curStr.contains("$") || curStr == "USD" ? "USD" : "PEN"
+
+        var merchant = "BBVA - Pago de servicio"
+        let merchantPattern = "Nombre de servicio\\s+(.*?)(?=\\s+(?:Descripci|Dato|C[OoÓó][Dd][IiÍí][Gg][Oo]|Fecha|Recuerda))"
+        if let regex = try? NSRegularExpression(pattern: merchantPattern, options: []),
+           let match = regex.firstMatch(in: cleanText, options: [], range: fullRange),
+           let range = Range(match.range(at: 1), in: cleanText) {
+            let extracted = String(cleanText[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !extracted.isEmpty { merchant = extracted }
+        }
+
+        var expenseDate = Date()
+        let datePattern = "Fecha y hora de la operaci[oó]n\\s*([0-9]{1,2})\\s+(?:de\\s+)?([a-zA-Z]+),?\\s+(?:de\\s+)?([0-9]{4})\\s*(?:-|a\\s+las)?\\s*([0-9]{2}:[0-9]{2})"
+        if let regex = try? NSRegularExpression(pattern: datePattern, options: []),
+           let match = regex.firstMatch(in: cleanText, options: [], range: fullRange),
+           let dayRange = Range(match.range(at: 1), in: cleanText),
+           let monthRange = Range(match.range(at: 2), in: cleanText),
+           let yearRange = Range(match.range(at: 3), in: cleanText),
+           let timeRange = Range(match.range(at: 4), in: cleanText) {
+            let months = ["enero": "01", "febrero": "02", "marzo": "03", "abril": "04", "mayo": "05", "junio": "06", "julio": "07", "agosto": "08", "septiembre": "09", "setiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"]
+            if let month = months[String(cleanText[monthRange]).lowercased()] {
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.dateFormat = "dd MM yyyy HH:mm"
+                if let parsed = formatter.date(from: "\(cleanText[dayRange]) \(month) \(cleanText[yearRange]) \(cleanText[timeRange])") {
+                    expenseDate = parsed
+                }
+            }
+        }
+
+        var cardLastDigits: String? = nil
+        let cardPattern = "Cargo en (?:cuenta|tarjeta)\\s*(?:•\\s*)?([0-9]{4})"
+        if let regex = try? NSRegularExpression(pattern: cardPattern, options: []),
+           let match = regex.firstMatch(in: cleanText, options: [], range: fullRange),
+           let range = Range(match.range(at: 1), in: cleanText) {
+            cardLastDigits = String(cleanText[range])
+        }
+
+        return Expense(amount: amount, merchant: merchant, date: expenseDate, category: "Sin Clasificar", currency: currency, cardLastDigits: cardLastDigits)
     }
 }
