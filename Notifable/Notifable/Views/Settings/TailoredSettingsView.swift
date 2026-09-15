@@ -12,6 +12,7 @@ struct TailoredSettingsView: View {
     @AppStorage(AppThemeColor.storageKey) private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     @AppStorage(DashboardView.tapTitleFiltersKey) private var tapTitleFilters = true
+    @AppStorage(PeriodHeader.pinnedBarKey) private var pinsPeriodBar = true
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .blue }
     private var palette: Palette { Palette(scheme, accent: accent) }
@@ -24,6 +25,8 @@ struct TailoredSettingsView: View {
                     .foregroundStyle(palette.secondaryLabel)
                     .padding(.horizontal, 20)
 
+                pinnedPeriodBarSection
+
                 activityTitleTapSection
             }
             .padding(.vertical, 16)
@@ -31,6 +34,18 @@ struct TailoredSettingsView: View {
         .background(palette.background)
         .navigationTitle("A tu medida")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Resumen, Categorías y Ritmo › Barra de periodo
+
+    private var pinnedPeriodBarSection: some View {
+        TailoredToggleSection(title: "Resumen, Categorías y Ritmo · Periodo",
+                              isOn: $pinsPeriodBar,
+                              label: "Fijar la barra de periodo arriba",
+                              detail: pinsPeriodBar
+                                ? "Las flechas, la fecha y el selector de día, semana o mes se quedan fijos bajo la cabecera al desplazarte."
+                                : "La barra de periodo se desplaza con el resto del contenido.",
+                              tint: accent.color)
     }
 
     // MARK: - Resumen › Actividad Reciente
@@ -49,8 +64,8 @@ struct TailoredSettingsView: View {
 /// Valor de la fila en la raíz de Configuración: cuántos ajustes se apartan
 /// del comportamiento por defecto.
 enum TailoredSettings {
-    static func summary(tapTitleFilters: Bool) -> String {
-        let changed = [tapTitleFilters != true].filter { $0 }.count
+    static func summary(tapTitleFilters: Bool, pinsPeriodBar: Bool) -> String {
+        let changed = [tapTitleFilters != true, pinsPeriodBar != true].filter { $0 }.count
         if changed == 0 { return "Por defecto" }
         return changed == 1 ? "1 cambio" : "\(changed) cambios"
     }

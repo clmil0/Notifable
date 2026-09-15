@@ -162,6 +162,7 @@ private struct RhythmContent: View {
                 Spacer(minLength: 100)
             }
         }
+        .pinnedPeriodBar(period: $period)
     }
 
     // MARK: - Titular

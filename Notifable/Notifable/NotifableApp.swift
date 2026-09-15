@@ -66,12 +66,14 @@ struct NotifableApp: App {
                 .appTextSize()
                 .appAppearance()
                 .task {
+                    Diagnostics.shared.log("Configurando respaldo y amigos")
                     // A partir de aquí la sincronización se dispara sola con
                     // cada guardado; ninguna vista tiene que avisarle de nada.
                     backupManager.configure(container: sharedModelContainer)
                     // Pinta Amigos con lo último que se vio, antes de que
                     // AmigosHubView llegue a pedir nada por red.
                     FriendsManager.shared.configure(container: sharedModelContainer)
+                    Diagnostics.shared.log("Respaldo y amigos configurados")
                 }
                 // Presentación en cadena: primero el onboarding y sólo después,
                 // si esa cuenta ya tenía respaldo, la oferta de restaurarlo. Dos
@@ -93,6 +95,7 @@ struct NotifableApp: App {
         }
         .modelContainer(sharedModelContainer) // Inyecta la BD a todas las vistas
         .onChange(of: scenePhase) { oldPhase, newPhase in
+            Diagnostics.shared.log("Fase: \(oldPhase) → \(newPhase)")
             // El bloqueo se arma al **salir**, no al volver: `.inactive` es la
             // pantalla que iOS fotografía para el conmutador de apps, así que
             // esperar al regreso dejaría el saldo a la vista en la vista de
@@ -102,6 +105,7 @@ struct NotifableApp: App {
                 AppLock.shared.sceneDidBecomeActive()
             } else {
                 AppLock.shared.sceneWillResignActive()
+                GmailSyncService.shared.stopForegroundPolling()
             }
 
             if newPhase == .active {
@@ -109,6 +113,7 @@ struct NotifableApp: App {
                     GmailSyncService.shared.modelContext = sharedModelContainer.mainContext
                     GmailSyncService.shared.syncEmails()
                 }
+                GmailSyncService.shared.startForegroundPolling()
                 Task { await ConfigBackupManager.shared.checkForExistingBackup() }
             }
         }

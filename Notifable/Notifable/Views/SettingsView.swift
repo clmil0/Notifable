@@ -46,6 +46,7 @@ struct SettingsView: View {
     // valor sin tener que volver a entrar.
     @AppStorage(AppLock.enabledKey) private var lockEnabled = false
     @AppStorage(DashboardView.tapTitleFiltersKey) private var tapTitleFilters = true
+    @AppStorage(PeriodHeader.pinnedBarKey) private var pinsPeriodBar = true
 
     @State private var query = ""
 
@@ -199,7 +200,8 @@ struct SettingsView: View {
             }
             SettingsSeparator()
             SettingsRow(title: "A tu medida", icon: "slider.horizontal.3",
-                        tint: .orange, value: TailoredSettings.summary(tapTitleFilters: tapTitleFilters)) {
+                        tint: .orange, value: TailoredSettings.summary(tapTitleFilters: tapTitleFilters,
+                                                           pinsPeriodBar: pinsPeriodBar)) {
                 TailoredSettingsView()
             }
             SettingsSeparator()
@@ -217,6 +219,18 @@ struct SettingsView: View {
                         tint: .gray, value: "\(counts.total) gastos") {
                 DataBackupView()
             }
+            SettingsSeparator()
+            SettingsRow(title: "Diagnóstico", icon: "stethoscope",
+                        tint: .gray, value: "Registros") {
+                DiagnosticsView()
+            }
+            #if DEBUG
+            SettingsSeparator()
+            SettingsRow(title: "FinanceKit (POC)", icon: "wallet.pass.fill",
+                        tint: .gray, value: "Debug") {
+                FinanceKitPOCView()
+            }
+            #endif
         }
     }
 

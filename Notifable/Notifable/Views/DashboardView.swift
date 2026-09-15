@@ -364,6 +364,7 @@ private struct DashboardContent: View {
                     .padding(.bottom, 100) // Padding extra para la Floating Bar solamente
                 }
             }
+            .pinnedPeriodBar(period: $period)
         }
         .onChange(of: searchText) { _, _ in visibleTransactionCount = 50; focusBottomSpace = 0 }
         .onChange(of: period) { _, _ in visibleTransactionCount = 50; focusBottomSpace = 0 }

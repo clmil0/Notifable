@@ -716,6 +716,7 @@ struct CategoriesView: View {
                 }
                 .padding(.bottom, 100)
             }
+            .pinnedPeriodBar(period: $period)
             .overlay(alignment: .bottomTrailing) {
                 // Toast Notifications flotantes (Apilados)
                 VStack(alignment: .trailing, spacing: 10) {

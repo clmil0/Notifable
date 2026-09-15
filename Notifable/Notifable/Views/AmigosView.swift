@@ -140,7 +140,7 @@ struct AmigosHubView: View {
     private var profileBanner: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .topTrailing) {
-                SocialGradients.gradient(social.bannerIndex)
+                SocialBannerView(index: social.bannerIndex)
                     .frame(height: 78)
 
                 Button {
@@ -159,20 +159,16 @@ struct AmigosHubView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .bottom, spacing: 12) {
-                    // El aro es un círculo opaco detrás, no un trazo encima: un
-                    // emoji usa `tint.opacity(0.22)` como fondo, y esa
-                    // transparencia dejaba ver la costura entre el degradado y
-                    // el blanco justo donde el avatar cruza el borde del
-                    // banner — la mitad de arriba salía de un color y la de
-                    // abajo de otro.
-                    ZStack {
-                        Circle()
-                            .fill(palette.surface)
-                            .frame(width: 64 + 7, height: 64 + 7)
-                        avatar(glyph: social.avatarEmoji ?? SocialProfileStore.initial(of: social.displayName),
-                               tint: themeColor, size: 64, isEmoji: social.avatarEmoji != nil)
+                    // El fondo del círculo es opaco: el pingüino cruza el borde
+                    // del banner y cualquier transparencia dejaría ver la
+                    // costura entre la textura y la tarjeta.
+                    Button {
+                        showProfileSheet = true
+                    } label: {
+                        PenguinAvatar(look: social.penguin, size: 71, background: palette.surface)
+                            .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
                     }
-                    .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+                    .buttonStyle(.plain)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(social.displayName.isEmpty ? "Tu nombre" : social.displayName)
@@ -189,6 +185,8 @@ struct AmigosHubView: View {
                 .offset(y: -26)
                 .padding(.bottom, -26)
 
+                monthSpendBox
+
                 bannerChips
             }
             .padding(.horizontal, 14)
@@ -198,6 +196,34 @@ struct AmigosHubView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 0.5)
+        )
+    }
+
+    /// 1b: la cifra que se decide compartir, a la vista justo encima de con
+    /// cuántos se comparte. Sólo la ve quien la gastó.
+    private var monthSpendBox: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text("Tu gasto del mes")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(palette.label)
+                Spacer(minLength: 0)
+                Text(Period.spanishMonthName(for: Date()).lowercased())
+                    .font(.caption)
+                    .foregroundStyle(palette.tertiaryLabel)
+            }
+            Text(Money.format(totals.spent))
+                .font(.title2.bold())
+                .foregroundStyle(palette.label)
+                .contentTransition(.numericText())
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
     }
@@ -443,39 +469,32 @@ struct AmigosHubView: View {
 
                     Spacer(minLength: 8)
 
-                    VStack(alignment: .trailing, spacing: 2) {
-                        if let total = incoming.totalAmount {
-                            Text(Money.format(total))
-                                .font(.subheadline.bold())
-                                .foregroundStyle(palette.label)
-                        }
-                        if hasCategories {
-                            Text(incoming.categoryTotals.count == 1 ? "1 categoría" : "\(incoming.categoryTotals.count) categorías")
-                                .font(.caption2)
-                                .foregroundStyle(palette.tertiaryLabel)
-                        }
+                    if let total = incoming.totalAmount {
+                        Text(Money.format(total))
+                            .font(.subheadline.bold())
+                            .foregroundStyle(palette.label)
                     }
 
-                    Button {
-                        if hasCategories {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                expandedFriendID = isExpanded ? nil : entry.friend.id
-                            }
-                        } else {
-                            selectedFriend = entry.friend
-                        }
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(palette.tertiaryLabel)
-                            .rotationEffect(.degrees(hasCategories && isExpanded ? 180 : -90))
-                    }
-                    .buttonStyle(.plain)
+                    Image(systemName: "chevron.right")
+                        .font(.caption.bold())
+                        .foregroundStyle(palette.tertiaryLabel)
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.top, 8)
+                .padding(.bottom, hasCategories ? 4 : 8)
                 .contentShape(Rectangle())
                 .onTapGesture { selectedFriend = entry.friend }
+
+                if hasCategories {
+                    categoriesToggle(incoming, isExpanded: isExpanded) {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            expandedFriendID = isExpanded ? nil : entry.friend.id
+                        }
+                    }
+                    .padding(.leading, 64)
+                    .padding(.trailing, 12)
+                    .padding(.bottom, 10)
+                }
 
                 if hasCategories && isExpanded {
                     categoryBreakdown(incoming)
@@ -485,6 +504,48 @@ struct AmigosHubView: View {
                 }
             }
         )
+    }
+
+    /// 1b: el pie "Ver N categorías" con una barra de proporciones de las tres
+    /// más grandes — se intuye el reparto antes de desplegarlo.
+    private func categoriesToggle(_ incoming: FriendShareRow, isExpanded: Bool,
+                                  action: @escaping () -> Void) -> some View {
+        let top = incoming.categoryTotals.map(\.amount).sorted(by: >).prefix(3)
+        let opacities = [1.0, 0.55, 0.28]
+        let count = incoming.categoryTotals.count
+        return Button(action: action) {
+            HStack(spacing: 8) {
+                GeometryReader { geo in
+                    let sum = top.reduce(0, +)
+                    let spacing = 3.0 * Double(max(0, top.count - 1))
+                    HStack(spacing: 3) {
+                        ForEach(Array(top.enumerated()), id: \.offset) { index, amount in
+                            Capsule()
+                                .fill(themeColor.opacity(opacities[index]))
+                                .frame(width: sum > 0 ? max(4, (geo.size.width - spacing) * amount / sum) : 4)
+                        }
+                    }
+                }
+                .frame(height: 6)
+
+                Text(isExpanded ? "Ocultar" : (count == 1 ? "Ver 1 categoría" : "Ver \(count) categorías"))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(themeColor)
+                    .fixedSize(horizontal: true, vertical: false)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(themeColor)
+                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .background(palette.background, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .stroke(palette.hairline, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func categoryBreakdown(_ incoming: FriendShareRow) -> some View {
@@ -1063,11 +1124,10 @@ struct AddFriendSheet: View {
     }
 }
 
-/// 2h — Tu nombre, tu estado y la cabecera de tu perfil.
+/// 2a — "Tu perfil": pingüino, cabecera y datos en un solo lugar.
 ///
-/// Vista previa arriba y controles abajo: se edita viendo el resultado. Es lo
-/// único tuyo que sale del teléfono hacia tus amigos, así que la nota de
-/// privacidad va aquí y no en un ajuste aparte: se lee justo cuando se decide.
+/// Vista previa arriba y controles abajo: se edita viendo el resultado, tal
+/// como lo verán tus amigos. Nada se guarda hasta "Listo"; "Cerrar" descarta.
 struct MyProfileSheet: View {
 
     @Environment(\.dismiss) private var dismiss
@@ -1078,18 +1138,21 @@ struct MyProfileSheet: View {
     @State private var social = SocialProfileStore.shared
     @State private var auth = SupabaseAuthManager.shared
 
+    private enum Tab: String, CaseIterable, Identifiable {
+        case penguin = "Pingüino", header = "Cabecera", data = "Datos"
+        var id: String { rawValue }
+    }
+
+    @State private var tab: Tab = .penguin
     @State private var nameDraft = ""
     @State private var statusDraft = ""
-    @State private var emojiDraft: String?
     @State private var bannerDraft = 0
+    @State private var penguinDraft = PenguinLook()
     @State private var didLoad = false
 
     private var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     private var palette: Palette { Palette(colorScheme) }
 
-    /// Los mismos del diseño. No es un teclado de emoji entero a propósito: se
-    /// elige de un vistazo o se deja la inicial.
-    private static let emojis = ["🌵", "⚡️", "🏔️", "☕️"]
     private static let statusSuggestions = ["Ahorrando para el viaje a Cusco",
                                             "Mes tranquilo",
                                             "Sin gastos hormiga"]
@@ -1097,163 +1160,307 @@ struct MyProfileSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 16) {
                     headerPreview
-                    bannerPicker
-                    avatarPicker
 
-                    field(title: "Tu nombre") {
-                        TextField("Tu nombre", text: $nameDraft)
-                            .font(.body)
-                            .textInputAutocapitalization(.words)
+                    Picker("Sección", selection: $tab) {
+                        ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
                     }
+                    .pickerStyle(.segmented)
 
-                    field(title: "Estado") {
-                        VStack(alignment: .leading, spacing: 10) {
-                            TextField("Ahorrando para el viaje a Cusco", text: $statusDraft, axis: .vertical)
-                                .font(.body)
-                                .lineLimit(1...2)
-                                .onChange(of: statusDraft) { _, value in
-                                    if value.count > SocialProfileStore.statusLimit {
-                                        statusDraft = String(value.prefix(SocialProfileStore.statusLimit))
-                                    }
-                                }
-
-                            HStack {
-                                Spacer()
-                                Text("\(statusDraft.count)/\(SocialProfileStore.statusLimit)")
-                                    .font(.caption2.monospacedDigit())
-                                    .foregroundStyle(palette.tertiaryLabel)
-                            }
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(Self.statusSuggestions, id: \.self) { suggestion in
-                                    Button { statusDraft = suggestion } label: {
-                                        Text(suggestion)
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(palette.label)
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 8)
-                                            .background(palette.track, in: Capsule())
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.horizontal, 1)
-                        }
-                    }
-
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "lock.fill")
-                            .font(.caption2)
-                            .foregroundStyle(palette.tertiaryLabel)
-                        Text("Tus amigos ven tu nombre, tu ícono, tu cabecera y tu estado. Nunca tus movimientos ni tus comercios.")
-                            .font(.caption)
-                            .foregroundStyle(palette.secondaryLabel)
+                    switch tab {
+                    case .penguin: penguinTab
+                    case .header: headerTab
+                    case .data: dataTab
                     }
                 }
-                .padding(16)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 24)
             }
             .background(palette.background)
-            .navigationTitle("Tu perfil")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cerrar") { dismiss() }
+                }
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 8) {
+                        Text("Tu perfil").font(.headline)
+                        Button(action: shuffle) {
+                            Text("🎲")
+                        }
+                        .accessibilityLabel("Sorpréndeme")
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Listo") { save() }
+                        .fontWeight(.semibold)
                 }
             }
             .onAppear(perform: load)
         }
     }
 
-    /// Vista previa de la cabecera tal como la verán tus amigos.
+    // MARK: - Vista previa
+
     private var headerPreview: some View {
-        ZStack(alignment: .bottomLeading) {
-            SocialGradients.gradient(bannerDraft)
-                .frame(height: 96)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        VStack(alignment: .leading, spacing: 0) {
+            SocialBannerView(index: bannerDraft)
+                .frame(height: 104)
 
-            ZStack {
+            HStack(alignment: .bottom, spacing: 12) {
+                PenguinAvatar(look: penguinDraft, size: 92, background: palette.surface)
+                    .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+                    .animation(.spring(duration: 0.3), value: penguinDraft)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(nameDraft.isEmpty ? "Tu nombre" : nameDraft)
+                        .font(.title3.bold())
+                        .foregroundStyle(nameDraft.isEmpty ? palette.tertiaryLabel : palette.label)
+                        .lineLimit(1)
+                    Text("Así te verán tus amigos")
+                        .font(.footnote)
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+                .padding(.bottom, 4)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .offset(y: -38)
+            .padding(.bottom, -38 + 12)
+        }
+        .background(palette.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 0.5)
+        )
+    }
+
+    // MARK: - Pingüino
+
+    private var penguinTab: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            VStack(spacing: 8) {
+                carouselRow(title: "Raza",
+                            value: penguinDraft.breedStyle.name,
+                            index: penguinDraft.breed, count: PenguinBreed.all.count) { step in
+                    penguinDraft.setBreed(penguinDraft.breed + step)
+                }
+                carouselRow(title: "Edad",
+                            value: PenguinLook.ageNames[penguinDraft.age],
+                            index: penguinDraft.age, count: PenguinLook.ageNames.count) { step in
+                    penguinDraft.age = wrap(penguinDraft.age + step, PenguinLook.ageNames.count)
+                }
+                carouselRow(title: "Manto y aletas",
+                            value: PenguinPalettes.coats[penguinDraft.coat].name,
+                            swatch: penguinDraft.coatHex,
+                            index: penguinDraft.coat, count: PenguinPalettes.coats.count) { step in
+                    penguinDraft.coat = wrap(penguinDraft.coat + step, PenguinPalettes.coats.count)
+                }
+                carouselRow(title: "Acento",
+                            value: PenguinPalettes.accents[penguinDraft.accent].name,
+                            swatch: penguinDraft.accentHex,
+                            index: penguinDraft.accent, count: PenguinPalettes.accents.count) { step in
+                    penguinDraft.accent = wrap(penguinDraft.accent + step, PenguinPalettes.accents.count)
+                }
+                carouselRow(title: "Pico y patas",
+                            value: PenguinPalettes.beaks[penguinDraft.beak].name,
+                            swatch: penguinDraft.beakHex,
+                            index: penguinDraft.beak, count: PenguinPalettes.beaks.count) { step in
+                    penguinDraft.beak = wrap(penguinDraft.beak + step, PenguinPalettes.beaks.count)
+                }
+                carouselRow(title: "Accesorio",
+                            value: penguinDraft.accessoryStyle.name,
+                            index: penguinDraft.accessory, count: PenguinAccessory.allCases.count) { step in
+                    penguinDraft.accessory = wrap(penguinDraft.accessory + step, PenguinAccessory.allCases.count)
+                }
+            }
+
+            Button(action: shuffle) {
+                Text("Sorpréndeme")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(themeColor)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(themeColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(themeColor.opacity(0.22), lineWidth: 0.5)
+                    )
+            }
+            .buttonStyle(.plain)
+
+            lockNote("Tu pingüino y tu cabecera se guardan en este teléfono y viajan en el respaldo. Tus amigos solo ven el resultado.")
+        }
+    }
+
+    private func wrap(_ value: Int, _ count: Int) -> Int { ((value % count) + count) % count }
+
+    private func carouselRow(title: String, value: String, swatch: String? = nil,
+                             index: Int, count: Int, step: @escaping (Int) -> Void) -> some View {
+        HStack(spacing: 10) {
+            if let swatch {
                 Circle()
-                    .fill(.white)
-                    .frame(width: 60 + 6, height: 60 + 6)
-                Text(emojiDraft ?? SocialProfileStore.initial(of: nameDraft))
-                    .font(emojiDraft == nil ? .system(size: 26, weight: .bold) : .system(size: 30))
-                    .foregroundStyle(emojiDraft == nil ? Color.white : Color.primary)
-                    .frame(width: 60, height: 60)
-                    .background(emojiDraft == nil ? themeColor : themeColor.opacity(0.22), in: Circle())
+                    .fill(RGBColor(hex: swatch).color)
+                    .frame(width: 24, height: 24)
+                    .overlay(Circle().stroke(Color.black.opacity(0.16), lineWidth: 0.5))
             }
-            .shadow(color: .black.opacity(0.18), radius: 5, y: 2)
-            .padding(14)
-        }
-    }
-
-    private var bannerPicker: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("CABECERA")
-                .font(.caption2.weight(.semibold))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title.uppercased())
+                    .font(.caption2.weight(.semibold))
+                    .tracking(0.4)
+                    .foregroundStyle(palette.tertiaryLabel)
+                Text(value)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.label)
+                    .contentTransition(.opacity)
+            }
+            Spacer(minLength: 0)
+            Text("\(index + 1) / \(count)")
+                .font(.caption2.monospacedDigit())
                 .foregroundStyle(palette.tertiaryLabel)
-
-            HStack(spacing: 8) {
-                ForEach(SocialGradients.all.indices, id: \.self) { index in
-                    Button { bannerDraft = index } label: {
-                        SocialGradients.gradient(index)
-                            .frame(height: 44)
-                            .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 11, style: .continuous)
-                                    .stroke(bannerDraft == index ? themeColor : Color.clear, lineWidth: 2)
-                                    .padding(-2)
-                            )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
+            stepButton(systemName: "chevron.left", label: "Anterior \(title.lowercased())") { step(-1) }
+            stepButton(systemName: "chevron.right", label: "Siguiente \(title.lowercased())") { step(1) }
         }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 0.5)
+        )
+        .accessibilityElement(children: .contain)
     }
 
-    private var avatarPicker: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text("ÍCONO")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(palette.tertiaryLabel)
-
-            HStack(spacing: 10) {
-                choiceChip(label: SocialProfileStore.initial(of: nameDraft), isSelected: emojiDraft == nil) {
-                    emojiDraft = nil
-                }
-                ForEach(Self.emojis, id: \.self) { emoji in
-                    choiceChip(label: emoji, isSelected: emojiDraft == emoji) { emojiDraft = emoji }
-                }
-            }
-        }
-    }
-
-    private func choiceChip(label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.title3)
-                .frame(width: 44, height: 44)
-                .background(palette.surface, in: Circle())
-                .overlay(
-                    Circle().stroke(isSelected ? themeColor : palette.hairline,
-                                    lineWidth: isSelected ? 2 : 0.5)
-                )
+    private func stepButton(systemName: String, label: String, action: @escaping () -> Void) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { action() }
+        } label: {
+            Image(systemName: systemName)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(themeColor)
+                .frame(width: 30, height: 30)
+                .background(palette.background, in: Circle())
+                .overlay(Circle().stroke(palette.hairline, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private func shuffle() {
+        withAnimation(.spring(duration: 0.35)) {
+            penguinDraft = .random()
+            bannerDraft = Int.random(in: 0..<SocialBanner.allCases.count)
+        }
+    }
+
+    // MARK: - Cabecera
+
+    private var headerTab: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            sectionLabel("Cabecera")
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 12) {
+                ForEach(SocialBanner.allCases, id: \.rawValue) { banner in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { bannerDraft = banner.rawValue }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 5) {
+                            SocialBannerView(banner)
+                                .frame(height: 62)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(bannerDraft == banner.rawValue ? themeColor : palette.hairline,
+                                                lineWidth: bannerDraft == banner.rawValue ? 2.5 : 0.5)
+                                        .padding(bannerDraft == banner.rawValue ? -2.5 : 0)
+                                )
+                            Text(banner.name)
+                                .font(.caption)
+                                .foregroundStyle(palette.secondaryLabel)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(bannerDraft == banner.rawValue ? .isSelected : [])
+                }
+            }
+            lockNote("La cabecera es lo primero que ven tus amigos en tu tarjeta. No muestra ningún monto.")
+        }
+    }
+
+    // MARK: - Datos
+
+    private var dataTab: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            field(title: "Tu nombre") {
+                TextField("Tu nombre", text: $nameDraft)
+                    .font(.body)
+                    .textInputAutocapitalization(.words)
+            }
+
+            VStack(alignment: .trailing, spacing: 5) {
+                field(title: "Estado") {
+                    TextField("Ahorrando para el viaje a Cusco", text: $statusDraft, axis: .vertical)
+                        .font(.body)
+                        .lineLimit(1...2)
+                        .onChange(of: statusDraft) { _, value in
+                            if value.count > SocialProfileStore.statusLimit {
+                                statusDraft = String(value.prefix(SocialProfileStore.statusLimit))
+                            }
+                        }
+                }
+                Text("\(statusDraft.count)/\(SocialProfileStore.statusLimit)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(palette.tertiaryLabel)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Self.statusSuggestions, id: \.self) { suggestion in
+                        Button { statusDraft = suggestion } label: {
+                            Text(suggestion)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(palette.label)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 6)
+                                .background(palette.track, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 1)
+            }
+
+            lockNote("Tus amigos ven tu nombre, tu personaje, tu cabecera y tu estado. Nunca tus movimientos ni tus comercios.")
+        }
+    }
+
+    // MARK: - Piezas
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(.caption2.weight(.semibold))
+            .tracking(0.4)
+            .foregroundStyle(palette.tertiaryLabel)
+    }
+
+    private func lockNote(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "lock.fill")
+                .font(.caption2)
+                .foregroundStyle(palette.tertiaryLabel)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(palette.secondaryLabel)
+        }
     }
 
     private func field<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(palette.tertiaryLabel)
+            sectionLabel(title)
             content()
-                .padding(12)
+                .padding(13)
                 .background(palette.surface)
                 .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .overlay(
@@ -1268,18 +1475,22 @@ struct MyProfileSheet: View {
         didLoad = true
         nameDraft = social.displayName
         statusDraft = social.status
-        emojiDraft = social.avatarEmoji
         bannerDraft = social.bannerIndex ?? 0
+        penguinDraft = social.penguin
+        // Quien llega sin nombre (primera vez en Amigos) empieza por ahí.
+        if social.displayName.isEmpty || social.displayName == "Amigo" { tab = .data }
     }
 
     private func save() {
         let name = nameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         let status = statusDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         social.bannerIndex = bannerDraft
+        social.penguin = penguinDraft
+        let emoji = social.avatarEmoji
         Task {
             await auth.updateProfile(name: name.isEmpty ? "Amigo" : name,
                                      status: status,
-                                     avatarEmoji: emojiDraft)
+                                     avatarEmoji: emoji)
         }
         dismiss()
     }

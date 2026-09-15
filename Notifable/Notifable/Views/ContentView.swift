@@ -136,6 +136,9 @@ struct ContentView: View {
             .background(Color(.systemBackground).ignoresSafeArea())
             .ignoresSafeArea(.keyboard)
             .onAppear(perform: resolveRecurring)
+            .onChange(of: selectedTab) { _, tab in
+                Diagnostics.shared.log("Pestaña: \(tab)")
+            }
             .onChange(of: appLock.isLocked) { _, locked in
                 // Ajustes y las hojas se presentan en la capa de modales de
                 // iOS, por encima de este `ZStack`: si quedaran abiertas, la

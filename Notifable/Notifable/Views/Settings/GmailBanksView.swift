@@ -104,9 +104,14 @@ struct GmailBanksView: View {
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(gmailAuth.isAuthenticated ? "Gmail vinculado" : "Gmail sin vincular")
+                    // La cuenta concreta y no "Gmail vinculado": quien tiene
+                    // varias quiere saber cuál está leyendo la app.
+                    Text(gmailAuth.isAuthenticated ? (gmailAuth.accountEmail ?? "Gmail vinculado") : "Gmail sin vincular")
                         .font(.headline)
                         .foregroundStyle(palette.label)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .minimumScaleFactor(0.8)
                     Text(gmailAuth.isAuthenticated
                          ? "Conectado · sólo lectura"
                          : "AgruPay lee los avisos de tu banco para registrar gastos solo.")
@@ -176,12 +181,16 @@ struct GmailBanksView: View {
     private var lastReadRow: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                (Text("Última lectura · ")
-                    .foregroundStyle(palette.secondaryLabel)
-                 + Text(lastSyncLabel)
-                    .foregroundStyle(palette.label)
-                    .fontWeight(.semibold))
-                    .font(.caption)
+                // Se redibuja sola: la lectura corre cada minuto con la app
+                // abierta y "hace 6 min" no puede quedarse congelado en pantalla.
+                TimelineView(.periodic(from: .now, by: 15)) { _ in
+                    (Text("Última lectura · ")
+                        .foregroundStyle(palette.secondaryLabel)
+                     + Text(lastSyncLabel)
+                        .foregroundStyle(palette.label)
+                        .fontWeight(.semibold))
+                        .font(.caption)
+                }
                 Spacer()
                 Text("\(cachedEmailCount) en caché")
                     .font(.caption.monospacedDigit())
@@ -378,10 +387,20 @@ struct GmailBanksView: View {
     /// usan el acento del usuario, no cinco colores fijos.
     private var banksSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("BANCOS QUE SE LEEN")
-                .font(.caption)
-                .foregroundStyle(palette.secondaryLabel)
-                .padding(.horizontal, 20)
+            // "Bancos que se leen" sonaba a que la app había encontrado
+            // cuentas en esos bancos: quien no tiene Scotiabank se asustaba al
+            // verlo. Se aclara antes de la lista que es lo que AgruPay sabe
+            // leer, no dónde tiene cuentas el usuario.
+            VStack(alignment: .leading, spacing: 4) {
+                Text("BANCOS COMPATIBLES")
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
+                Text("Son los bancos cuyos avisos AgruPay sabe leer. No significa que tengas cuenta en ellos: si no usas alguno, simplemente no llegará nada suyo.")
+                    .font(.caption)
+                    .foregroundStyle(palette.tertiaryLabel)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 20)
 
             VStack(spacing: 0) {
                 ForEach(Array(BankSource.all.enumerated()), id: \.element.id) { index, bank in
@@ -487,5 +506,5 @@ struct GmailBanksView: View {
     }
 
     // El botón de desvincular vive dentro de `accountCard`, en la misma fila
-    // que "Gmail vinculado".
+    // que la cuenta vinculada.
 }

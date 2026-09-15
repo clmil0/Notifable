@@ -35,6 +35,7 @@ struct ExpenseDetailsView: View {
 
     @State private var showingCategoryPicker = false
     @State private var showingEditor = false
+    @State private var showingCollect = false
     @State private var showingDeleteConfirmation = false
     @ScaledAmountFont(40) private var amountSize
 
@@ -103,6 +104,9 @@ struct ExpenseDetailsView: View {
             }
             .sheet(isPresented: $showingEditor) {
                 EditExpenseSheet(expense: expense)
+            }
+            .sheet(isPresented: $showingCollect) {
+                AddTransactionSheet(collecting: expense)
             }
             .alert("¿Eliminar movimiento?", isPresented: $showingDeleteConfirmation) {
                 Button("Cancelar", role: .cancel) {}
@@ -358,9 +362,27 @@ struct ExpenseDetailsView: View {
         let ratio = min(Money.ratio(paid, to: expense.amount) ?? 0, 1.0)
 
         VStack(alignment: .leading, spacing: 12) {
-            Text("Estado del cobro")
-                .font(.headline)
-                .foregroundStyle(palette.label)
+            HStack {
+                Text("Estado del cobro")
+                    .font(.headline)
+                    .foregroundStyle(palette.label)
+                Spacer()
+                // Sólo mientras sigue por cobrar: saldada, no hay nada que
+                // registrar. Abre el ingreso ya asignado a este gasto.
+                if expense.isDebt {
+                    Button { showingCollect = true } label: {
+                        Label("Registrar cobro", systemImage: "plus")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(palette.positive)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(palette.positive.opacity(0.14))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity)
+                }
+            }
 
             HStack {
                 Text(Money.format(paid, currency: expense.currency) + " devuelto")

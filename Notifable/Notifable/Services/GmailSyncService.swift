@@ -43,9 +43,45 @@ class GmailSyncService: ObservableObject {
         self.lastSyncDate = UserDefaults.standard.object(forKey: "lastSyncDate") as? Date
     }
     
-    func syncEmails(force: Bool = false, startDate: Date? = nil, endDate: Date? = nil) {
-        // Throttling: Solo sincronizar si ha pasado más de 1 min o si es forzado
-        if !force, let lastSync = lastSyncDate, Date().timeIntervalSince(lastSync) < 1 * 60 {
+    // MARK: - Comprobación con la app abierta
+
+    /// Cada cuánto se mira el correo mientras la app está en primer plano.
+    static let foregroundPollInterval: TimeInterval = 60
+
+    private var pollTimer: Timer?
+
+    /// Arranca la comprobación de cada minuto. Antes sólo se leía al volver a
+    /// primer plano, así que con la app abierta un rato "Última lectura"
+    /// envejecía y parecía que había dejado de registrar.
+    ///
+    /// Cuesta muy poco: cuando no hay correo nuevo es **una** petición
+    /// `messages.list` (unos pocos KB, 5 unidades de cuota de Gmail, muy lejos
+    /// del límite por usuario). Sólo si aparece un correo sin procesar se
+    /// descarga ese mensaje. Se detiene al salir de la app: en segundo plano no
+    /// corre nada.
+    func startForegroundPolling() {
+        stopForegroundPolling()
+        let timer = Timer(timeInterval: Self.foregroundPollInterval, repeats: true) { [weak self] _ in
+            guard let self, GmailAuthService.shared.isAuthenticated, !self.isSyncing else { return }
+            self.syncEmails(quiet: true)
+        }
+        timer.tolerance = 5
+        RunLoop.main.add(timer, forMode: .common)
+        pollTimer = timer
+    }
+
+    func stopForegroundPolling() {
+        pollTimer?.invalidate()
+        pollTimer = nil
+    }
+
+    /// - Parameter quiet: comprobación periódica. No enciende `isSyncing` (que
+    ///   en Gmail y bancos cambia la fila de "Última lectura" por la barra de
+    ///   progreso) salvo que de verdad haya correos nuevos que procesar.
+    func syncEmails(force: Bool = false, quiet: Bool = false, startDate: Date? = nil, endDate: Date? = nil) {
+        // Throttling: un poco menos del intervalo del temporizador, para que su
+        // propio desfase no le haga saltarse una vuelta.
+        if !force, let lastSync = lastSyncDate, Date().timeIntervalSince(lastSync) < Self.foregroundPollInterval - 10 {
             print("Sync throttled. Last sync was \(Int(Date().timeIntervalSince(lastSync)/60)) minutes ago.")
             return
         }
@@ -61,12 +97,15 @@ class GmailSyncService: ObservableObject {
             return
         }
         
-        DispatchQueue.main.async {
-            self.isSyncing = true
-            self.lastSyncError = nil
-            self.totalEmailsToProcess = 0
-            self.emailsProcessed = 0
-            self.expensesFoundByBank = [:]
+        Diagnostics.shared.log("Sync Gmail: inicio (force: \(force), rango: \(startDate != nil || endDate != nil))")
+        if !quiet {
+            DispatchQueue.main.async {
+                self.isSyncing = true
+                self.lastSyncError = nil
+                self.totalEmailsToProcess = 0
+                self.emailsProcessed = 0
+                self.expensesFoundByBank = [:]
+            }
         }
         
         guard let token = GmailAuthService.shared.getAccessToken() else {
@@ -82,7 +121,8 @@ class GmailSyncService: ObservableObject {
             case .success(let messages):
                 self?.processMessages(messages, token: token,
                                       isRangeSync: startDate != nil || endDate != nil,
-                                      coversNow: Self.reachesNow(endDate))
+                                      coversNow: Self.reachesNow(endDate),
+                                      quiet: quiet)
             case .failure(let error):
                 // Token might be expired, try to refresh
                 print("Failed to fetch messages: \(error). Trying to refresh token...")
@@ -93,7 +133,8 @@ class GmailSyncService: ObservableObject {
                             case .success(let msgs):
                                 self?.processMessages(msgs, token: newToken,
                                                       isRangeSync: startDate != nil || endDate != nil,
-                                                      coversNow: Self.reachesNow(endDate))
+                                                      coversNow: Self.reachesNow(endDate),
+                                                      quiet: quiet)
                             case .failure(let err):
                                 DispatchQueue.main.async {
                                     self?.isSyncing = false
@@ -254,7 +295,8 @@ class GmailSyncService: ObservableObject {
     private func processMessages(_ messages: [[String: Any]],
                                  token: String,
                                  isRangeSync: Bool = false,
-                                 coversNow: Bool = true) {
+                                 coversNow: Bool = true,
+                                 quiet: Bool = false) {
         let processedIDs = UserDefaults.standard.stringArray(forKey: "processedEmailIDs") ?? []
         // Borrados a propósito: no se resucitan solos. Para recuperarlos está
         // "Recuperación de Gastos" en Ajustes.
@@ -270,15 +312,23 @@ class GmailSyncService: ObservableObject {
             return isRangeSync || !processedIDs.contains(id)
         }
         
-        DispatchQueue.main.async {
+        // Sin nada nuevo la comprobación no se ve ni toca los contadores (el
+        // onboarding los lee para dar por terminada su lectura); con correos
+        // que procesar se enseña el progreso, como una lectura normal.
+        if !(quiet && newMessages.isEmpty) { DispatchQueue.main.async {
+            if quiet {
+                self.isSyncing = true
+                self.lastSyncError = nil
+            }
             self.totalEmailsToProcess = newMessages.count
             self.emailsProcessed = 0
             self.expensesFoundByBank = [:]
             for parser in self.parsers {
                 self.expensesFoundByBank[parser.bankName] = 0
             }
-        }
+        } }
         
+        Diagnostics.shared.log("Sync Gmail: \(newMessages.count) correos por procesar de \(messages.count)")
         var newIDs = processedIDs
         let queue = DispatchQueue(label: "com.notifable.syncQueue") // Para evitar race conditions
         
@@ -360,6 +410,7 @@ class GmailSyncService: ObservableObject {
                     ConfigBackupManager.reapplyPendingDecisions(modelContext: context)
                 }
                 print("Sync complete. Found \(newExpensesFound) new expenses of \(newMessages.count) checked.")
+                Diagnostics.shared.log("Sync Gmail: fin, \(newExpensesFound) nuevos")
             }
         }
     }

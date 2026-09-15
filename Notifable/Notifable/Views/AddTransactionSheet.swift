@@ -47,6 +47,17 @@ struct AddTransactionSheet: View {
         _draft = State(initialValue: TransactionDraft(type: transactionType))
     }
 
+    /// Cobro de una deuda concreta, abierto desde "Estado del cobro" en el
+    /// detalle del gasto: ingreso, marcado como abono, con esa deuda elegida y
+    /// su moneda. Sólo queda escribir el monto.
+    init(collecting debt: Expense) {
+        var draft = TransactionDraft(type: .ingreso)
+        draft.isDebtPayment = true
+        draft.currency = debt.currency
+        draft.selectDebt(debt)
+        _draft = State(initialValue: draft)
+    }
+
     // MARK: - Colores
 
     private var palette: Palette { Palette(scheme) }

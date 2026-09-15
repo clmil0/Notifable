@@ -38,6 +38,7 @@ struct CategorySettingsView: View {
     @State private var showingMerge = false
     @State private var showingAddMerchant = false
     @State private var confirmingDelete = false
+    @State private var infoTopic: BehaviourInfo?
     @State private var merchants: [String] = []
     @State private var loaded = false
     /// No-nil mientras renombrar/fusionar/eliminar recorre todo el historial
@@ -56,13 +57,19 @@ struct CategorySettingsView: View {
             VStack(alignment: .leading, spacing: 22) {
                 identity
                 limitCard
-                behaviourSection
+                // Sin límite no hay nada a lo que avisar ni sobrante que pasar:
+                // la sección aparece recién al ponerlo.
+                if activeBudget != nil {
+                    behaviourSection
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
                 merchantsSection
                 if !isNew && !CategoryCatalog.isSystem(currentName) {
                     destructiveSection
                 }
             }
             .padding(.vertical, 16)
+            .animation(.spring(response: 0.35, dampingFraction: 0.85), value: activeBudget != nil)
         }
         .background(palette.background)
         .navigationTitle(isNew ? "Nueva categoría" : "")
@@ -81,6 +88,13 @@ struct CategorySettingsView: View {
         .sheet(isPresented: $showingLimit) { limitEditor }
         .sheet(isPresented: $showingMerge) { mergePicker }
         .sheet(isPresented: $showingAddMerchant) { merchantPicker }
+        .alert(infoTopic?.title ?? "", isPresented: Binding(get: { infoTopic != nil },
+                                                          set: { if !$0 { infoTopic = nil } }),
+               presenting: infoTopic) { _ in
+            Button("Entendido", role: .cancel) {}
+        } message: { topic in
+            Text(topic.message)
+        }
         .alert("¿Eliminar \(currentName)?", isPresented: $confirmingDelete) {
             Button("Cancelar", role: .cancel) {}
             Button("Eliminar", role: .destructive) { deleteCategory() }
@@ -347,13 +361,10 @@ struct CategorySettingsView: View {
             VStack(spacing: 0) {
                 thresholdRow
                 separator
-                toggleRow(title: "Traspasar sobrante",
-                          detail: "Lo que no gastes suma al ciclo siguiente",
+                toggleRow(title: "Pasar lo que sobre",
+                          detail: rolloverDetail,
+                          info: .rollover,
                           isOn: rollsOverBinding)
-                separator
-                toggleRow(title: "Contar en el presupuesto",
-                          detail: "Apágalo para gastos reembolsables",
-                          isOn: countsBinding)
             }
             .background(palette.surface)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -365,10 +376,37 @@ struct CategorySettingsView: View {
         }
     }
 
+    /// "Contar en el presupuesto" se quitó: no se entendía y, además, no
+    /// cambiaba nada — sólo alimentaba `assignedTotal`, que ninguna pantalla
+    /// muestra. El campo sigue en `CategoryBudget` por los respaldos.
+    private var rolloverDetail: String {
+        let cycle = draft?.cycle ?? .mes
+        let (this, next): (String, String) = {
+            switch cycle {
+            case .semana:   return ("esta semana", "de la semana siguiente")
+            case .quincena: return ("esta quincena", "de la quincena siguiente")
+            case .mes:      return ("este mes", "del mes siguiente")
+            case .anio:     return ("este año", "del año siguiente")
+            }
+        }()
+        return "Lo que no gastes \(this) se añadirá al límite \(next). Sólo pasa una vez: no se acumula."
+    }
+
     private var thresholdRow: some View {
         HStack {
-            Text("Avisarme al")
-                .foregroundStyle(palette.label)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("Avisarme al llegar al")
+                        .foregroundStyle(palette.label)
+                    infoButton(.threshold)
+                }
+                Text(draft?.alertThreshold == nil
+                     ? "Sólo te avisamos si te pasas del límite"
+                     : "Te enviamos una notificación al gastar ese porcentaje del límite")
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer()
             Menu {
                 Button("50%") { setThreshold(0.5) }
@@ -394,10 +432,49 @@ struct CategorySettingsView: View {
         return String(Int((value * 100).rounded())) + "%"
     }
 
-    private func toggleRow(title: String, detail: String, isOn: Binding<Bool>) -> some View {
+    // MARK: - Ayuda de cada opción
+
+    enum BehaviourInfo: String, Identifiable {
+        case threshold, rollover
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .threshold: return "Avisarme al llegar al…"
+            case .rollover:  return "Pasar lo que sobre"
+            }
+        }
+
+        var message: String {
+            switch self {
+            case .threshold:
+                return "Cuando lo que gastas en esta categoría llega a ese porcentaje del límite, la categoría se marca como «cerca» y te llega una notificación. Si te pasas del límite, te avisamos otra vez.\n\nCon «Nunca» sólo recibes el aviso de que te pasaste."
+            case .rollover:
+                return "Si el mes pasado tu límite era S/ 500 y gastaste S/ 400, este mes tu límite será S/ 600.\n\nSólo cuenta el mes inmediatamente anterior: lo que sobra no se va sumando mes tras mes. La tarjeta del límite te muestra cuánto se traspasó."
+            }
+        }
+    }
+
+    /// Icono "?" junto al título. Dentro del `Toggle` también funciona: en iOS
+    /// el interruptor sólo cambia al tocar el propio switch.
+    private func infoButton(_ topic: BehaviourInfo) -> some View {
+        Button { infoTopic = topic } label: {
+            Image(systemName: "questionmark.circle")
+                .font(.subheadline)
+                .foregroundStyle(palette.secondaryLabel)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Qué significa " + topic.title)
+    }
+
+    private func toggleRow(title: String, detail: String, info: BehaviourInfo, isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).foregroundStyle(palette.label)
+                HStack(spacing: 6) {
+                    Text(title).foregroundStyle(palette.label)
+                    infoButton(info)
+                }
                 Text(detail)
                     .font(.caption)
                     .foregroundStyle(palette.secondaryLabel)
@@ -420,17 +497,12 @@ struct CategorySettingsView: View {
                 set: { value in mutate { $0.rollsOver = value } })
     }
 
-    private var countsBinding: Binding<Bool> {
-        Binding(get: { draft?.countsInGlobalBudget ?? true },
-                set: { value in mutate { $0.countsInGlobalBudget = value } })
-    }
-
     private func setThreshold(_ value: Double?) {
         mutate { $0.alertThreshold = value }
     }
 
-    /// Cambiar el comportamiento antes de poner un monto crea la fila igualmente:
-    /// así "no cuenta en el presupuesto" se puede dejar puesto de antemano.
+    /// Crea la fila si aún no existe. Con la sección oculta hasta tener
+    /// límite, en la práctica siempre existe ya.
     private func mutate(_ change: (inout CategoryBudget) -> Void) {
         var budget = draft ?? CategoryBudget(category: currentName, amount: 0)
         change(&budget)

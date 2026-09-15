@@ -76,11 +76,25 @@ private struct ShieldContent: View {
 /// puede prometer.
 @MainActor
 final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        // Lo más temprano posible: un cuelgue en el arranque también debe quedar.
+        Diagnostics.shared.start()
+        return true
+    }
+
+    // Los cierres por watchdog que ha tenido la app son de "scene-update": iOS
+    // pide un cambio de escena y la app no contesta. Marcar la entrada y la
+    // salida de estos callbacks dice si el atasco empieza aquí.
     func applicationWillResignActive(_ application: UIApplication) {
+        Diagnostics.shared.log("willResignActive: inicio")
         PrivacyShield.show()
+        Diagnostics.shared.log("willResignActive: fin")
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
+        Diagnostics.shared.log("didBecomeActive: inicio")
         PrivacyShield.hide()
+        Diagnostics.shared.log("didBecomeActive: fin")
     }
 }
