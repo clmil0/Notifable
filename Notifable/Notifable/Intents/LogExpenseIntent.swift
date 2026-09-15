@@ -46,8 +46,8 @@ struct LogExpenseIntent: AppIntent {
         }
         
         do {
-            let container = try ModelContainer(for: Expense.self)
-            let context = container.mainContext
+            // El contenedor de la app, no uno propio: ver `AppModelContainer`.
+            let context = AppModelContainer.shared.mainContext
             
             // Auto-categorización básica (Prueba de concepto)
             var autoCategory = "Sin Clasificar"
@@ -66,7 +66,8 @@ struct LogExpenseIntent: AppIntent {
             context.insert(newExpense)
             
             try context.save()
-            
+            WidgetSnapshotWriter.shared.refreshNow()
+
             print("Expense saved successfully: $\(finalAmount) at \(finalMerchant) (\(autoCategory))")
             return .result()
         } catch {
@@ -110,19 +111,5 @@ struct LogExpenseIntent: AppIntent {
         }
         
         return (amount, merchant.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-}
-
-// Este proveedor expone automáticamente el Intent a Siri y a la app Atajos
-struct NotifableShortcutsProvider: AppShortcutsProvider {
-    static var appShortcuts: [AppShortcut] {
-        AppShortcut(
-            intent: LogExpenseIntent(),
-            phrases: [
-                "Log an expense in \(.applicationName)"
-            ],
-            shortTitle: "Log Expense",
-            systemImageName: "dollarsign.circle"
-        )
     }
 }

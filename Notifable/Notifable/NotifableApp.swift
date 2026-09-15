@@ -7,26 +7,8 @@ struct NotifableApp: App {
     /// punto que UIKit garantiza que corre antes de que el sistema fotografíe
     /// la pantalla para el selector de apps.
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    // Configura el contenedor principal de la base de datos de SwiftData
-    var sharedModelContainer: ModelContainer = {
-        // Migración aditiva: SwiftData crea las tablas nuevas sin tocar las
-        // existentes.
-        let schema = Schema([
-            Expense.self,
-            Income.self,
-            RecurringExpense.self,
-            QuickExpense.self,
-            CachedFriend.self,
-            CachedFriendShare.self
-        ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("No se pudo crear el ModelContainer: \(error)")
-        }
-    }()
+    // El mismo contenedor que usan los intents de Siri: ver `AppModelContainer`.
+    var sharedModelContainer: ModelContainer { AppModelContainer.shared }
 
     init() {
         // Traduce el `dashboardFilter` guardado por la versión anterior al
@@ -40,6 +22,10 @@ struct NotifableApp: App {
         NotificationSettings.migrateIfNeeded()
         // Rebrand: el tema pasa a "Azul" (el azul del ícono), una sola vez.
         AppThemeColor.migrateToBrandBlueIfNeeded()
+        // En `init` y no en el `.task` de la ventana: cuando Siri despierta la
+        // app en segundo plano no se monta ninguna escena, y el guardado de un
+        // intent también tiene que llegar a los widgets.
+        WidgetSnapshotWriter.shared.start(container: AppModelContainer.shared)
         // Quien ya venía usando la app no tiene por qué ver el onboarding: si
         // hay correo conectado o correos ya procesados, se da por visto.
         let defaults = UserDefaults.standard

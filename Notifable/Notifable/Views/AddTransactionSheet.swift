@@ -47,6 +47,19 @@ struct AddTransactionSheet: View {
         _draft = State(initialValue: TransactionDraft(type: transactionType))
     }
 
+    /// Desde un enlace `agrupay://` (widget o Atajos): ingreso con la fuente
+    /// ya elegida, o un gasto rápido que se registra al abrir con la opción de
+    /// deshacer — el mismo camino que el doble toque.
+    init(transactionType: TransactionType, source: String?, savingQuick quickID: UUID?) {
+        var draft = TransactionDraft(type: transactionType)
+        if let source { draft.source = source }
+        _draft = State(initialValue: draft)
+        _pendingQuickSave = State(initialValue: quickID)
+    }
+
+    /// Gasto rápido por registrar al aparecer. Se consume una sola vez.
+    @State private var pendingQuickSave: UUID?
+
     /// Cobro de una deuda concreta, abierto desde "Estado del cobro" en el
     /// detalle del gasto: ingreso, marcado como abono, con esa deuda elegida y
     /// su moneda. Sólo queda escribir el monto.
@@ -111,6 +124,13 @@ struct AddTransactionSheet: View {
                             titleVisibility: .visible) {
             Button("Descartar movimiento", role: .destructive) { dismiss() }
             Button("Seguir editando", role: .cancel) {}
+        }
+        .onAppear {
+            guard let id = pendingQuickSave else { return }
+            pendingQuickSave = nil
+            if let quick = quickExpenses.first(where: { $0.id == id }) {
+                saveImmediately(quick)
+            }
         }
         .sheet(isPresented: $showDatePicker) { datePickerSheet }
         .sheet(isPresented: $showAllCategories) { categoryListSheet }

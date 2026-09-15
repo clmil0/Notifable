@@ -6,7 +6,18 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AA20000D30415B9C00D1EEB9 /* NotifableWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AA20000130415B9C00D1EEB9 /* NotifableWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
+		AA20000E30415B9C00D1EEB9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = E7CE96C430415B9A00D1EEB9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA20000530415B9C00D1EEB9;
+			remoteInfo = NotifableWidgetsExtension;
+		};
 		E7CE96DF30415B9C00D1EEB9 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = E7CE96C430415B9A00D1EEB9 /* Project object */;
@@ -23,15 +34,63 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		AA20000C30415B9C00D1EEB9 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				AA20000D30415B9C00D1EEB9 /* NotifableWidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		AA20000130415B9C00D1EEB9 /* NotifableWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NotifableWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		E7CE96CC30415B9A00D1EEB9 /* Notifable.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Notifable.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E7CE96DE30415B9C00D1EEB9 /* NotifableTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NotifableTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		E7CE96E830415B9C00D1EEB9 /* NotifableUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NotifableUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		AA20000330415B9C00D1EEB9 /* Exceptions for "NotifableWidgets" folder in "NotifableWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = AA20000530415B9C00D1EEB9 /* NotifableWidgetsExtension */;
+		};
+		AA20000430415B9C00D1EEB9 /* Exceptions for "Notifable" folder in "Notifable" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = E7CE96CB30415B9A00D1EEB9 /* Notifable */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		AA10000130415B9C00D1EEB9 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		AA20000230415B9C00D1EEB9 /* NotifableWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				AA20000330415B9C00D1EEB9 /* Exceptions for "NotifableWidgets" folder in "NotifableWidgetsExtension" target */,
+			);
+			path = NotifableWidgets;
+			sourceTree = "<group>";
+		};
 		E7CE96CE30415B9A00D1EEB9 /* Notifable */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				AA20000430415B9C00D1EEB9 /* Exceptions for "Notifable" folder in "Notifable" target */,
+			);
 			path = Notifable;
 			sourceTree = "<group>";
 		};
@@ -48,6 +107,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		AA20000730415B9C00D1EEB9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E7CE96C930415B9A00D1EEB9 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -76,6 +142,8 @@
 			isa = PBXGroup;
 			children = (
 				E7CE96CE30415B9A00D1EEB9 /* Notifable */,
+				AA10000130415B9C00D1EEB9 /* Shared */,
+				AA20000230415B9C00D1EEB9 /* NotifableWidgets */,
 				E7CE96E130415B9C00D1EEB9 /* NotifableTests */,
 				E7CE96EB30415B9C00D1EEB9 /* NotifableUITests */,
 				E7CE96CD30415B9A00D1EEB9 /* Products */,
@@ -88,6 +156,7 @@
 				E7CE96CC30415B9A00D1EEB9 /* Notifable.app */,
 				E7CE96DE30415B9C00D1EEB9 /* NotifableTests.xctest */,
 				E7CE96E830415B9C00D1EEB9 /* NotifableUITests.xctest */,
+				AA20000130415B9C00D1EEB9 /* NotifableWidgetsExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -95,6 +164,29 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		AA20000530415B9C00D1EEB9 /* NotifableWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA20000930415B9C00D1EEB9 /* Build configuration list for PBXNativeTarget "NotifableWidgetsExtension" */;
+			buildPhases = (
+				AA20000630415B9C00D1EEB9 /* Sources */,
+				AA20000730415B9C00D1EEB9 /* Frameworks */,
+				AA20000830415B9C00D1EEB9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				AA10000130415B9C00D1EEB9 /* Shared */,
+				AA20000230415B9C00D1EEB9 /* NotifableWidgets */,
+			);
+			name = NotifableWidgetsExtension;
+			packageProductDependencies = (
+			);
+			productName = NotifableWidgetsExtension;
+			productReference = AA20000130415B9C00D1EEB9 /* NotifableWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		E7CE96CB30415B9A00D1EEB9 /* Notifable */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = E7CE96F230415B9C00D1EEB9 /* Build configuration list for PBXNativeTarget "Notifable" */;
@@ -102,12 +194,15 @@
 				E7CE96C830415B9A00D1EEB9 /* Sources */,
 				E7CE96C930415B9A00D1EEB9 /* Frameworks */,
 				E7CE96CA30415B9A00D1EEB9 /* Resources */,
+				AA20000C30415B9C00D1EEB9 /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				AA20000F30415B9C00D1EEB9 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
+				AA10000130415B9C00D1EEB9 /* Shared */,
 				E7CE96CE30415B9A00D1EEB9 /* Notifable */,
 			);
 			name = Notifable;
@@ -173,6 +268,9 @@
 				LastSwiftUpdateCheck = 1620;
 				LastUpgradeCheck = 1620;
 				TargetAttributes = {
+					AA20000530415B9C00D1EEB9 = {
+						CreatedOnToolsVersion = 26.6;
+					};
 					E7CE96CB30415B9A00D1EEB9 = {
 						CreatedOnToolsVersion = 16.2;
 					};
@@ -192,6 +290,7 @@
 			knownRegions = (
 				en,
 				Base,
+				es,
 			);
 			mainGroup = E7CE96C330415B9A00D1EEB9;
 			minimizedProjectReferenceProxies = 1;
@@ -203,11 +302,19 @@
 				E7CE96CB30415B9A00D1EEB9 /* Notifable */,
 				E7CE96DD30415B9C00D1EEB9 /* NotifableTests */,
 				E7CE96E730415B9C00D1EEB9 /* NotifableUITests */,
+				AA20000530415B9C00D1EEB9 /* NotifableWidgetsExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		AA20000830415B9C00D1EEB9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E7CE96CA30415B9A00D1EEB9 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -232,6 +339,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		AA20000630415B9C00D1EEB9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E7CE96C830415B9A00D1EEB9 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -256,6 +370,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		AA20000F30415B9C00D1EEB9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA20000530415B9C00D1EEB9 /* NotifableWidgetsExtension */;
+			targetProxy = AA20000E30415B9C00D1EEB9 /* PBXContainerItemProxy */;
+		};
 		E7CE96E030415B9C00D1EEB9 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = E7CE96CB30415B9A00D1EEB9 /* Notifable */;
@@ -269,6 +388,64 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		AA20000A30415B9C00D1EEB9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = NotifableWidgets/NotifableWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = PPQPXJMF36;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NotifableWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = AgruPay;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.2.2;
+				PRODUCT_BUNDLE_IDENTIFIER = clmilo.Notifable.NotifableWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AA20000B30415B9C00D1EEB9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = NotifableWidgets/NotifableWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = PPQPXJMF36;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = NotifableWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = AgruPay;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.2.2;
+				PRODUCT_BUNDLE_IDENTIFIER = clmilo.Notifable.NotifableWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		E7CE96F030415B9C00D1EEB9 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -394,12 +571,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = Notifable/Notifable.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Notifable/Preview Content\"";
 				DEVELOPMENT_TEAM = PPQPXJMF36;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Notifable/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = AgruPay;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Para desbloquear AgruPay y proteger tus movimientos, deudas e ingresos.";
@@ -413,7 +592,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = clmilo.Notifable;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -428,12 +607,14 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
+				CODE_SIGN_ENTITLEMENTS = Notifable/Notifable.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "\"Notifable/Preview Content\"";
 				DEVELOPMENT_TEAM = PPQPXJMF36;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Notifable/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = AgruPay;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "Para desbloquear AgruPay y proteger tus movimientos, deudas e ingresos.";
@@ -447,7 +628,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.2.1;
+				MARKETING_VERSION = 1.2.2;
 				PRODUCT_BUNDLE_IDENTIFIER = clmilo.Notifable;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -535,6 +716,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		AA20000930415B9C00D1EEB9 /* Build configuration list for PBXNativeTarget "NotifableWidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA20000A30415B9C00D1EEB9 /* Debug */,
+				AA20000B30415B9C00D1EEB9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		E7CE96C730415B9A00D1EEB9 /* Build configuration list for PBXProject "Notifable" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

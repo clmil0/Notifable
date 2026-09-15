@@ -55,6 +55,12 @@ struct ContentView: View {
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
     @Environment(\.colorScheme) private var systemScheme
     @State private var selectedTransactionType: TransactionType? = nil
+    /// Lo que pidió el último enlace `agrupay://` para el formulario.
+    @State private var linkedSource: String?
+    @State private var linkedQuickID: UUID?
+    /// Un enlace que llegó con la app bloqueada o con el splash: se aplica al
+    /// desbloquear, nunca por encima de la pantalla de bloqueo.
+    @State private var pendingLink: AppDeepLink?
     @State private var showAddPicker = false
     @State private var showSplash = true
     @StateObject private var appLock = AppLock.shared
@@ -82,6 +88,52 @@ struct ContentView: View {
             merchant: awaiting.first.map { Accounting.displayName($0.merchant) },
             enabled: remindRecurring
         )
+    }
+
+    // MARK: - Enlaces
+
+    private func applyPendingLinkIfReady() {
+        guard let link = pendingLink, !appLock.isLocked, !showSplash else { return }
+        pendingLink = nil
+        showAddPicker = false
+        showSettings = false
+
+        switch link {
+        case let .add(isIncome, source):
+            presentAdd(isIncome ? .ingreso : .gasto, source: source, quickID: nil)
+        case .quick(let id):
+            presentAdd(.gasto, source: nil, quickID: id)
+        case .summary:
+            selectedTransactionType = nil
+            selectedTab = .home
+        case .categories:
+            selectedTransactionType = nil
+            categoriesSegment = .misCategorias
+            selectedTab = .categories
+        case .pending:
+            selectedTransactionType = nil
+            categoriesSegment = .inbox
+            selectedTab = .categories
+        case .rhythm:
+            selectedTransactionType = nil
+            selectedTab = .trends
+        }
+    }
+
+    /// Si ya había un formulario abierto se cierra primero: cambiar el
+    /// `item` de una hoja presentada no la vuelve a construir.
+    private func presentAdd(_ type: TransactionType, source: String?, quickID: UUID?) {
+        let open = {
+            linkedSource = source
+            linkedQuickID = quickID
+            selectedTransactionType = type
+        }
+        if selectedTransactionType != nil {
+            selectedTransactionType = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: open)
+        } else {
+            open()
+        }
     }
 
     /// Cada opción cierra el menú y abre su propio modal.
@@ -153,9 +205,20 @@ struct ContentView: View {
             .fullScreenCover(isPresented: $showSettings) {
                 SettingsView()
             }
-            .sheet(item: $selectedTransactionType) { type in
-                AddTransactionSheet(transactionType: type)
+            .sheet(item: $selectedTransactionType, onDismiss: {
+                linkedSource = nil
+                linkedQuickID = nil
+            }) { type in
+                AddTransactionSheet(transactionType: type, source: linkedSource, savingQuick: linkedQuickID)
             }
+            .onOpenURL { url in
+                guard let link = AppDeepLink(url: url) else { return }
+                Diagnostics.shared.log("Enlace: \(url.host ?? "")")
+                pendingLink = link
+                applyPendingLinkIfReady()
+            }
+            .onChange(of: appLock.isLocked) { _, _ in applyPendingLinkIfReady() }
+            .onChange(of: showSplash) { _, _ in applyPendingLinkIfReady() }
             
             // Botones flotantes de Gasto e Ingreso al tocar el +.
             if showAddPicker {

@@ -11,6 +11,8 @@ struct AppLockSettingsView: View {
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
+    @AppStorage(WidgetSnapshotBuilder.showAmountsKey) private var widgetShowAmounts = false
+
     @State private var isWorking = false
     @State private var error: String?
 
@@ -41,6 +43,17 @@ struct AppLockSettingsView: View {
                         }
                     } footer: {
                         Text("Con un margen, salir un momento a otra app y volver no vuelve a pedir la verificación.")
+                    }
+
+                    Section {
+                        Toggle(isOn: $widgetShowAmounts) {
+                            Label("Mostrar montos en widgets", systemImage: "square.text.square")
+                        }
+                        .tint(tint)
+                    } footer: {
+                        Text(widgetShowAmounts
+                             ? "Los widgets de la pantalla de inicio muestran tus montos aunque la app esté bloqueada."
+                             : "Con el bloqueo encendido, los widgets muestran porcentajes y ocultan los montos.")
                     }
                 }
 

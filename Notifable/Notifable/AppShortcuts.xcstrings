@@ -1,0 +1,214 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Añade un gasto en ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Añade un gasto en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Añade un ingreso de ${source} en ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Añade un ingreso de ${source} en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Añade un ingreso en ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Añade un ingreso en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Anota ${quick} en ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anota ${quick} en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Anota un gasto de ${category} en ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anota un gasto de ${category} en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Anota un ingreso de ${source} en ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anota un ingreso de ${source} en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Cuánto gasté este mes en ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cuánto gasté este mes en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Cuánto llevo gastado en ${applicationName}" : {
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringSet" : {
+            "state" : "new",
+            "values" : [
+              "Cuánto llevo gastado en ${applicationName}",
+              "Cuánto gasté este mes en ${applicationName}",
+              "Resumen del mes en ${applicationName}"
+            ]
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Cuánto llevo gastado en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Registra ${quick} en ${applicationName}" : {
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringSet" : {
+            "state" : "new",
+            "values" : [
+              "Registra ${quick} en ${applicationName}",
+              "Anota ${quick} en ${applicationName}",
+              "Registra un gasto rápido en ${applicationName}"
+            ]
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registra ${quick} en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Registra un gasto de ${category} en ${applicationName}" : {
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringSet" : {
+            "state" : "new",
+            "values" : [
+              "Registra un gasto de ${category} en ${applicationName}",
+              "Anota un gasto de ${category} en ${applicationName}",
+              "Registra un gasto en ${applicationName}",
+              "Añade un gasto en ${applicationName}"
+            ]
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registra un gasto de ${category} en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Registra un gasto en ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registra un gasto en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Registra un gasto rápido en ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registra un gasto rápido en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Registra un ingreso de ${source} en ${applicationName}" : {
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "en" : {
+          "stringSet" : {
+            "state" : "new",
+            "values" : [
+              "Registra un ingreso de ${source} en ${applicationName}",
+              "Añade un ingreso de ${source} en ${applicationName}",
+              "Anota un ingreso de ${source} en ${applicationName}",
+              "Registra un ingreso en ${applicationName}",
+              "Añade un ingreso en ${applicationName}"
+            ]
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Registra un ingreso de ${source} en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Registra un ingreso en ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registra un ingreso en ${applicationName}"
+          }
+        }
+      }
+    },
+    "Resumen del mes en ${applicationName}" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resumen del mes en ${applicationName}"
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.0"
+}
