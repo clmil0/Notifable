@@ -28,7 +28,9 @@ enum CategoryStyle {
         case Accounting.unclassified: return "tray.full.fill"
         default: 
             let key = category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            return hiddenIcons[key] ?? "bag.fill"
+            // Antes el catálogo de palabras; si no, ¿es una persona? ("María",
+            // "Regalos papá", "Mi hijo"). Ver `PersonCategoryIcon`.
+            return hiddenIcons[key] ?? PersonCategoryIcon.icon(for: category) ?? "bag.fill"
         }
     }
 

@@ -67,7 +67,9 @@ enum CategoryIcons {
         "bag.fill", "tshirt.fill", "gift.fill", "pawprint.fill",
         "play.tv.fill", "gamecontroller.fill", "music.note", "book.fill",
         "graduationcap.fill", "briefcase.fill", "airplane", "creditcard.fill",
-        "person.2.fill", "scissors", "wrench.and.screwdriver.fill", "tray.full.fill"
+        "person.2.fill", "scissors", "wrench.and.screwdriver.fill", "tray.full.fill",
+        // Personas: los que asigna solo `PersonCategoryIcon`, también a mano.
+        "figure.stand.dress", "figure.stand", "figure.child", "figure.2.and.child.holdinghands"
     ]
 }
 
