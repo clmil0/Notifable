@@ -150,31 +150,132 @@ extension Color {
     }
 }
 
-extension WidgetSnapshot.Theme {
-    func accent(_ scheme: ColorScheme) -> Color {
-        Color(hex: scheme == .dark ? accentDarkHex : accentHex)
-    }
+/// La paleta crema de `Widgets AgruPay.dc.html`. Siempre la clara, también con
+/// el teléfono en modo oscuro: el widget se ve igual en los dos.
+enum WidgetPalette {
+    static let background = Color(hex: "FDF8F0")
+    static let ink = Color(hex: "2B2621")
+    /// Las etiquetas en versalitas ("HOY TE QUEDAN").
+    static let label = Color(hex: "7A5F2C")
+    static let secondary = Color(hex: "6B6056")
+    static let track = Color(hex: "EADFCB")
+    static let idleBar = Color(hex: "E4D9C6")
+    static let amber = Color(hex: "C88A2E")
+    static let tile = Color(hex: "F4EADA")
+    static let curve = Color(hex: "F7EFE2")
+    static let incomeTile = Color(hex: "DCE8DD")
+    static let income = Color(hex: "2F6640")
+    static let over = Color(hex: "C2452D")
+    /// El pingüino dorado de StandBy.
+    static let standByGold = Color(hex: "E8B25C")
 }
 
 extension WidgetDerived.Status {
     var color: Color {
         switch self {
-        case .ok: return .green
-        case .warning: return .orange
-        case .over: return .red
+        case .ok, .warning: return WidgetPalette.amber
+        case .over: return WidgetPalette.over
         }
     }
 
-    var label: String {
+    var mood: PenguinMood {
+        switch self {
+        case .ok: return .ok
+        case .warning: return .warning
+        case .over: return .over
+        }
+    }
+
+    /// Para StandBy, en versalitas.
+    var headline: String {
         switch self {
         case .ok: return "Vas bien"
-        case .warning: return "Por encima del ritmo"
+        case .warning: return "Vas un poco rápido"
         case .over: return "Presupuesto pasado"
         }
     }
 }
 
+extension WidgetDerived {
+    var mood: PenguinMood { status?.mood ?? .ok }
+
+    /// "Vas 12 % arriba del ritmo": lo gastado contra lo esperado a hoy.
+    func paceLine(hidden: Bool) -> String? {
+        guard let target = targetCents, let status else { return nil }
+        if status == .over {
+            return "Pasaste por " + WidgetFormat.money(spentCents - target, hidden: hidden)
+        }
+        let expected = Double(target) * expectedFraction
+        guard expected > 0 else { return nil }
+        let diff = Int(((Double(spentCents) / expected - 1) * 100).rounded())
+        if diff == 0 { return "Vas justo al ritmo" }
+        return "Vas \(min(abs(diff), 999)) % " + (diff > 0 ? "arriba" : "debajo") + " del ritmo"
+    }
+}
+
+// MARK: - Pingüino
+
+/// Tu pingüino de Amigos (`PenguinView`, el mismo de la app). Fuera de color
+/// completo — teñido, transparente, pantalla bloqueada — pasa a silueta.
+struct WidgetPenguin: View {
+    let look: PenguinLook
+    var mood: PenguinMood = .ok
+    var forceMonochrome = false
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
+    init(_ snapshot: WidgetSnapshot?, mood: PenguinMood = .ok, monochrome: Bool = false) {
+        look = snapshot?.penguin ?? PenguinLook()
+        self.mood = mood
+        forceMonochrome = monochrome
+    }
+
+    var body: some View {
+        PenguinView(look: look, mood: mood, monochrome: forceMonochrome || renderingMode != .fullColor)
+            .accessibilityHidden(true)
+    }
+}
+
+/// El pingüino que se asoma en una esquina cuando hay datos: nunca carga
+/// información, así que va en el fondo y desaparece con él.
+struct CornerPenguin {
+    let snapshot: WidgetSnapshot?
+    let mood: PenguinMood
+    var size: CGFloat = 58
+    var opacity: Double = 0.9
+}
+
+private struct WidgetCanvas: View {
+    let corner: CornerPenguin?
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            WidgetPalette.background
+            if let corner {
+                WidgetPenguin(corner.snapshot, mood: corner.mood)
+                    .frame(width: corner.size, height: corner.size)
+                    .opacity(corner.opacity)
+                    .offset(x: corner.size * 0.17, y: corner.size * 0.21)
+            }
+        }
+    }
+}
+
 // MARK: - Piezas comunes
+
+/// "HOY TE QUEDAN", "SETIEMBRE": la etiqueta de cada widget.
+struct SectionLabel: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text.uppercased())
+            .font(.system(size: 10, weight: .semibold))
+            .tracking(0.9)
+            .foregroundStyle(WidgetPalette.label)
+            .lineLimit(1)
+            .widgetAccentable()
+    }
+}
 
 /// Barra del presupuesto con la marca de ritmo: la misma idea que
 /// `BudgetHeroCard`. Si el relleno pasa la marca, vas rápido.
@@ -182,20 +283,22 @@ struct PaceBar: View {
     let used: Double
     let expected: Double
     let tint: Color
-    var height: CGFloat = 8
+    var track: Color = WidgetPalette.track
+    var marker: Color = WidgetPalette.ink
+    var height: CGFloat = 10
 
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
             ZStack(alignment: .leading) {
-                Capsule().fill(.quaternary)
+                Capsule().fill(track)
                 Capsule()
                     .fill(tint)
                     .frame(width: max(height, width * min(max(used, 0), 1)))
                     .widgetAccentable()
-                Rectangle()
-                    .fill(.primary)
-                    .frame(width: 2, height: height + 4)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(marker)
+                    .frame(width: 2, height: height + 6)
                     .offset(x: min(width - 2, max(0, width * expected - 1)))
             }
         }
@@ -208,6 +311,8 @@ struct QuickIcon: View {
     let name: String
     let tint: Color
     var size: CGFloat = 26
+    /// `nil` = el mismo color del icono, muy suave.
+    var background: Color? = nil
 
     var body: some View {
         Group {
@@ -216,41 +321,86 @@ struct QuickIcon: View {
                     .resizable()
                     .scaledToFill()
                     .frame(width: size, height: size)
-                    .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
             } else {
                 Image(systemName: name)
-                    .font(.system(size: size * 0.5, weight: .semibold))
+                    .font(.system(size: size * 0.46, weight: .semibold))
                     .foregroundStyle(tint)
                     .frame(width: size, height: size)
-                    .background(tint.opacity(0.16), in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+                    .background(background ?? tint.opacity(0.16),
+                                in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
                     .widgetAccentable()
             }
         }
     }
 }
 
-/// Sin resumen todavía: la app nunca se abrió desde que se instaló el widget.
-struct EmptySnapshotView: View {
-    var compact = false
+/// Sin datos: el pingüino es protagonista, con un título y una línea.
+struct PenguinMessage: View {
+    let snapshot: WidgetSnapshot?
+    let title: String
+    var subtitle: String? = nil
+    var mood: PenguinMood = .ok
+    /// Pingüino a la izquierda y texto al lado (medium).
+    var horizontal = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Image(systemName: "chart.bar.doc.horizontal")
-                .font(compact ? .body : .title3)
-                .foregroundStyle(.secondary)
-            Text("Abre AgruPay para ver tu resumen")
-                .font(compact ? .caption2 : .caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        if horizontal {
+            HStack(spacing: 16) {
+                WidgetPenguin(snapshot, mood: mood)
+                    .frame(width: 84, height: 84)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(WidgetPalette.ink)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(WidgetPalette.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            VStack(spacing: 9) {
+                WidgetPenguin(snapshot, mood: mood)
+                    .frame(width: 54, height: 54)
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(WidgetPalette.ink)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(WidgetPalette.secondary)
+                        .privacySensitive()
+                }
+            }
+            .multilineTextAlignment(.center)
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+}
+
+/// Sin resumen todavía: la app nunca se abrió desde que se instaló el widget.
+struct EmptySnapshotView: View {
+    var horizontal = false
+
+    var body: some View {
+        PenguinMessage(snapshot: nil, title: "Abre AgruPay para ver tu resumen", horizontal: horizontal)
     }
 }
 
 extension View {
-    /// Fondo del sistema: respeta el modo claro/oscuro y los modos teñido y
-    /// transparente de la pantalla de inicio.
-    func widgetBackground() -> some View {
-        containerBackground(for: .widget) { Color(.systemBackground) }
+    /// Fondo crema del diseño. En los modos teñido y transparente, y en
+    /// StandBy, el sistema lo quita — y con él al pingüino de la esquina.
+    ///
+    /// Fija el esquema claro: la paleta ya no cambia, pero así tampoco lo hacen
+    /// las piezas del sistema (gráficos, `ProgressView`, colores semánticos).
+    func widgetBackground(_ corner: CornerPenguin? = nil) -> some View {
+        containerBackground(for: .widget) { WidgetCanvas(corner: corner) }
+            .environment(\.colorScheme, .light)
     }
 }

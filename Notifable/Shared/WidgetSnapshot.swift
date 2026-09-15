@@ -39,6 +39,9 @@ struct WidgetSnapshot: Codable, Equatable {
     var quickActions: [QuickAction]
     /// Para elegir la categoría al configurar un widget, sin abrir la base.
     var categoryNames: [String]
+    /// El pingüino de Amigos, que se asoma en los widgets. Opcional para que
+    /// un resumen escrito antes de existir siga decodificando: `nil` = el clásico.
+    var penguin: PenguinLook? = nil
 
     struct Theme: Codable, Equatable {
         var accentHex: String

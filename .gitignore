@@ -1,1 +1,7 @@
 Claude outputs/
+
+# macOS
+.DS_Store
+
+# Carpeta local de Wrangler al publicar web/
+web/.wrangler/

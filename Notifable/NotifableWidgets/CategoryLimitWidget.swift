@@ -81,7 +81,6 @@ struct CategoryLimitWidget: Widget {
                                provider: CategoryLimitProvider()) { entry in
             CategoryLimitView(entry: entry)
                 .widgetURL(AppDeepLink.categories.url)
-                .widgetBackground()
         }
         .configurationDisplayName("Límite de categoría")
         .description("Cuánto te queda en una categoría antes del corte.")
@@ -103,90 +102,91 @@ struct CategoryLimitView: View {
                 }
                 .gaugeStyle(.accessoryCircularCapacity)
                 .widgetAccentable()
+                .containerBackground(for: .widget) { Color.clear }
             } else {
                 LimitCard(limit: limit, hidden: snapshot.hideAmounts, date: entry.date)
+                    .widgetBackground()
             }
         } else if family == .accessoryCircular {
-            Image(systemName: "gauge.with.dots.needle.0percent")
+            WidgetPenguin(entry.snapshot, monochrome: true)
+                .padding(6)
+                .containerBackground(for: .widget) { Color.clear }
+        } else if let snapshot = entry.snapshot {
+            let stale = entry.limit?.isStale(at: entry.date) == true
+            PenguinMessage(snapshot: snapshot,
+                           title: stale ? "Empezó un ciclo nuevo"
+                                        : (entry.category.map { "\($0) sin límite" } ?? "Aún no tienes límites"),
+                           subtitle: stale ? "Abre AgruPay para actualizarlo" : "Ponle uno en Categorías")
+                .widgetBackground()
         } else {
-            NoLimitView(category: entry.category, hasSnapshot: entry.snapshot != nil,
-                        stale: entry.limit?.isStale(at: entry.date) == true)
+            EmptySnapshotView().widgetBackground()
         }
     }
 }
 
+/// Categoría, lo que queda, días al corte y el límite en cinco tramos.
 private struct LimitCard: View {
     let limit: WidgetSnapshot.LimitSummary
     let hidden: Bool
     let date: Date
 
-    var body: some View {
-        let tint = limit.isOver ? Color.red : (limit.isNear ? Color.orange : Color(hex: limit.colorHex))
-        let days = limit.daysLeft(at: date)
+    static let segments = 5
 
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
+    var body: some View {
+        let tint = limit.isOver ? WidgetPalette.over : WidgetPalette.amber
+        let days = limit.daysLeft(at: date)
+        let filled = limit.fraction <= 0 ? 0 : min(Self.segments, Int((limit.fraction * Double(Self.segments)).rounded(.up)))
+
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 7) {
+                QuickIcon(name: limit.symbol, tint: Color(hex: limit.colorHex), size: 22)
                 Text(limit.category)
-                    .font(.caption.weight(.semibold))
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(WidgetPalette.ink)
                     .lineLimit(1)
-                Spacer(minLength: 2)
-                Text(days == 1 ? "1 día" : "\(days) días")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
 
-            ZStack {
-                Circle().stroke(.quaternary, lineWidth: 9)
-                Circle()
-                    .trim(from: 0, to: min(limit.fraction, 1))
-                    .stroke(tint, style: StrokeStyle(lineWidth: 9, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .widgetAccentable()
-                VStack(spacing: 0) {
-                    Image(systemName: limit.symbol)
-                        .font(.caption)
-                        .foregroundStyle(tint)
+            Group {
+                if hidden {
                     Text(WidgetFormat.percent(limit.fraction))
-                        .font(.headline.weight(.bold))
-                        .minimumScaleFactor(0.6)
+                } else if limit.isOver {
+                    Text("−" + WidgetFormat.money(-limit.remainingCents, hidden: false))
+                } else {
+                    Text(WidgetFormat.money(limit.remainingCents, hidden: false))
                 }
             }
-            .padding(.horizontal, 10)
-            .frame(maxHeight: .infinity)
+            .font(.system(size: 30, weight: .bold))
+            .tracking(-0.9)
+            .foregroundStyle(limit.isOver ? WidgetPalette.over : WidgetPalette.ink)
+            .minimumScaleFactor(0.5)
+            .lineLimit(1)
+            .privacySensitive()
+            .contentTransition(.numericText())
+            .padding(.top, 12)
 
-            Text(limit.isOver
-                 ? "Pasado por " + WidgetFormat.money(-limit.remainingCents, hidden: hidden)
-                 : "Quedan " + WidgetFormat.money(limit.remainingCents, hidden: hidden))
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(limit.isOver ? Color.red : Color.primary)
+            Text((limit.isOver ? "te pasaste · " : "para ") + (days == 1 ? "1 día" : "\(days) días"))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(WidgetPalette.secondary)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .frame(maxWidth: .infinity)
-                .privacySensitive()
-        }
-    }
-}
+                .padding(.top, 3)
 
-private struct NoLimitView: View {
-    let category: String?
-    let hasSnapshot: Bool
-    let stale: Bool
+            Spacer(minLength: 0)
 
-    var body: some View {
-        if !hasSnapshot {
-            EmptySnapshotView()
-        } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Image(systemName: "gauge.with.dots.needle.33percent")
-                    .font(.title3)
-                    .foregroundStyle(.secondary)
-                Text(stale ? "Empezó un ciclo nuevo" : (category.map { "\($0) no tiene límite" } ?? "Aún no tienes límites"))
-                    .font(.caption.weight(.semibold))
-                Text(stale ? "Abre AgruPay para actualizarlo." : "Ponle uno en Categorías.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            HStack(spacing: 3) {
+                ForEach(0..<Self.segments, id: \.self) { index in
+                    Capsule()
+                        .fill(index < filled ? tint : WidgetPalette.track)
+                        .frame(height: 6)
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .widgetAccentable()
+
+            Text(WidgetFormat.percent(limit.fraction) + " del límite")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(WidgetPalette.secondary)
+                .lineLimit(1)
+                .padding(.top, 7)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }

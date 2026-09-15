@@ -99,8 +99,7 @@ enum IncomeLinkStore {
         let expenses = (try? modelContext.fetch(FetchDescriptor<Expense>())) ?? []
         guard !incomes.isEmpty, !expenses.isEmpty else { return 0 }
 
-        let expensesByKey = Dictionary(expenses.map { (TransactionKey.key(for: $0), $0) },
-                                       uniquingKeysWith: { first, _ in first })
+        let expensesByKey = TransactionKey.expensesByLookupKey(expenses)
         var relinked = 0
         for income in incomes {
             guard let link = links[income.id] else { continue }

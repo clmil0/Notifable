@@ -779,8 +779,7 @@ final class ConfigBackupManager {
         let existingExpenseIDs = Set(expenses.map(\.id))
         let existingIncomeIDs = Set(incomes.map(\.id))
 
-        var byKey = Dictionary(expenses.map { (TransactionKey.key(for: $0), $0) },
-                               uniquingKeysWith: { first, _ in first })
+        var byKey = TransactionKey.expensesByLookupKey(expenses)
 
         for t in payload.manualTransactions where t.kind == "expense" {
             guard !existingExpenseIDs.contains(t.id) else { continue }

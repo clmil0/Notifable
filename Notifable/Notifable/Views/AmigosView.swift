@@ -873,7 +873,9 @@ struct AddFriendSheet: View {
     private var themeColor: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
     private var palette: Palette { Palette(colorScheme) }
 
-    @State private var myCode: String?
+    /// El guardado en el teléfono, si ya se consultó alguna vez: la hoja abre
+    /// con el código puesto y "Compartir" listo, sin esperar a la red.
+    @State private var myCode: String? = FriendsManager.shared.cachedFriendCode
     @State private var isGeneratingCode = false
     @State private var copied = false
 

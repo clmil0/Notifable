@@ -34,6 +34,7 @@ enum WidgetSnapshotBuilder {
         var categoryNames: [String]
         var theme: WidgetSnapshot.Theme
         var style: (String) -> Style
+        var penguin: PenguinLook? = nil
     }
 
     static let maxCategories = 4
@@ -92,7 +93,8 @@ enum WidgetSnapshotBuilder {
                 nextRecurring: inputs.nextRecurring
             ),
             quickActions: Array(inputs.quickActions.prefix(maxQuickActions)),
-            categoryNames: inputs.categoryNames
+            categoryNames: inputs.categoryNames,
+            penguin: inputs.penguin
         )
     }
 

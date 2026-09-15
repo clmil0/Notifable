@@ -3,16 +3,15 @@ import WidgetKit
 
 // MARK: - Hoy
 
-/// "Hoy": lo gastado hoy y cuánto puedes gastar por día sin pasarte.
+/// "Hoy": cuánto te queda para hoy, lo que llevas y la semana en barras.
 struct TodayWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: WidgetKinds.today, provider: SnapshotProvider()) { entry in
             TodayWidgetView(entry: entry)
                 .widgetURL(AppDeepLink.summary.url)
-                .widgetBackground()
         }
         .configurationDisplayName("Hoy")
-        .description("Lo que llevas hoy y lo que te queda por día.")
+        .description("Lo que te queda para hoy y lo que llevas.")
         .supportedFamilies([.systemSmall, .accessoryInline])
     }
 }
@@ -20,71 +19,111 @@ struct TodayWidget: Widget {
 struct TodayWidgetView: View {
     let entry: SnapshotEntry
     @Environment(\.widgetFamily) private var family
-    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        if let snapshot = entry.snapshot, let d = entry.derived {
-            let hidden = snapshot.hideAmounts
-            if family == .accessoryInline {
-                Text("Hoy " + WidgetFormat.money(d.todayCents, hidden: hidden))
+        if family == .accessoryInline {
+            if let snapshot = entry.snapshot, let d = entry.derived {
+                Text("Hoy " + WidgetFormat.money(d.todayCents, hidden: snapshot.hideAmounts))
             } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    Label("HOY", systemImage: "sun.max.fill")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(snapshot.theme.accent(scheme))
-                        .widgetAccentable()
-                    Text(WidgetFormat.money(d.todayCents, hidden: hidden))
-                        .font(.title.weight(.bold))
-                        .minimumScaleFactor(0.5)
-                        .lineLimit(1)
-                        .privacySensitive()
-                        .contentTransition(.numericText())
-
-                    Spacer(minLength: 0)
-
-                    if let perDay = d.availablePerDayCents {
-                        caption("Te quedan", WidgetFormat.money(perDay, hidden: hidden) + " por día",
-                                warn: d.todayCents > perDay)
-                    } else if let remaining = d.remainingCents {
-                        caption("Último día", "quedan " + WidgetFormat.money(remaining, hidden: hidden), warn: remaining == 0)
-                    } else if d.elapsedDays > 0 {
-                        caption("Promedio", WidgetFormat.money(d.spentCents / d.elapsedDays, hidden: hidden) + " por día",
-                                warn: false)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text("AgruPay")
             }
-        } else if family == .accessoryInline {
-            Text("AgruPay")
+        } else if let snapshot = entry.snapshot, let d = entry.derived {
+            small(snapshot, d)
         } else {
-            EmptySnapshotView()
+            EmptySnapshotView().widgetBackground()
         }
     }
 
-    private func caption(_ title: String, _ value: String, warn: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(warn ? Color.orange : Color.primary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .privacySensitive()
+    /// Lo disponible para hoy: el "por día", o lo que queda el último día.
+    private func available(_ d: WidgetDerived) -> Int? {
+        d.availablePerDayCents ?? d.remainingCents
+    }
+
+    @ViewBuilder
+    private func small(_ snapshot: WidgetSnapshot, _ d: WidgetDerived) -> some View {
+        let hidden = snapshot.hideAmounts
+        if !d.isCurrentMonth {
+            PenguinMessage(snapshot: snapshot, title: "Mes nuevo",
+                           subtitle: "Abre la app para empezar " + WidgetFormat.monthName(entry.date).lowercased())
+                .widgetBackground()
+        } else if d.todayCents == 0 {
+            PenguinMessage(snapshot: snapshot, title: "Nada anotado hoy",
+                           subtitle: available(d).map { "Tienes " + WidgetFormat.money($0, hidden: hidden) + " para hoy" },
+                           mood: d.mood)
+                .widgetBackground()
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                SectionLabel(available(d) == nil ? "Hoy llevas" : "Hoy te quedan")
+                Text(WidgetFormat.money(available(d) ?? d.todayCents, hidden: hidden))
+                    .font(.system(size: 34, weight: .bold))
+                    .tracking(-1)
+                    .foregroundStyle(WidgetPalette.ink)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+                    .privacySensitive()
+                    .contentTransition(.numericText())
+                    .padding(.top, 9)
+
+                Spacer(minLength: 0)
+
+                WeekBars(daily: Array(snapshot.month.dailySpentCents.prefix(d.elapsedDays)))
+                    .frame(width: 96, height: 30)
+
+                Text(caption(d, hidden: hidden))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(WidgetPalette.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                    .privacySensitive()
+                    .padding(.top, 7)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .widgetBackground(CornerPenguin(snapshot: snapshot, mood: d.mood))
         }
+    }
+
+    private func caption(_ d: WidgetDerived, hidden: Bool) -> String {
+        if available(d) != nil {
+            return "Llevas " + WidgetFormat.money(d.todayCents, hidden: hidden) + " hoy"
+        }
+        let average = d.elapsedDays > 0 ? d.spentCents / d.elapsedDays : 0
+        return "Promedio " + WidgetFormat.money(average, hidden: hidden) + "/día"
+    }
+}
+
+/// Los últimos siete días en barras; hoy, la última, en ámbar.
+struct WeekBars: View {
+    let daily: [Int]
+
+    var body: some View {
+        let week = Array(daily.suffix(7))
+        let days = Array(repeating: 0, count: 7 - week.count) + week
+        let top = max(days.max() ?? 0, 1)
+
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(Array(days.enumerated()), id: \.offset) { index, cents in
+                GeometryReader { geo in
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(index == days.count - 1 ? WidgetPalette.amber : WidgetPalette.idleBar)
+                            .frame(height: max(3, geo.size.height * Double(cents) / Double(top)))
+                    }
+                }
+            }
+        }
+        .widgetAccentable()
     }
 }
 
 // MARK: - Categorías
 
-/// "Categorías": el total del mes y en qué se va.
+/// "¿A dónde va?": el total del mes y en qué se va.
 struct CategoriesWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: WidgetKinds.categories, provider: SnapshotProvider()) { entry in
             CategoriesWidgetView(entry: entry)
                 .widgetURL(AppDeepLink.categories.url)
-                .widgetBackground()
         }
         .configurationDisplayName("¿A dónde va?")
         .description("Tu gasto del mes y las categorías que más pesan.")
@@ -96,72 +135,102 @@ struct CategoriesWidgetView: View {
     let entry: SnapshotEntry
 
     var body: some View {
-        if let snapshot = entry.snapshot, let derived = entry.derived {
-            HStack(alignment: .top, spacing: 16) {
-                PaceSummary(snapshot: snapshot, derived: derived, date: entry.date)
-                    .frame(maxWidth: 130)
-                CategoryBars(snapshot: snapshot, derived: derived, date: entry.date, limit: 3)
+        if let snapshot = entry.snapshot, let d = entry.derived {
+            if !d.isCurrentMonth {
+                PenguinMessage(snapshot: snapshot, title: "Mes nuevo",
+                               subtitle: "Abre la app para empezar " + WidgetFormat.monthName(entry.date).lowercased() + ".",
+                               horizontal: true)
+                    .widgetBackground()
+            } else if snapshot.topCategories.isEmpty {
+                PenguinMessage(snapshot: snapshot, title: "Aún no hay gastos este mes",
+                               subtitle: "Cuando anotes algo verás aquí en qué se va tu mes.",
+                               horizontal: true)
+                    .widgetBackground()
+            } else {
+                HStack(spacing: 18) {
+                    summary(snapshot, d)
+                        .frame(width: 118, alignment: .leading)
+                    CategoryRows(snapshot: snapshot, date: entry.date, limit: 3, iconSize: 26, barHeight: 7)
+                }
+                .widgetBackground(CornerPenguin(snapshot: snapshot, mood: d.mood, size: 46, opacity: 0.85))
             }
         } else {
-            EmptySnapshotView()
+            EmptySnapshotView(horizontal: true).widgetBackground()
+        }
+    }
+
+    private func summary(_ snapshot: WidgetSnapshot, _ d: WidgetDerived) -> some View {
+        let hidden = snapshot.hideAmounts
+        let top = snapshot.topCategories.first
+        let share = top.map { Double($0.totalCents) / Double(max(1, snapshot.month.spentCents)) }
+
+        return VStack(alignment: .leading, spacing: 6) {
+            SectionLabel("Se va en")
+            Text(WidgetFormat.money(d.spentCents, hidden: hidden))
+                .font(.system(size: 26, weight: .bold))
+                .tracking(-0.8)
+                .foregroundStyle(WidgetPalette.ink)
+                .minimumScaleFactor(0.5)
+                .lineLimit(1)
+                .privacySensitive()
+                .contentTransition(.numericText())
+            if let top, let share {
+                Text("este mes · " + WidgetFormat.percent(share) + " en " + top.name.lowercased())
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(WidgetPalette.secondary)
+                    .lineLimit(2)
+            }
         }
     }
 }
 
-/// Filas de categoría con barra proporcional al total del mes.
-struct CategoryBars: View {
+/// Filas de categoría con icono y barra proporcional al total del mes.
+struct CategoryRows: View {
     let snapshot: WidgetSnapshot
-    let derived: WidgetDerived
     let date: Date
     let limit: Int
+    var iconSize: CGFloat = 24
+    var barHeight: CGFloat = 6
 
     var body: some View {
         let hidden = snapshot.hideAmounts
         let total = max(1, snapshot.month.spentCents)
-        let rows = derived.isCurrentMonth ? Array(snapshot.topCategories.prefix(limit)) : []
 
-        VStack(alignment: .leading, spacing: 8) {
-            if rows.isEmpty {
-                Spacer()
-                Text(derived.isCurrentMonth ? "Aún no hay gastos este mes" : "Mes nuevo")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Spacer()
-            } else {
-                ForEach(rows) { row in
-                    let share = Double(row.totalCents) / Double(total)
-                    let isOver = snapshot.limits.contains { $0.category == row.name && $0.isOver && !$0.isStale(at: date) }
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Image(systemName: row.symbol)
-                                .font(.caption2)
-                                .foregroundStyle(Color(hex: row.colorHex))
-                                .frame(width: 14)
-                                .widgetAccentable()
+        VStack(alignment: .leading, spacing: iconSize > 24 ? 11 : 10) {
+            ForEach(snapshot.topCategories.prefix(limit)) { row in
+                let share = Double(row.totalCents) / Double(total)
+                let isOver = snapshot.limits.contains { $0.category == row.name && $0.isOver && !$0.isStale(at: date) }
+                let tint = Color(hex: row.colorHex)
+                HStack(spacing: 9) {
+                    QuickIcon(name: row.symbol, tint: tint, size: iconSize)
+                    VStack(spacing: 4) {
+                        HStack(alignment: .firstTextBaseline) {
                             Text(row.name)
-                                .font(.caption.weight(.medium))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(WidgetPalette.ink)
                                 .lineLimit(1)
                             Spacer(minLength: 4)
                             Text(hidden ? WidgetFormat.percent(share) : WidgetFormat.money(row.totalCents, hidden: false))
-                                .font(.caption.weight(.semibold))
-                                .monospacedDigit()
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(WidgetPalette.ink)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
                                 .privacySensitive()
                         }
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
-                                Capsule().fill(.quaternary)
+                                Capsule().fill(WidgetPalette.track)
                                 Capsule()
-                                    .fill(isOver ? Color.red : Color(hex: row.colorHex))
-                                    .frame(width: max(4, geo.size.width * share))
+                                    .fill(isOver ? WidgetPalette.over : tint)
+                                    .frame(width: max(barHeight, geo.size.width * min(share, 1)))
                                     .widgetAccentable()
                             }
                         }
-                        .frame(height: 5)
+                        .frame(height: barHeight)
                     }
                 }
-                Spacer(minLength: 0)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 }

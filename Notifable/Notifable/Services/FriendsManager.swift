@@ -391,8 +391,27 @@ final class FriendsManager {
     /// `agrupay_friends_v3_schema.sql`). El backend ya lo crea solo al crear
     /// el perfil (trigger); el `POST` de aquí es sólo el respaldo defensivo
     /// para una cuenta de antes de esa migración que todavía no tiene fila.
+    ///
+    /// Como no cambia nunca, se consulta una sola vez por cuenta y queda
+    /// guardado en el teléfono: compartirlo después no toca la red.
     func myFriendCode() async -> String? {
         guard let uid = auth.userID else { return nil }
+        if let cached = cachedFriendCode { return cached }
+        let code = await fetchOrCreateFriendCode(uid: uid)
+        if let code { UserDefaults.standard.set(code, forKey: Self.friendCodeKey(uid)) }
+        return code
+    }
+
+    /// El código guardado de la cuenta con sesión, sin ir a la red. La clave
+    /// lleva el id de la cuenta: con otra sesión no se muestra el de antes.
+    var cachedFriendCode: String? {
+        guard let uid = auth.userID else { return nil }
+        return UserDefaults.standard.string(forKey: Self.friendCodeKey(uid))
+    }
+
+    private static func friendCodeKey(_ uid: String) -> String { "socialFriendCode.\(uid)" }
+
+    private func fetchOrCreateFriendCode(uid: String) async -> String? {
         if let code = await fetchMyFriendCode(uid: uid) { return code }
 
         guard let url = URL(string: "\(baseURL)/rest/v1/friend_codes") else { return nil }

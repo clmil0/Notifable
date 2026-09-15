@@ -133,7 +133,10 @@ final class WidgetSnapshotWriter {
             style: { category in
                 WidgetSnapshotBuilder.Style(symbol: CategoryStyle.icon(for: category),
                                             colorHex: CategoryStyle.color(for: category, accent: accent.color).hex(.light))
-            }
+            },
+            penguin: defaults.string(forKey: SocialProfileStore.Keys.penguin)
+                .flatMap { $0.data(using: .utf8) }
+                .flatMap { try? JSONDecoder().decode(PenguinLook.self, from: $0) }
         )
         return WidgetSnapshotBuilder.build(inputs, now: now)
     }

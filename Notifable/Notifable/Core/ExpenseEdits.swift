@@ -203,7 +203,12 @@ enum ExpenseEditStore {
 
         var applied = 0
         for expense in expenses {
-            guard let edit = edits[TransactionKey.key(for: expense)] else { continue }
+            // Por las dos llaves de un gasto unido; si hay edición en ambas, se
+            // funden con la más reciente encima.
+            let found = TransactionKey.lookupKeys(for: expense).compactMap { edits[$0] }
+                .sorted { $0.updatedAt < $1.updatedAt }
+            guard var edit = found.first else { continue }
+            for newer in found.dropFirst() { edit = edit.merged(with: newer) }
             var touched = false
             if let value = edit.category, expense.category != value { expense.category = value; touched = true }
             if let value = edit.merchant, expense.merchant != value { expense.merchant = value; touched = true }

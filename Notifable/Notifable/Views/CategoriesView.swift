@@ -993,9 +993,9 @@ struct CategoriesView: View {
     /// tarjeta de categoría expandible que antes vivían por separado y pintaban
     /// lo mismo dos veces.
     ///
-    /// Orden: límites pasados primero, luego por fracción de gasto descendente,
-    /// luego categorías con límite sin pasar, y al final las sin límite
-    /// (ordenadas entre sí por gasto del periodo).
+    /// Orden: de más a menos gasto del periodo, tengan límite o no — el mismo
+    /// de la barra de reparto. Un límite no sube la fila; su estado se lee en
+    /// la propia fila. A igual gasto, por nombre.
     private var unifiedRows: [UnifiedCategoryData] {
         let names = CategoryStyle.selectable(history: expenses)
         let statuses = budgets.statuses(for: names,
@@ -1014,12 +1014,6 @@ struct CategoriesView: View {
         }
 
         return rows.sorted { lhs, rhs in
-            if lhs.status.hasLimit != rhs.status.hasLimit { return lhs.status.hasLimit }
-            if lhs.status.hasLimit {
-                if lhs.status.isOver != rhs.status.isOver { return lhs.status.isOver }
-                if lhs.status.fraction == rhs.status.fraction { return lhs.category < rhs.category }
-                return lhs.status.fraction > rhs.status.fraction
-            }
             if Money.cents(lhs.spent) == Money.cents(rhs.spent) { return lhs.category < rhs.category }
             return Money.cents(lhs.spent) > Money.cents(rhs.spent)
         }

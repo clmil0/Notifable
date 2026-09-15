@@ -31,6 +31,35 @@ enum TransactionKey {
             date: expense.date)
     }
 
+    /// Todas las llaves por las que se puede volver a encontrar un gasto: la
+    /// suya y, si se le unió un segundo correo (el recibo de Apple con el cargo
+    /// del banco), también la de ése.
+    ///
+    /// Al rearmar desde cero los correos se leen en paralelo y cualquiera de
+    /// los dos puede llegar primero y quedar como `emailID`. Una deuda marcada
+    /// con la llave del cargo del banco tiene que seguir encontrando el gasto
+    /// aunque esta vez el recibo de Apple haya llegado antes.
+    static func lookupKeys(for expense: Expense) -> [String] {
+        var keys = [key(for: expense)]
+        if expense.emailID != nil, let related = expense.relatedEmailID, !related.isEmpty {
+            keys.append("mail:" + related)
+        }
+        return keys
+    }
+
+    /// Gastos por cada una de sus llaves. La llave propia de un gasto gana a la
+    /// secundaria de otro: si existe un duplicado suelto del correo unido, el
+    /// vínculo que se hizo sobre él sigue yendo a él.
+    static func expensesByLookupKey(_ expenses: [Expense]) -> [String: Expense] {
+        var result = Dictionary(expenses.map { (key(for: $0), $0) }, uniquingKeysWith: { first, _ in first })
+        for expense in expenses {
+            for secondary in lookupKeys(for: expense).dropFirst() where result[secondary] == nil {
+                result[secondary] = expense
+            }
+        }
+        return result
+    }
+
     private static func fingerprint(merchant: String, amount: Double, currency: String, date: Date) -> String {
         let day = dayFormatter.string(from: date)
         let name = merchant

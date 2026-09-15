@@ -269,11 +269,47 @@ class GmailSyncService: ObservableObject {
     /// La deduplicación no puede depender sólo de `processedEmailIDs`: esa lista
     /// vive en `UserDefaults` y se borra al restablecer la sincronización o al
     /// reinstalar, y entonces el mismo rango se importaba dos veces.
+    ///
+    /// Incluye `relatedEmailID`: el segundo correo de un par de Apple (recibo +
+    /// cargo del banco) no crea gasto, se une al primero. Sin contarlo, cada
+    /// lectura por rango lo veía como nuevo y, como el gasto ya estaba unido,
+    /// no encontraba con qué unirlo y creaba un duplicado.
     private func existingEmailIDs() -> Set<String> {
         guard let context = modelContext else { return [] }
         let expenses = (try? context.fetch(FetchDescriptor<Expense>())) ?? []
         let incomes = (try? context.fetch(FetchDescriptor<Income>())) ?? []
-        return Set(expenses.compactMap { $0.emailID }).union(incomes.compactMap { $0.emailID })
+        return Set(expenses.compactMap { $0.emailID })
+            .union(expenses.compactMap { $0.relatedEmailID })
+            .union(incomes.compactMap { $0.emailID })
+    }
+
+    /// Borra los duplicados que dejó el error de arriba: un gasto cuyo correo
+    /// ya está unido a otro gasto. Sólo si nadie decidió nada sobre él — ni
+    /// deuda, ni cobros, ni ediciones —; si no, se deja y se anota.
+    @discardableResult
+    static func removeLinkedDuplicates(in context: ModelContext) -> Int {
+        let expenses = (try? context.fetch(FetchDescriptor<Expense>())) ?? []
+        let linkedIDs = Set(expenses.compactMap(\.relatedEmailID))
+        guard !linkedIDs.isEmpty else { return 0 }
+        let edits = ExpenseEditStore.all()
+
+        var removed = 0
+        for expense in expenses {
+            guard let emailID = expense.emailID, linkedIDs.contains(emailID), expense.relatedEmailID == nil,
+                  expenses.contains(where: { $0.id != expense.id && $0.relatedEmailID == emailID }) else { continue }
+            guard !expense.isDebt, (expense.payments ?? []).isEmpty,
+                  edits[TransactionKey.key(for: expense)] == nil else {
+                Diagnostics.shared.log("Duplicado de correo unido conservado (tiene decisiones): \(expense.merchant)")
+                continue
+            }
+            context.delete(expense)
+            removed += 1
+        }
+        if removed > 0 {
+            try? context.save()
+            Diagnostics.shared.log("Duplicados de correos unidos borrados: \(removed)")
+        }
+        return removed
     }
 
     /// `existingEmailIDs()` en el hilo principal, se llame desde donde se llame.
@@ -407,6 +443,7 @@ class GmailSyncService: ObservableObject {
                 // sí existen los que estaban esperando su marca de deuda o su
                 // categoría restaurada. Ver ConfigBackupManager.
                 if let context = self?.modelContext {
+                    Self.removeLinkedDuplicates(in: context)
                     ConfigBackupManager.reapplyPendingDecisions(modelContext: context)
                 }
                 print("Sync complete. Found \(newExpensesFound) new expenses of \(newMessages.count) checked.")
@@ -492,6 +529,7 @@ class GmailSyncService: ObservableObject {
                 }
                 self?.isSyncing = false
                 if let context = self?.modelContext {
+                    Self.removeLinkedDuplicates(in: context)
                     ConfigBackupManager.reapplyPendingDecisions(modelContext: context)
                 }
                 print("Recovery complete. Restored \(newExpensesFound) expenses.")
@@ -853,7 +891,13 @@ class GmailSyncService: ObservableObject {
             let date = newExpense.date
             
             let allExpenses = (try? context.fetch(FetchDescriptor<Expense>())) ?? []
-            
+
+            // Este correo ya está en un gasto, propio o unido: no hay nada que
+            // crear. Segunda red por si llega aquí sin pasar por `knownIDs`.
+            if allExpenses.contains(where: { $0.emailID == emailID || $0.relatedEmailID == emailID }) {
+                return false
+            }
+
             if let match = allExpenses.first(where: {
                 $0.id != newExpense.id &&
                 $0.relatedEmailID == nil &&

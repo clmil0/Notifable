@@ -59,6 +59,9 @@ struct NotifableApp: App {
                     // Pinta Amigos con lo último que se vio, antes de que
                     // AmigosHubView llegue a pedir nada por red.
                     FriendsManager.shared.configure(container: sharedModelContainer)
+                    // Duplicados de Apple que dejaron las lecturas por rango
+                    // anteriores al arreglo de `existingEmailIDs`.
+                    GmailSyncService.removeLinkedDuplicates(in: sharedModelContainer.mainContext)
                     Diagnostics.shared.log("Respaldo y amigos configurados")
                 }
                 // Presentación en cadena: primero el onboarding y sólo después,
@@ -101,6 +104,8 @@ struct NotifableApp: App {
                 }
                 GmailSyncService.shared.startForegroundPolling()
                 Task { await ConfigBackupManager.shared.checkForExistingBackup() }
+                // Sólo pregunta la versión; baja la lista si hay comercios nuevos.
+                Task { await MerchantCatalog.shared.refreshIfNeeded() }
             }
         }
     }

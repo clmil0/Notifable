@@ -427,21 +427,20 @@ struct ContentView: View {
                     showAddPicker.toggle()
                 }
             } label: {
+                // Círculo sólido del acento: es la acción principal y tiene
+                // que resaltar. El "+" va blanco en claro y en oscuro.
                 Image(systemName: "plus")
                     .font(.title2.bold())
-                    .foregroundStyle(Color.primary)
+                    .foregroundStyle(Color.white)
                     .frame(width: 56, height: 56)
                     .rotationEffect(.degrees(showAddPicker ? 45 : 0))
             }
-            .background(.ultraThinMaterial, in: Circle())
-            .overlay(
-                Circle()
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
-            )
+            .background(themeColor, in: Circle())
             .shadow(color: Color.black.opacity(0.12), radius: 20, x: 0, y: 8)
         }
         .padding(.horizontal, 20)
-        .padding(.bottom, 2)
+        // Negativo: se mete en el área segura, más cerca de la barra de inicio.
+        .padding(.bottom, -10)
     }
 }
 

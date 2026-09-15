@@ -18,10 +18,20 @@ struct NotifableShortcutsProvider: AppShortcutsProvider {
             intent: AddIncomeIntent(),
             phrases: [
                 "Registra un ingreso de \(\.$source) en \(.applicationName)",
+                "Registra un ingreso de tipo \(\.$source) en \(.applicationName)",
+                "Registra un ingreso por \(\.$source) en \(.applicationName)",
+                "Registra un ingreso con \(\.$source) en \(.applicationName)",
                 "Añade un ingreso de \(\.$source) en \(.applicationName)",
+                "Añade un ingreso de tipo \(\.$source) en \(.applicationName)",
                 "Anota un ingreso de \(\.$source) en \(.applicationName)",
+                "Anota un ingreso de tipo \(\.$source) en \(.applicationName)",
+                "Recibí un \(\.$source) en \(.applicationName)",
+                "Registra un \(\.$source) en \(.applicationName)",
+                "En \(.applicationName) registra un ingreso de \(\.$source)",
                 "Registra un ingreso en \(.applicationName)",
-                "Añade un ingreso en \(.applicationName)"
+                "Añade un ingreso en \(.applicationName)",
+                "Anota un ingreso en \(.applicationName)",
+                "En \(.applicationName) registra un ingreso"
             ],
             shortTitle: "Registrar ingreso",
             systemImageName: "arrow.down.left.circle.fill"
@@ -30,9 +40,14 @@ struct NotifableShortcutsProvider: AppShortcutsProvider {
             intent: AddExpenseIntent(),
             phrases: [
                 "Registra un gasto de \(\.$category) en \(.applicationName)",
+                "Registra un gasto de tipo \(\.$category) en \(.applicationName)",
+                "Registra un gasto en \(\.$category) en \(.applicationName)",
                 "Anota un gasto de \(\.$category) en \(.applicationName)",
+                "Añade un gasto de \(\.$category) en \(.applicationName)",
                 "Registra un gasto en \(.applicationName)",
-                "Añade un gasto en \(.applicationName)"
+                "Añade un gasto en \(.applicationName)",
+                "Anota un gasto en \(.applicationName)",
+                "En \(.applicationName) registra un gasto"
             ],
             shortTitle: "Registrar gasto",
             systemImageName: "arrow.up.right.circle.fill"

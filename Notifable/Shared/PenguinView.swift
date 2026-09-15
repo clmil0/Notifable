@@ -1,9 +1,25 @@
 import SwiftUI
 
+/// La cara del pingüino. En los widgets dice el estado del presupuesto sin
+/// leer cifras (diseño `Widgets AgruPay.dc.html`).
+enum PenguinMood: Equatable {
+    /// Ojos redondos: vas bien.
+    case ok
+    /// Ojos entrecerrados: vas por encima del ritmo.
+    case warning
+    /// Ojos en X: pasaste el presupuesto.
+    case over
+}
+
 /// Dibuja un `PenguinLook` con los mismos trazos del kit en SVG
 /// (`output/pinguinos`). Vectorial: se ve nítido de 38 a 120 pt sin assets.
+/// Compartido con los widgets: el pingüino de la pantalla de inicio es el tuyo.
 struct PenguinView: View {
     let look: PenguinLook
+    var mood: PenguinMood = .ok
+    /// Silueta de un solo color (el de primer plano) con ojos y pico
+    /// recortados: pantalla bloqueada, StandBy y modos teñidos.
+    var monochrome = false
 
     /// El `viewBox` del SVG original.
     static let viewBox = CGRect(x: 140, y: 170, width: 470, height: 460)
@@ -15,7 +31,12 @@ struct PenguinView: View {
             context.translateBy(x: (size.width - box.width * scale) / 2, y: (size.height - box.height * scale) / 2)
             context.scaleBy(x: scale, y: scale)
             context.translateBy(x: -box.minX, y: -box.minY)
-            PenguinDrawing(look: look).draw(in: &context)
+            let drawing = PenguinDrawing(look: look, mood: mood)
+            if monochrome {
+                drawing.drawMonochrome(in: &context)
+            } else {
+                drawing.draw(in: &context)
+            }
         }
         .aspectRatio(Self.viewBox.width / Self.viewBox.height, contentMode: .fit)
         .accessibilityLabel("Pingüino \(look.breedStyle.name)")
@@ -45,6 +66,7 @@ struct PenguinAvatar: View {
 
 private struct PenguinDrawing {
     let look: PenguinLook
+    let mood: PenguinMood
 
     private static let navy = RGBColor(hex: "#1e1a6b").color
     private static let round = StrokeStyle(lineWidth: 8, lineCap: .round, lineJoin: .round)
@@ -146,15 +168,21 @@ private struct PenguinDrawing {
             case .ring34: eyeCtx.fill(circle(eye, 34), with: .color(.white))
             default: break
             }
-            if breed.eyes == .iris {
+            if mood != .ok {
+                // El iris rojo va sobre el manto oscuro: sin él, la X no se ve.
+                if breed.eyes == .iris { eyeCtx.fill(circle(eye, 27), with: .color(.white)) }
+                drawMoodEye(eye, in: eyeCtx, color: navy)
+            } else if breed.eyes == .iris {
                 eyeCtx.fill(circle(eye, 24), with: .color(RGBColor(hex: "#d62839").color))
                 eyeCtx.stroke(circle(eye, 24), with: .color(navy), lineWidth: 3)
                 eyeCtx.fill(circle(CGPoint(x: eye.x + 1, y: eye.y + 2), 13), with: .color(navy))
+                eyeCtx.fill(circle(CGPoint(x: eye.x - 9, y: eye.y - 9), 8), with: .color(.white))
+                eyeCtx.fill(circle(CGPoint(x: eye.x + 9, y: eye.y + 10), 3.5), with: .color(.white))
             } else {
                 eyeCtx.fill(circle(eye, 24), with: .color(navy))
+                eyeCtx.fill(circle(CGPoint(x: eye.x - 9, y: eye.y - 9), 8), with: .color(.white))
+                eyeCtx.fill(circle(CGPoint(x: eye.x + 9, y: eye.y + 10), 3.5), with: .color(.white))
             }
-            eyeCtx.fill(circle(CGPoint(x: eye.x - 9, y: eye.y - 9), 8), with: .color(.white))
-            eyeCtx.fill(circle(CGPoint(x: eye.x + 9, y: eye.y + 10), 3.5), with: .color(.white))
         }
 
         if breed.extra == .rockhopper {
@@ -192,6 +220,71 @@ private struct PenguinDrawing {
             let pompom = circle(CGPoint(x: 373, y: 196), 20)
             ctx.fill(pompom, with: .color(RGBColor(hex: "#fcfcfe").color))
             ctx.stroke(pompom, with: .color(navy), style: accessoryStroke)
+        }
+    }
+}
+
+// MARK: - Expresiones y monocromo
+
+private extension PenguinDrawing {
+
+    /// Entrecerrado: media luna bajo un párpado. En X: dos trazos cruzados.
+    /// Mismas medidas que `pin-warn` y `pin-over` del diseño.
+    func drawMoodEye(_ eye: CGPoint, in context: GraphicsContext, color: Color) {
+        switch mood {
+        case .ok:
+            context.fill(circle(eye, 24), with: .color(color))
+        case .warning:
+            var half = Path()
+            half.addArc(center: CGPoint(x: eye.x, y: eye.y + 2), radius: 24,
+                        startAngle: .degrees(0), endAngle: .degrees(180), clockwise: false)
+            half.closeSubpath()
+            context.fill(half, with: .color(color))
+            var lid = Path()
+            lid.move(to: CGPoint(x: eye.x - 26, y: eye.y - 4))
+            lid.addCurve(to: CGPoint(x: eye.x + 26, y: eye.y - 4),
+                         control1: CGPoint(x: eye.x - 16, y: eye.y - 16),
+                         control2: CGPoint(x: eye.x + 16, y: eye.y - 16))
+            context.stroke(lid, with: .color(color), style: StrokeStyle(lineWidth: 8, lineCap: .round))
+        case .over:
+            var cross = Path()
+            cross.move(to: CGPoint(x: eye.x - 15, y: eye.y - 15))
+            cross.addLine(to: CGPoint(x: eye.x + 15, y: eye.y + 15))
+            cross.move(to: CGPoint(x: eye.x + 15, y: eye.y - 15))
+            cross.addLine(to: CGPoint(x: eye.x - 15, y: eye.y + 15))
+            context.stroke(cross, with: .color(color), style: StrokeStyle(lineWidth: 9, lineCap: .round))
+        }
+    }
+
+    /// La silueta en `.foreground` con la cara recortada, como `pin-mono-w`:
+    /// así el sistema la tiñe en la pantalla bloqueada sin perder la expresión.
+    func drawMonochrome(in context: inout GraphicsContext) {
+        let breed = look.breedStyle
+        let young = look.age == 0
+        let body = scaled(context, around: CGPoint(x: 379, y: 430), by: young ? 0.94 : 1.03)
+        let ink = GraphicsContext.Shading.foreground
+        let clear = Color.black
+
+        body.drawLayer { layer in
+            let tuft = breed.tuft == .leaf ? P.tuftLeaf : P.tuftSpikes
+            for shape in [tuft, P.wingLeft, P.wingRight, P.body] {
+                layer.fill(shape, with: ink)
+                layer.stroke(shape, with: ink, style: Self.round)
+            }
+            if look.accessoryStyle == .hat {
+                layer.fill(P.hatDome, with: ink)
+                layer.fill(P.hatBrim, with: ink)
+                layer.fill(circle(CGPoint(x: 373, y: 196), 20), with: ink)
+            }
+
+            layer.blendMode = .destinationOut
+            let face = scaled(layer, around: CGPoint(x: 379, y: 353), by: young ? 1.16 : 0.94)
+            for eye in Self.eyes {
+                drawMoodEye(eye, in: face, color: clear)
+            }
+            let beak = scaled(layer, around: CGPoint(x: 379, y: 384), by: young ? 0.9 : 1.04)
+            beak.stroke(P.beak, with: .color(clear), style: StrokeStyle(lineWidth: 6, lineCap: .round, lineJoin: .round))
+            beak.fill(P.mouth, with: .color(clear))
         }
     }
 }
