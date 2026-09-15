@@ -95,7 +95,7 @@ struct IncomeDetailsView: View {
                 }
             }
 
-            Text(Money.format(income.amount, currency: income.currency))
+            Text(income.amountSign + Money.format(income.amount, currency: income.currency))
                 .font(.system(size: amountSize, weight: .bold, design: .rounded))
                 .foregroundStyle(palette.label)
                 .lineLimit(1)

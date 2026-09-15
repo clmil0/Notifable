@@ -953,7 +953,7 @@ private struct DashboardContent: View {
 
                 Spacer()
 
-                Text(Money.format(income.amount, currency: income.currency))
+                Text(income.amountSign + Money.format(income.amount, currency: income.currency))
                     .font(.title3)
                     .fontWeight(.bold)
                     .foregroundStyle(income.isDebtPayment ? palette.label : accent.incomeColor(colorScheme))

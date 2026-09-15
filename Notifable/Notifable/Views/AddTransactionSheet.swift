@@ -240,7 +240,8 @@ struct AddTransactionSheet: View {
 
     private var symbolPrefix: String {
         let symbol = draft.currency == "USD" ? "US$" : "S/"
-        return draft.type == .ingreso ? "+ " + symbol : symbol
+        // Un cobro de deuda no lleva "+": no es ingreso (ver `Income.amountSign`).
+        return draft.type == .ingreso && !draft.isDebtPayment ? "+ " + symbol : symbol
     }
 
     /// Sólo hay dos monedas: un segmentado de 26 pt en vez del `Picker` de rueda

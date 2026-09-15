@@ -418,7 +418,8 @@ struct ExpenseDetailsView: View {
                             .foregroundStyle(palette.secondaryLabel)
                     }
                     Spacer()
-                    Text("+" + Money.format(payment.amount, currency: payment.currency))
+                    // Sin "+": un abono devuelve lo prestado, no es un ingreso.
+                    Text(Money.format(payment.amount, currency: payment.currency))
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(palette.positive)
                 }

@@ -42,6 +42,11 @@ extension Expense {
 
 extension Income {
 
+    /// Signo delante del monto en las listas. Un ingreso suma ("+"); un abono
+    /// a deuda no: es dinero que te devuelven, no dinero nuevo (ACCOUNTING.md
+    /// §3), y un "+" lo haría pasar por ingreso a simple vista.
+    var amountSign: String { isDebtPayment ? "" : "+ " }
+
     var accountingSnapshot: IncomeSnapshot {
         IncomeSnapshot(
             amount: amount,
