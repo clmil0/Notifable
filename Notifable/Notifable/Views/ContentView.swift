@@ -117,6 +117,10 @@ struct ContentView: View {
         case .rhythm:
             selectedTransactionType = nil
             selectedTab = .trends
+        case .friendInvite(let code):
+            selectedTransactionType = nil
+            FriendInviteRouter.shared.pendingCode = code
+            selectedTab = .amigos
         }
     }
 

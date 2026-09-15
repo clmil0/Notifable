@@ -1,0 +1,12 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["PPQPXJMF36.clmilo.Notifable"],
+        "components": [
+          { "/": "/amigo/*", "comment": "Invitación de amigo: abre AgruPay en Amigos" }
+        ]
+      }
+    ]
+  }
+}

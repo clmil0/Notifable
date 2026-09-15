@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invitación a AgruPay</title>
+<meta property="og:title" content="Te invitaron a AgruPay">
+<meta property="og:description" content="Toca para agregar a tu amigo en AgruPay.">
+<style>
+  :root { color-scheme: light dark; --accent: #2E5BFF; }
+  body { margin: 0; font: 16px/1.4 -apple-system, system-ui, sans-serif; display: grid; place-items: center; min-height: 100vh; padding: 0 20px; box-sizing: border-box; }
+  main { max-width: 380px; width: 100%; text-align: center; }
+  h1 { font-size: 24px; margin: 0 0 8px; }
+  p { color: #888; margin: 0 0 20px; }
+  .code { font: 700 28px ui-monospace, Menlo, monospace; letter-spacing: 6px; padding: 14px; border-radius: 14px; background: rgba(127,127,127,.15); margin-bottom: 20px; }
+  a.button, button { display: block; width: 100%; box-sizing: border-box; padding: 14px; border-radius: 14px; border: 0; font: 600 17px -apple-system, system-ui, sans-serif; text-decoration: none; margin-bottom: 10px; }
+  a.button { background: var(--accent); color: #fff; }
+  button { background: rgba(127,127,127,.15); color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Te invitaron a AgruPay</h1>
+  <p>Si ya tienes la app, ábrela para aceptar. Si no, instálala y escribe este código en Amigos.</p>
+  <div class="code" id="code">········</div>
+  <a class="button" id="open" href="agrupay://amigo">Abrir AgruPay</a>
+  <button id="copy">Copiar código</button>
+</main>
+<script>
+  // /amigo/<código> (o ?codigo=): 8 caracteres hexadecimales, igual que friend_codes.
+  const match = location.pathname.match(/\/amigo\/([0-9a-fA-F]{8})\/?$/);
+  const query = new URLSearchParams(location.search).get('codigo');
+  const raw = match ? match[1] : query;
+  const code = raw && /^[0-9a-fA-F]{8}$/.test(raw) ? raw.toLowerCase() : null;
+  if (!code) {
+    document.querySelector('h1').textContent = 'AgruPay';
+    document.querySelector('p').textContent = 'Para agregar a un amigo, abre el enlace que te compartió.';
+    document.getElementById('code').hidden = true;
+    document.getElementById('copy').hidden = true;
+  }
+  if (code) {
+    document.getElementById('code').textContent = code;
+    document.getElementById('open').href = 'agrupay://amigo?codigo=' + code;
+  }
+  document.getElementById('copy').onclick = async (e) => {
+    if (!code) return;
+    try { await navigator.clipboard.writeText(code); e.target.textContent = '✓ Copiado'; } catch (_) {}
+  };
+</script>
+</body>
+</html>

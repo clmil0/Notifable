@@ -1,0 +1,11 @@
+{
+  // Sólo archivos estáticos: la página de invitación y el archivo de Apple.
+  "name": "agrupay",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./public",
+    // Cualquier ruta que no sea un archivo (/amigo/<código>) sirve index.html
+    // con 200 y SIN redirigir: así la página conserva el código en la URL.
+    "not_found_handling": "single-page-application"
+  }
+}

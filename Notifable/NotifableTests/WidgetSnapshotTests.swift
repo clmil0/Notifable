@@ -215,11 +215,22 @@ struct WidgetSnapshotTests {
     func enlaces() {
         let id = UUID()
         let links: [AppDeepLink] = [.add(isIncome: true, source: "Yape"), .add(isIncome: false, source: nil),
-                                    .quick(id), .summary, .categories, .pending, .rhythm]
+                                    .quick(id), .summary, .categories, .pending, .rhythm,
+                                    .friendInvite(code: "a1b2c3d4")]
         for link in links {
             #expect(AppDeepLink(url: link.url) == link, "\(link.url)")
         }
         #expect(AppDeepLink(url: URL(string: "https://agrupay.app/add")!) == nil)
         #expect(AppDeepLink(url: URL(string: "agrupay://quick?id=nope")!) == nil)
+        // Códigos de invitación: 8 hexadecimales; en minúsculas como los canjea el backend.
+        #expect(AppDeepLink(url: URL(string: "agrupay://amigo?codigo=A1B2C3D4")!) == .friendInvite(code: "a1b2c3d4"))
+        #expect(AppDeepLink(url: URL(string: "agrupay://amigo?codigo=corto")!) == nil)
+        // Sólo el dominio configurado cuenta como invitación.
+        #expect(AppDeepLink(url: URL(string: "https://ejemplo.com/amigo/a1b2c3d4")!) == nil)
+        if let host = InviteLinks.webHosts.first {
+            #expect(AppDeepLink(url: URL(string: "https://\(host)/amigo/A1B2C3D4")!) == .friendInvite(code: "a1b2c3d4"))
+            #expect(AppDeepLink(url: URL(string: "https://\(host)/otra/a1b2c3d4")!) == nil)
+        }
+        #expect(!InviteLinks.shareText(code: "a1b2c3d4", linkReady: false).contains("https"))
     }
 }

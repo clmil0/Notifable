@@ -53,6 +53,10 @@ struct AmigosHubView: View {
     @State private var showProfileSheet = false
 
     @State private var showInviteSheet = false
+    /// Código que llegó por un enlace de invitación: la hoja abre directo en
+    /// "¿Aceptar?". Ver `FriendInviteRouter`.
+    @State private var invitedCode: String?
+    @State private var inviteRouter = FriendInviteRouter.shared
     /// El amigo que se acaba de agregar: su fila en "Sin compartir" lo resalta
     /// unos segundos con "Nuevo · elige qué le compartes" en vez del subtítulo
     /// normal. Se limpia solo — ver `flagRecentlyAdded`.
@@ -116,13 +120,16 @@ struct AmigosHubView: View {
                 showProfileSheet = true
             }
             await friendsManager.refresh()
+            presentPendingInvite()
         }
+        .onChange(of: inviteRouter.pendingCode) { _, _ in presentPendingInvite() }
+        .onChange(of: auth.isReady) { _, _ in presentPendingInvite() }
         .refreshable { await friendsManager.refresh() }
         .sheet(isPresented: $showProfileSheet) {
             MyProfileSheet()
         }
-        .sheet(isPresented: $showInviteSheet) {
-            AddFriendSheet(onJoined: flagRecentlyAdded)
+        .sheet(isPresented: $showInviteSheet, onDismiss: { invitedCode = nil }) {
+            AddFriendSheet(invitedCode: invitedCode, onJoined: flagRecentlyAdded)
         }
         .sheet(item: $selectedFriend) { friend in
             FriendProfileView(friend: friend, totals: totals,
@@ -775,6 +782,22 @@ struct AmigosHubView: View {
 
     // MARK: - Invitar / unirme
 
+    /// Sin sesión no se puede canjear: el código espera en el router hasta
+    /// que `auth.isReady` y esta vista vuelvan a llamar.
+    private func presentPendingInvite() {
+        guard auth.isReady, inviteRouter.pendingCode != nil, let code = inviteRouter.take() else { return }
+        if showInviteSheet {
+            showInviteSheet = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                invitedCode = code
+                showInviteSheet = true
+            }
+        } else {
+            invitedCode = code
+            showInviteSheet = true
+        }
+    }
+
     private var inviteCard: some View {
         Button {
             showInviteSheet = true
@@ -835,9 +858,15 @@ struct AddFriendSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
 
+    /// Código de un enlace de invitación. Con él la hoja pregunta "¿Aceptar?"
+    /// en vez de mostrar el formulario completo.
+    var invitedCode: String? = nil
     let onJoined: (String) -> Void
 
     @State private var friendsManager = FriendsManager.shared
+    @State private var dismissedInvite = false
+    /// La página de invitación ya está publicada: se comparte con enlace.
+    @State private var inviteLinkReady = InviteLinkCheck.isKnownReady
 
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
@@ -859,11 +888,14 @@ struct AddFriendSheet: View {
         VStack(spacing: 0) {
             if let joinedFriend {
                 successContent(friend: joinedFriend)
+            } else if let invitedCode, !dismissedInvite {
+                inviteContent(code: invitedCode)
             } else {
                 formContent
             }
         }
         .task { await ensureCode() }
+        .task { inviteLinkReady = await InviteLinkCheck.isReady() }
         // Semimodal, no a pantalla completa: el contenido cabe de sobra en
         // media hoja, y abrirla hasta arriba era ocupar espacio de más.
         .presentationDetents([.medium])
@@ -932,7 +964,7 @@ struct AddFriendSheet: View {
                 .disabled(myCode == nil)
 
                 if let myCode {
-                    ShareLink(item: "Agrégame en AgruPay con el código \(myCode)") {
+                    ShareLink(item: InviteLinks.shareText(code: myCode, linkReady: inviteLinkReady)) {
                         Text("Compartir")
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(.white)
@@ -1060,6 +1092,88 @@ struct AddFriendSheet: View {
         .padding(13)
         .background(themeColor.opacity(colorScheme == .dark ? 0.16 : 0.08))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    // MARK: - Invitación recibida
+
+    private func inviteContent(code: String) -> some View {
+        let isOwn = code == myCode?.lowercased()
+        let chars = Array(code)
+
+        return VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Te invitaron a ser amigos")
+                        .font(.title2.bold())
+                    Text("Alguien te compartió su código de AgruPay.")
+                        .font(.subheadline)
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.caption.bold())
+                        .foregroundStyle(palette.secondaryLabel)
+                        .frame(width: 32, height: 32)
+                        .background(Color(.systemGray5), in: Circle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            HStack(spacing: 6) {
+                ForEach(0..<chars.count, id: \.self) { i in
+                    Text(String(chars[i]))
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 56)
+                        .background(Color(.secondarySystemBackground))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+            }
+
+            if isOwn {
+                Label("Es tu propio código: compártelo con alguien más.", systemImage: "info.circle")
+                    .font(.footnote)
+                    .foregroundStyle(palette.secondaryLabel)
+            } else if let redeemError {
+                Label(redeemError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+
+            Button {
+                redeemInput = code
+                submitRedeem()
+            } label: {
+                Group {
+                    if isRedeeming {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("Aceptar y agregar")
+                            .font(.headline)
+                    }
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(isOwn ? Color(.systemGray4) : themeColor)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isOwn || isRedeeming)
+
+            Button("Ahora no") { dismissedInvite = true }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(palette.secondaryLabel)
+                .frame(maxWidth: .infinity)
+
+            privacyNote(text: "Agregarse **no comparte nada todavía**. Después eliges, por persona, qué ve de tu gasto.")
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 26)
     }
 
     // MARK: - Éxito
