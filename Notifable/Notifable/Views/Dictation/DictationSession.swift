@@ -1,0 +1,264 @@
+import Foundation
+import SwiftData
+import SwiftUI
+
+/// Una tarjeta del dictado: lo entendido y en qué punto está.
+struct DictationCard: Identifiable, Equatable {
+    enum Status: Equatable {
+        /// Contando los 2 s antes de registrarse; se puede cancelar o editar.
+        case pending
+        /// Pausado: nada se registra hasta que se guarde.
+        case editing
+        case saved
+        case cancelled
+    }
+
+    let id = UUID()
+    var movement: VoiceMovement
+    var status: Status = .pending
+    /// Cambia en cada cuenta atrás: una vieja que termina tarde no registra.
+    var countdown = UUID()
+}
+
+/// La lógica del dictado, aparte de su hoja: frases → movimientos → tarjetas
+/// → registros.
+@MainActor
+final class DictationSession: ObservableObject {
+
+    /// Lo que falta del movimiento que quedó a medias.
+    enum Question: Equatable {
+        case amount
+        case title
+
+        var text: String {
+            switch self {
+            case .amount: return "¿De cuánto?"
+            case .title:  return "¿En qué?"
+            }
+        }
+    }
+
+    @Published private(set) var cards: [DictationCard] = []
+    @Published private(set) var question: Question?
+    /// La última frase ya entendida, para que no desaparezca de golpe.
+    @Published private(set) var lastPhrase = ""
+    @Published private(set) var isThinking = false
+    /// Lo dicho hasta ahora sin monto: el relato de quien da vueltas antes de
+    /// llegar al gasto. Se interpreta junto con la frase que traiga el monto.
+    @Published private(set) var story = ""
+
+    let speech = SpeechDictation()
+
+    static let countdown: Duration = .seconds(2)
+
+    private var context: ModelContext?
+    private var incomplete: VoiceMovement?
+    private var queue: Task<Void, Never>?
+    /// Si tras el relato no llega ningún monto, se interpreta igual (y se
+    /// pregunta «¿De cuánto?»).
+    private var patience: Task<Void, Never>?
+    static let contextPatience: Duration = .milliseconds(3_500)
+    private(set) var categories: [String] = CategoryStyle.defaults
+
+    var savedCount: Int { cards.filter { $0.status == .saved }.count }
+
+    init() {
+        speech.onPhrase = { [weak self] text in self?.enqueue(text) }
+    }
+
+    func start(context: ModelContext) async {
+        self.context = context
+        categories = Self.availableCategories(context: context)
+        await speech.start()
+    }
+
+    /// Lo que estaba contando se registra —nadie lo canceló—; lo que estaba
+    /// en edición se descarta, porque no se guardó.
+    func finish() {
+        speech.stop(flush: false)
+        queue?.cancel()
+        patience?.cancel()
+        for card in cards where card.status == .pending { commit(card.id, token: card.countdown) }
+        for index in cards.indices where cards[index].status == .editing {
+            cards[index].status = .cancelled
+        }
+    }
+
+    // MARK: - Frases
+
+    private func enqueue(_ text: String) {
+        patience?.cancel()
+        let combined = story.isEmpty ? text : story + " " + text
+
+        // Sin monto todavía y sin pregunta abierta: es contexto, no un gasto.
+        // Se guarda y se espera a que la persona llegue al número.
+        if question == nil, VoiceMovementParser.allAmounts(in: combined).isEmpty {
+            story = combined
+            lastPhrase = combined
+            patience = Task { [weak self] in
+                try? await Task.sleep(for: Self.contextPatience)
+                guard !Task.isCancelled, let self, !self.story.isEmpty else { return }
+                let told = self.story
+                self.story = ""
+                self.process(told)
+            }
+            return
+        }
+
+        story = ""
+        process(combined)
+    }
+
+    private func process(_ text: String) {
+        let previous = queue
+        queue = Task { [weak self] in
+            await previous?.value
+            await self?.handle(text)
+        }
+    }
+
+    private func handle(_ text: String) async {
+        lastPhrase = text
+
+        // Primero, ¿contesta la pregunta pendiente? Sólo si la frase no es un
+        // movimiento propio: «Gasté 24 en el almuerzo» después de «¿De
+        // cuánto?» es un gasto nuevo, no el monto del anterior.
+        let isOwnMovement = VoiceMovementParser.parse(text) { _, _ in nil }
+            .contains { $0.amount != nil && $0.title != nil }
+        if !isOwnMovement, var pending = incomplete, let question {
+            switch question {
+            case .amount:
+                pending.amount = VoiceMovementParser.amount(in: text)
+            case .title:
+                if let title = VoiceMovementParser.title(in: text) {
+                    pending.title = title
+                    if pending.kind == .gasto {
+                        pending.category = VoiceMovementParser.defaultCategory(title: title, whole: text)
+                            ?? Accounting.unclassified
+                    }
+                }
+            }
+            if pending.isComplete {
+                clearQuestion()
+                add(pending)
+                return
+            }
+        }
+
+        isThinking = true
+        let movements = await VoiceMovementAI.parse(text, categories: categories)
+        isThinking = false
+        guard !movements.isEmpty else { return }
+
+        // Algo nuevo reemplaza a la pregunta que no se contestó.
+        clearQuestion()
+        for var movement in movements {
+            if movement.title == nil, movement.kind == .ingreso { movement.title = "Ingreso" }
+
+            if movement.isComplete {
+                add(movement)
+            } else if question == nil {
+                // Una pregunta a la vez; primero el monto.
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    incomplete = movement
+                    question = movement.amount == nil ? .amount : .title
+                }
+            }
+        }
+    }
+
+    private func clearQuestion() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            incomplete = nil
+            question = nil
+        }
+    }
+
+    private func add(_ movement: VoiceMovement) {
+        let card = DictationCard(movement: movement)
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.86)) {
+            cards.insert(card, at: 0)
+        }
+        startCountdown(card.id)
+    }
+
+    // MARK: - Tarjetas
+
+    private func startCountdown(_ id: DictationCard.ID) {
+        guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
+        let token = UUID()
+        cards[index].countdown = token
+        cards[index].status = .pending
+        Task { [weak self] in
+            try? await Task.sleep(for: Self.countdown)
+            self?.commit(id, token: token)
+        }
+    }
+
+    func cancel(_ id: DictationCard.ID) {
+        update(id) { $0.status = .cancelled }
+    }
+
+    func edit(_ id: DictationCard.ID) {
+        update(id) { $0.status = .editing }
+    }
+
+    /// Guardar tras editar vuelve a contar: se ve el cambio antes de que quede.
+    func saveEdit(_ id: DictationCard.ID, amount: Double, category: String) {
+        update(id) {
+            $0.movement.amount = amount
+            if $0.movement.kind == .gasto { $0.movement.category = category }
+        }
+        startCountdown(id)
+    }
+
+    private func update(_ id: DictationCard.ID, _ change: (inout DictationCard) -> Void) {
+        guard let index = cards.firstIndex(where: { $0.id == id }) else { return }
+        withAnimation(.easeInOut(duration: 0.2)) { change(&cards[index]) }
+    }
+
+    private func commit(_ id: DictationCard.ID, token: UUID) {
+        guard let index = cards.firstIndex(where: { $0.id == id }),
+              cards[index].status == .pending,
+              cards[index].countdown == token,
+              let context else { return }
+
+        let movement = cards[index].movement
+        guard let amount = movement.amount, Money.cents(amount) > 0 else {
+            update(id) { $0.status = .cancelled }
+            return
+        }
+        let title = movement.title ?? (movement.kind == .gasto ? "Gasto" : "Ingreso")
+
+        switch movement.kind {
+        case .gasto:
+            context.insert(Expense(amount: amount,
+                                   merchant: title,
+                                   date: movement.date,
+                                   category: movement.category,
+                                   currency: movement.currency))
+        case .ingreso:
+            context.insert(Income(amount: amount,
+                                  currency: movement.currency,
+                                  source: movement.source ?? "Transferencia",
+                                  title: title,
+                                  date: movement.date))
+        }
+        try? context.save()
+        update(id) { $0.status = .saved }
+    }
+
+    // MARK: - Categorías
+
+    /// Las de fábrica, las creadas y las que ya se usaron: lo mismo que se
+    /// puede elegir al editar, y la lista cerrada que se le da al modelo.
+    private static func availableCategories(context: ModelContext) -> [String] {
+        var descriptor = FetchDescriptor<Expense>(sortBy: [SortDescriptor(\.date, order: .reverse)])
+        descriptor.fetchLimit = 400
+        let used = ((try? context.fetch(descriptor)) ?? []).map(\.category)
+
+        var seen = Set<String>()
+        return (CategoryStyle.defaults + CategoryCatalog.shared.names.sorted() + used)
+            .filter { $0 != Accounting.unclassified && !$0.isEmpty && seen.insert($0).inserted }
+    }
+}

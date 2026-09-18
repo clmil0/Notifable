@@ -61,6 +61,7 @@ enum AppPreferences {
         .init(key: "readPeriodMonths", kind: .int, note: "Desde cuándo leer el correo"),
 
         // Preferencias de vista que sí son una elección duradera
+        .init(key: DictationStyle.storageKey, kind: .string, note: "Animación del dictado por voz"),
         .init(key: "categoriesSegment", kind: .string, note: "Pestaña por defecto en Categorías"),
 
         // Amigos. La sesión y los ids viven en el servidor; lo de aquí es lo

@@ -63,9 +63,14 @@ struct AppLockRoutingTests {
         }
     }
 
-    @Test("Un error desconocido guía: es mejor sobrar que dejar sin salida")
-    func desconocidoGuia() {
-        #expect(AppLockFailure.other("lo que sea").needsGuidance)
+    /// Desde 7868e58 un error desconocido ya no abre la pantalla guiada: suele
+    /// ser un fallo pasajero de Face ID, y se resuelve volviendo a tocar el
+    /// sello. La pantalla en reposo lo explica en su subtítulo.
+    @Test("Un error desconocido se reintenta desde la pantalla en reposo, con su explicación")
+    func desconocidoSeReintenta() {
+        let failure = AppLockFailure.other("lo que sea")
+        #expect(!failure.needsGuidance)
+        #expect(!failure.idleSubtitle.isEmpty)
     }
 
     // MARK: - Que cada caso guiado sepa salir

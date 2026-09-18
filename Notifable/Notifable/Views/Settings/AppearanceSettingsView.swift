@@ -13,6 +13,7 @@ struct AppearanceSettingsView: View {
     @AppStorage(AppTextSize.storageKey) private var appTextSize = AppTextSize.sistema.rawValue
     @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     @AppStorage(AppThemeColor.themedCategoryColorsKey) private var themedCategoryColors = false
+    @AppStorage(DictationStyle.storageKey) private var dictationStyle = DictationStyle.bars.rawValue
 
     @State private var showsThemeGallery = false
 
@@ -35,6 +36,7 @@ struct AppearanceSettingsView: View {
                     textSizePicker
                     intenseTintSection
                     categoryColorsSection
+                    dictationSection
                 }
                 .padding(.vertical, 12)
             }
@@ -252,6 +254,26 @@ struct AppearanceSettingsView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: themedCategoryColors)
+    }
+}
+
+// MARK: - Dictado
+
+extension AppearanceSettingsView {
+    /// Barras (`1a`) por defecto; la forma orgánica (`1c`) es la alternativa.
+    fileprivate var dictationSection: some View {
+        let organic = Binding(
+            get: { dictationStyle == DictationStyle.blob.rawValue },
+            set: { dictationStyle = ($0 ? DictationStyle.blob : .bars).rawValue }
+        )
+        return TailoredToggleSection(title: "Dictado por voz",
+                                     isOn: organic,
+                                     label: "Animación orgánica al escuchar",
+                                     detail: organic.wrappedValue
+                                        ? "Una forma que respira detrás del micrófono mientras hablas."
+                                        : "Barras que siguen el volumen de tu voz.",
+                                     tint: accent.color)
+            .animation(.easeInOut(duration: 0.2), value: dictationStyle)
     }
 }
 

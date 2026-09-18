@@ -63,6 +63,18 @@ final class MerchantCatalog: @unchecked Sendable {
     var version: String? { lock.withLock { stored.version } }
     var entries: [MerchantKeyword] { lock.withLock { stored.entries } }
 
+    /// La categoría de una palabra **entera** del catálogo («cine», «plaza
+    /// vea»), sin buscarla dentro de otras: en una frase dictada, «gastado»
+    /// no puede delatar «gas». Acepta también el plural («pollos»).
+    func exactCategory(for word: String) -> String? {
+        let clean = Self.normalize(word)
+        guard clean.count >= 3 else { return nil }
+        let singular = clean.hasSuffix("s") ? String(clean.dropLast()) : clean
+        return lock.withLock { matchers }
+            .first { $0.keyword == clean || $0.keyword == singular }?
+            .category
+    }
+
     /// La categoría de la palabra que aparece primero en el nombre; si dos
     /// empiezan en el mismo sitio, la más larga ("uber eats" gana a "uber",
     /// y en "TOTTUS LA MARINA" gana "tottus" y no "la mar").

@@ -172,7 +172,8 @@ struct SettingsTests {
         #expect(!SettingsTests.budgetValue(budget: 0, enabled: true).isEmpty)
         #expect(SettingsTests.budgetValue(budget: 0, enabled: true) == "Sin definir")
         #expect(SettingsTests.budgetValue(budget: 2400, enabled: false) == "Sin definir")
-        #expect(SettingsTests.budgetValue(budget: 2400, enabled: true).contains("2 400"))
+        // Miles con coma, igual que el resto de la app («S/ 4,945.12»).
+        #expect(SettingsTests.budgetValue(budget: 2400, enabled: true).contains("2,400"))
 
         #expect(SettingsTests.countLabel(0, singular: "regla", plural: "reglas", empty: "Ninguna") == "Ninguna")
         #expect(SettingsTests.countLabel(1, singular: "regla", plural: "reglas", empty: "Ninguna") == "1 regla")

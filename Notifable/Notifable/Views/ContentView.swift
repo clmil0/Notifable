@@ -34,6 +34,7 @@ struct ContentView: View {
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
     @Environment(\.colorScheme) private var systemScheme
     @State private var selectedTransactionType: TransactionType? = nil
+    @State private var showsDictation = false
     /// Lo que pidió el último enlace `agrupay://` para el formulario.
     @State private var linkedSource: String?
     @State private var linkedQuickID: UUID?
@@ -189,13 +190,14 @@ struct ContentView: View {
                     ShellBottomBar(selection: tabSelection,
                                    progress: scrollProgress,
                                    isAddMenuOpen: showAddPicker,
+                                   isDictating: showsDictation,
                                    onReselect: reselect,
                                    onAdd: {
                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                            showAddPicker.toggle()
                                        }
                                    },
-                                   onDictate: { presentAdd(.gasto, source: nil, quickID: nil) })
+                                   onDictate: { showsDictation = true })
                         .padding(.bottom, 4)
                 }
             }
@@ -213,6 +215,7 @@ struct ContentView: View {
                 guard locked else { return }
                 showSettings = false
                 selectedTransactionType = nil
+                showsDictation = false
                 showAddPicker = false
             }
             .gmailLinkFlow(isEnabled: !showSettings)
@@ -224,6 +227,12 @@ struct ContentView: View {
                 linkedQuickID = nil
             }) { type in
                 AddTransactionSheet(transactionType: type, source: linkedSource, savingQuick: linkedQuickID)
+            }
+            .sheet(isPresented: $showsDictation) {
+                DictationSheet()
+                    .presentationDetents([.fraction(0.72), .large])
+                    .presentationDragIndicator(.visible)
+                    .presentationCornerRadius(28)
             }
             .onOpenURL { url in
                 guard let link = AppDeepLink(url: url) else { return }

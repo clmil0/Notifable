@@ -187,6 +187,8 @@ struct ShellBottomBar: View {
     /// Con el menú del `+` abierto, el `+` gira 45° y se vuelve la ✕ que lo
     /// cierra: el mismo toque que abrió, cierra.
     var isAddMenuOpen: Bool = false
+    /// Con el dictado abierto, el mic se tiñe del tema.
+    var isDictating: Bool = false
     let onReselect: (AppTab) -> Void
     let onAdd: () -> Void
     let onDictate: () -> Void
@@ -264,9 +266,9 @@ struct ShellBottomBar: View {
             .accessibilityLabel(isAddMenuOpen ? "Cerrar" : "Registrar movimiento")
 
             Button(action: onDictate) {
-                Image(systemName: "mic")
+                Image(systemName: isDictating ? "mic.fill" : "mic")
                     .font(.system(size: 17, weight: .medium))
-                    .foregroundStyle(palette.secondaryLabel)
+                    .foregroundStyle(isDictating ? accent.color : palette.secondaryLabel)
                     .frame(width: 36, height: 46)
             }
             .accessibilityLabel("Dictar un gasto")
