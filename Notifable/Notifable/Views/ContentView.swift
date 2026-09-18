@@ -1,46 +1,25 @@
 import SwiftUI
 import SwiftData
 
-enum AppTab: Int, CaseIterable {
-    case home = 0
-    case categories = 1
-    case trends = 2
-    case amigos = 3
-    
-    var icon: String {
-        switch self {
-        case .home: return "house.fill"
-        case .categories: return "tray.full.fill"
-        case .trends: return "chart.bar.fill"
-        case .amigos: return "person.2.fill"
-        }
-    }
-    
-    var title: String {
-        switch self {
-        case .home: return "Resumen"
-        case .categories: return "Categorías"
-        case .trends: return "Ritmo"
-        case .amigos: return "Amigos"
-        }
-    }
-}
-
 struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
-    @Query private var expenses: [Expense]
     @Query private var recurringRules: [RecurringExpense]
     @AppStorage("remindRecurring") private var remindRecurring = true
     @State private var didResolveRecurring = false
-    @State private var selectedTab: AppTab = .home
+    @State private var selectedTab: AppTab = .summary
+
+    // Sub-vista activa de cada pestaña. Una por pestaña, no una global: al
+    // volver a Análisis se espera encontrarlo como se dejó, pero tocar el
+    // ícono de la pestaña ya activa devuelve a la sub-vista por defecto.
+    @State private var summarySub: SummarySubtab = .today
+    @State private var analysisSub: AnalysisSubtab = .categories
+    @State private var socialSub: SocialSubtab = .activity
+
+    /// El desplazamiento de la pestaña visible, en una clase observable para
+    /// no invalidar este cuerpo en cada fotograma (ver `ScrollProgress`).
+    @State private var scrollProgress = ScrollProgress()
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
-    /// En `AppStorage` porque el banner de Resumen necesita dejarlo en
-    /// Pendientes antes de navegar hasta Categorías (`onOpenInbox`); por eso
-    /// sobrevive de por sí a cambiar de pestaña. Tocar el ícono de Categorías
-    /// desde la barra inferior, en cambio, siempre debe abrir Mis Categorías
-    /// — nunca dejarte donde estabas la última vez.
-    @AppStorage("categoriesSegment") private var categoriesSegment = CategoryTab.misCategorias
     
     var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     var themeColor: Color { accent.color }
@@ -75,6 +54,13 @@ struct ContentView: View {
         guard !didResolveRecurring else { return }
         didResolveRecurring = true
 
+        // Sólo la ventana que el motor necesita para casar cada regla con el
+        // cobro que ya llegó del banco. Antes esto venía de un `@Query` sin
+        // predicado en la raíz: la app materializaba el historial completo al
+        // arrancar —y lo mantenía vivo— para una comprobación que corre una
+        // vez por sesión.
+        let expenses = recurringExpenses()
+
         RecurringEngine.applyAutomatic(rules: recurringRules, expenses: expenses, in: modelContext)
         try? modelContext.save()
 
@@ -90,6 +76,19 @@ struct ContentView: View {
         )
     }
 
+    /// Los gastos de la ventana de casado de recurrentes. Sin reglas activas
+    /// no hay nada que casar y no se pide nada.
+    private func recurringExpenses() -> [Expense] {
+        guard let window = RecurringEngine.matchWindow(rules: recurringRules) else { return [] }
+        let start = window.start
+        let end = window.end
+        let descriptor = FetchDescriptor<Expense>(
+            predicate: #Predicate { $0.date >= start && $0.date < end },
+            sortBy: [SortDescriptor(\Expense.date, order: .reverse)]
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
     // MARK: - Enlaces
 
     private func applyPendingLinkIfReady() {
@@ -103,24 +102,30 @@ struct ContentView: View {
             presentAdd(isIncome ? .ingreso : .gasto, source: source, quickID: nil)
         case .quick(let id):
             presentAdd(.gasto, source: nil, quickID: id)
+        // Los enlaces `agrupay://` de los widgets y de Siri siguen siendo los
+        // mismos; lo que cambia es dónde aterrizan. `categories` y `rhythm` ya
+        // no son pestañas: ahora son sub-vistas de Análisis.
         case .summary:
             selectedTransactionType = nil
-            selectedTab = .home
+            summarySub = .today
+            selectedTab = .summary
         case .categories:
             selectedTransactionType = nil
-            categoriesSegment = .misCategorias
-            selectedTab = .categories
+            analysisSub = .categories
+            selectedTab = .analysis
         case .pending:
             selectedTransactionType = nil
-            categoriesSegment = .inbox
-            selectedTab = .categories
+            analysisSub = .pending
+            selectedTab = .analysis
         case .rhythm:
             selectedTransactionType = nil
-            selectedTab = .trends
+            analysisSub = .history
+            selectedTab = .analysis
         case .friendInvite(let code):
             selectedTransactionType = nil
             FriendInviteRouter.shared.pendingCode = code
-            selectedTab = .amigos
+            socialSub = .friends
+            selectedTab = .social
         }
     }
 
@@ -140,53 +145,58 @@ struct ContentView: View {
         }
     }
 
-    /// Cada opción cierra el menú y abre su propio modal.
-    private func addOption(title: String, icon: String, tint: Color, type: TransactionType) -> some View {
-        Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                showAddPicker = false
-            }
-            selectedTransactionType = type
-        } label: {
-            VStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.title2)
-                Text(title)
-                    .font(.caption.bold())
-            }
-            .foregroundStyle(tint)
-            .frame(width: 70, height: 60)
-        }
-    }
-
     var body: some View {
         ZStack {
-            VStack(spacing: 0) {
-                // Header siempre visible arriba
-                topHeader
-                
-                // Contenido Principal
-                ZStack(alignment: .bottom) {
-                    Group {
-                        switch selectedTab {
-                        case .home:
-                            DashboardView(onOpenInbox: {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                    selectedTab = .categories
-                                }
-                            }, scrollToTopTrigger: $scrollToTopTrigger)
-                        case .categories:
-                            CategoriesView(scrollToTopTrigger: $scrollToTopTrigger)
-                        case .trends:
-                            RhythmView(scrollToTopTrigger: $scrollToTopTrigger)
-                        case .amigos:
-                            AmigosHubView(scrollToTopTrigger: $scrollToTopTrigger)
-                        }
-                    }
+            // El chrome **flota** sobre el contenido; ya no lo empuja hacia
+            // abajo. Por eso es un `ZStack` y no un `VStack`: el monto grande
+            // de Resumen pasa por debajo de los botones circulares al hacer
+            // scroll, que es lo que permite que el header sea transparente.
+            ZStack(alignment: .top) {
+                tabContent
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    
-                    // Floating Glass Tab Bar (WhatsApp/Telegram style)
-                    floatingGlassTabBar
+
+                header
+
+                // Degradado al pie: las píldoras son de vidrio y sin él las
+                // filas se leen a través de ellas. Sube hasta 150 pt y no
+                // intercepta toques.
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    LinearGradient(colors: [Palette(systemScheme).background.opacity(0),
+                                            Palette(systemScheme).background],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: 150)
+                        .allowsHitTesting(false)
+                }
+                .ignoresSafeArea(edges: .bottom)
+
+                if showAddPicker {
+                    AddMenu(onPick: { type in
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                    showAddPicker = false
+                                }
+                                presentAdd(type, source: nil, quickID: nil)
+                            },
+                            onDismiss: {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                    showAddPicker = false
+                                }
+                            })
+                }
+
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    ShellBottomBar(selection: tabSelection,
+                                   progress: scrollProgress,
+                                   isAddMenuOpen: showAddPicker,
+                                   onReselect: reselect,
+                                   onAdd: {
+                                       withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                           showAddPicker.toggle()
+                                       }
+                                   },
+                                   onDictate: { presentAdd(.gasto, source: nil, quickID: nil) })
+                        .padding(.bottom, 4)
                 }
             }
             .background(Color(.systemBackground).ignoresSafeArea())
@@ -224,45 +234,6 @@ struct ContentView: View {
             .onChange(of: appLock.isLocked) { _, _ in applyPendingLinkIfReady() }
             .onChange(of: showSplash) { _, _ in applyPendingLinkIfReady() }
             
-            // Botones flotantes de Gasto e Ingreso al tocar el +.
-            if showAddPicker {
-                Color.black.opacity(0.3)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            showAddPicker = false
-                        }
-                    }
-
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
-
-                        HStack(spacing: 0) {
-                            addOption(title: "Gasto",
-                                      icon: "arrow.up.right.circle.fill",
-                                      tint: themeColor,
-                                      type: .gasto)
-
-                            Divider().frame(height: 40)
-
-                            addOption(title: "Ingreso",
-                                      icon: "arrow.down.left.circle.fill",
-                                      tint: accent.incomeColor(systemScheme),
-                                      type: .ingreso)
-                        }
-                        .background(.regularMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .shadow(color: Color.black.opacity(0.15), radius: 10, x: 0, y: 5)
-                    }
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 90)
-                    .transition(.scale(scale: 0.8, anchor: .bottomTrailing).combined(with: .opacity))
-                }
-            }
-
-            
             // Blindaje instantáneo: montado siempre, sin `.task` ni
             // transición — sólo cambia opacidad. `LockScreenView` reacciona a
             // `appLock.isLocked` a través de `@Published`, y SwiftUI puede
@@ -284,7 +255,10 @@ struct ContentView: View {
             // debajo del splash: al abrir se ve primero la marca y luego el
             // bloqueo, no los dos peleándose.
             if appLock.isLocked {
+                // Siempre en oscuro (`5l`), sea cual sea el tema: es la
+                // pantalla previa a la app, y así no destella al desbloquear.
                 LockScreenView(lock: appLock)
+                    .environment(\.colorScheme, .dark)
                     .transition(.opacity)
                     .zIndex(10)
             }
@@ -310,137 +284,115 @@ struct ContentView: View {
     /// segundo plano. Sólo tapa hasta que la pantalla de verdad llega.
     private var privacyShield: some View {
         ZStack {
-            Palette(systemScheme).background.ignoresSafeArea()
+            // Oscuro como el bloqueo que tapa: si no, el paso de uno a otro
+            // destellaba en claro.
+            Palette(.dark).background.ignoresSafeArea()
             AppIconTile(size: 64, accent: themeColor, coinFace: .white, detail: false)
         }
     }
 
-    // MARK: - Top Header
-    private var topHeader: some View {
-        HStack {
-            Button {
-                withAnimation {
-                    selectedTab = .home
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    AppIconTile(size: 34, accent: themeColor, coinFace: .white, detail: false)
+    // MARK: - Contenido de la pestaña
 
-                    Text("AgruPay")
-                        .font(.title)
-                        .fontWeight(.bold)
-                        .foregroundStyle(Color.primary)
-                }
+    /// Cada pestaña resuelve su sub-vista. Las diez viven en su propio
+    /// archivo y comparten el mismo esqueleto: `TrackableScrollView`, el hueco
+    /// del header flotante arriba y el de las píldoras abajo.
+    @ViewBuilder
+    private var tabContent: some View {
+        switch selectedTab {
+        case .summary:
+            switch summarySub {
+            case .today:
+                TodayScreen(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
+            case .movements:
+                MovementsView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
+            case .balance:
+                BalanceView(scrollToTopTrigger: $scrollToTopTrigger,
+                            progress: scrollProgress,
+                            onAddIncome: { presentAdd(.ingreso, source: nil, quickID: nil) })
             }
-            
-            Spacer()
-            
-            Button {
-                ThemeAnimator.animateThemeChange(from: themeButtonCenter) {
-                    appearanceRaw = (systemScheme == .dark ? AppAppearance.light : .dark).rawValue
-                }
-            } label: {
-                Image(systemName: systemScheme == .dark ? "moon.fill" : "sun.max.fill")
-                    .font(.title2)
-                    .foregroundStyle(systemScheme == .dark ? .yellow : .orange)
+
+        case .analysis:
+            switch analysisSub {
+            case .pending:
+                PendingView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
+            case .categories:
+                CategoriesOverviewView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
+            case .budgets:
+                BudgetsView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
+            case .history:
+                HistoryView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
             }
-            .accessibilityLabel(systemScheme == .dark ? "Cambiar a modo claro" : "Cambiar a modo oscuro")
-            .background(
-                GeometryReader { geo in
-                    Color.clear
-                        .onAppear {
-                            let frame = geo.frame(in: .global)
-                            themeButtonCenter = CGPoint(x: frame.midX, y: frame.midY)
-                        }
-                }
-            )
-            .padding(.trailing, 8)
-            
-            Button {
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape.fill")
-                    .font(.title2)
-                    .foregroundStyle(.gray)
+
+        case .social:
+            switch socialSub {
+            case .activity:
+                ActivityView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
+            case .friends:
+                FriendsListView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
+            case .profile:
+                ProfileView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
             }
-            .accessibilityLabel("Configuración")
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 16)
-        .padding(.bottom, 24)
-        .background(Color(.systemBackground))
     }
-    
-    // MARK: - Floating Glass Tab Bar (WhatsApp / Telegram style)
-    private var floatingGlassTabBar: some View {
-        HStack(spacing: 12) {
-            // Tab bar principal con glass material
-            HStack(spacing: 0) {
-                ForEach(AppTab.allCases, id: \.self) { tab in
-                    Button {
-                        if selectedTab == tab {
-                            scrollToTopTrigger.toggle()
-                        } else {
-                            if tab == .categories {
-                                categoriesSegment = .misCategorias
-                            }
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-                                selectedTab = tab
-                            }
-                        }
-                    } label: {
-                        // Pestaña activa en pastilla sólida del acento (`1c`):
-                        // el ícono va en blanco dentro, y el título debajo en
-                        // la variante legible del acento — blanco sobre el
-                        // vidrio claro no se leería.
-                        VStack(spacing: 4) {
-                            Image(systemName: tab.icon)
-                                .font(.system(size: 22, weight: selectedTab == tab ? .semibold : .regular))
-                                .foregroundStyle(selectedTab == tab ? Color.white : Color.gray)
-                                .frame(width: 52, height: 32)
-                                .background(
-                                    Capsule()
-                                        .fill(selectedTab == tab ? themeColor : Color.clear)
-                                )
-                            
-                            Text(tab.title)
-                                .font(.system(size: 11, weight: selectedTab == tab ? .bold : .regular))
-                                .foregroundStyle(selectedTab == tab ? accent.onSurface(systemScheme) : Color.gray)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                    }
+
+    // MARK: - Header flotante
+
+    /// Ajustes y tema a la izquierda —fijos en las tres pestañas—, y a la
+    /// derecha la píldora de sub-navegación de la pestaña activa.
+    ///
+    /// Vive en `ShellHeaderBar`, no aquí: es quien lee el desplazamiento, y
+    /// esa lectura no puede quedarse en este cuerpo.
+    private var header: some View {
+        ShellHeaderBar(tab: selectedTab,
+                       progress: scrollProgress,
+                       summarySub: $summarySub,
+                       analysisSub: $analysisSub,
+                       socialSub: $socialSub,
+                       onSettings: { showSettings = true },
+                       onTheme: toggleTheme,
+                       onMeasureThemeButton: { themeButtonCenter = $0 })
+    }
+
+    // MARK: - Acciones del chrome
+
+    /// Tocar la pestaña ya activa: primero sube al tope, y si ya está arriba
+    /// vuelve a su sub-vista por defecto.
+    /// La barra inferior escribe aquí y no en `selectedTab` directo: entrar a
+    /// Análisis desde la barra abre siempre Categorías. Los enlaces profundos
+    /// (Pendientes, Historial) cambian `selectedTab` por su cuenta y conservan
+    /// la sub-vista que eligen.
+    private var tabSelection: Binding<AppTab> {
+        Binding(
+            get: { selectedTab },
+            set: { tab in
+                if tab == .analysis, selectedTab != .analysis {
+                    analysisSub = .categories
                 }
+                selectedTab = tab
             }
-            .padding(.vertical, 10)
-            .padding(.horizontal, 8)
-            .background(.ultraThinMaterial, in: Capsule())
-            .overlay(
-                Capsule()
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
-            )
-            .shadow(color: Color.black.opacity(0.12), radius: 20, x: 0, y: 8)
-            
-            // Botón + separado (como el de búsqueda en WhatsApp)
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                    showAddPicker.toggle()
-                }
-            } label: {
-                // Círculo sólido del acento: es la acción principal y tiene
-                // que resaltar. El "+" va blanco en claro y en oscuro.
-                Image(systemName: "plus")
-                    .font(.title2.bold())
-                    .foregroundStyle(Color.white)
-                    .frame(width: 56, height: 56)
-                    .rotationEffect(.degrees(showAddPicker ? 45 : 0))
-            }
-            .background(themeColor, in: Circle())
-            .shadow(color: Color.black.opacity(0.12), radius: 20, x: 0, y: 8)
+        )
+    }
+
+    private func reselect(_ tab: AppTab) {
+        let atTop = scrollProgress.offset < 12
+        guard atTop else {
+            scrollToTopTrigger.toggle()
+            return
         }
-        .padding(.horizontal, 20)
-        // Negativo: se mete en el área segura, más cerca de la barra de inicio.
-        .padding(.bottom, -10)
+
+        withAnimation(.easeInOut(duration: 0.26)) {
+            switch tab {
+            case .summary:  summarySub = .today
+            case .analysis: analysisSub = .categories
+            case .social:   socialSub = .activity
+            }
+        }
+    }
+
+    private func toggleTheme() {
+        ThemeAnimator.animateThemeChange(from: themeButtonCenter) {
+            appearanceRaw = (systemScheme == .dark ? AppAppearance.light : .dark).rawValue
+        }
     }
 }
 

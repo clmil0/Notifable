@@ -28,6 +28,7 @@ struct CategoryLimitEditorView: View {
     @State private var showingAnchor = false
     @State private var showingOverride = false
     @State private var loaded = false
+    @FocusState private var amountFocused: Bool
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
@@ -38,17 +39,16 @@ struct CategoryLimitEditorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
                         amountBlock
-                        historyCard
                         cycleSection
+                        behaviorSection
                         overridesSection
                     }
                     .padding(.top, 14)
                     .padding(.bottom, 16)
                 }
+                .scrollDismissesKeyboard(.interactively)
 
-                Keypad(background: palette.surfaceElevated,
-                       onKey: press,
-                       onClear: { amountText = "" })
+                saveButton
             }
             .background(palette.background)
             .navigationTitle("Límite de " + category)
@@ -57,8 +57,9 @@ struct CategoryLimitEditorView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancelar") { dismiss() }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Guardar") { save() }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Listo") { amountFocused = false }.fontWeight(.semibold)
                 }
             }
             .sheet(isPresented: $showingAnchor) { anchorPicker }
@@ -93,14 +94,6 @@ struct CategoryLimitEditorView: View {
     private var referenceDate: Date { CategoryLimits.referenceDate(for: period) }
     private var snapshots: [ExpenseSnapshot] { history.map(\.accountingSnapshot) }
 
-    private var cycles: [(interval: DateInterval, total: Double)] {
-        CategoryLimits.history(budget: draft,
-                               expenses: snapshots,
-                               on: referenceDate,
-                               closedCycles: 3,
-                               usdToPen: rates.usdToPenRate)
-    }
-
     private var average: Double? {
         CategoryLimits.average(budget: draft,
                                expenses: snapshots,
@@ -108,76 +101,80 @@ struct CategoryLimitEditorView: View {
                                usdToPen: rates.usdToPenRate)
     }
 
-    private func press(_ key: TransactionDraft.KeypadKey) {
-        switch key {
-        case .digit(let d):
-            if let dot = amountText.firstIndex(of: ".") {
-                let decimals = amountText.distance(from: dot, to: amountText.endIndex) - 1
-                guard decimals < 2 else { return }
-            }
-            guard amountText.replacingOccurrences(of: ".", with: "").count < 9 else { return }
-            if amountText == "0" { amountText = String(d) } else { amountText.append(String(d)) }
-        case .decimal:
-            guard !amountText.contains(".") else { return }
-            amountText = amountText.isEmpty ? "0." : amountText + "."
-        case .backspace:
-            guard !amountText.isEmpty else { return }
-            amountText.removeLast()
-        }
-    }
-
     // MARK: - Monto
 
     private var amountBlock: some View {
-        VStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(draft.cycle == .mes ? "LÍMITE MENSUAL" : "LÍMITE POR " + draft.cycle.label.uppercased())
+                .font(.system(size: 11.5, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(palette.secondaryLabel)
+
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text("S/")
-                    .font(.system(size: 30, weight: .medium, design: .rounded))
+                    .font(.system(size: 26, weight: .semibold))
                     .foregroundStyle(palette.secondaryLabel)
-                Text(amountText.isEmpty ? "0" : amountText)
-                    .font(.system(size: 62, weight: .bold, design: .rounded))
-                    .foregroundStyle(amountText.isEmpty ? palette.tertiaryLabel : palette.label)
-                Rectangle()
-                    .fill(color)
-                    .frame(width: 3, height: 52)
-                    .clipShape(RoundedRectangle(cornerRadius: 2))
+                TextField("0", text: amountBinding)
+                    .font(.system(size: 52, weight: .bold))
+                    .foregroundStyle(palette.label)
+                    .keyboardType(.decimalPad)
+                    .focused($amountFocused)
             }
-            .frame(maxWidth: .infinity)
 
             presets
+
+            if let average {
+                Text("Tu promedio de los últimos 3 meses es " + Money.formatCompact(average) + ".")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(palette.secondaryLabel)
+            }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(palette.hairline, lineWidth: 0.5))
+        .padding(.horizontal, 16)
+    }
+
+    /// Todo lo que se teclea pasa por el mismo saneador que el alta de gastos.
+    private var amountBinding: Binding<String> {
+        Binding(get: { amountText },
+                set: { amountText = TransactionDraft.sanitizedAmount($0) })
     }
 
     private var presets: some View {
         HStack(spacing: 8) {
             ForEach(roundPresets, id: \.self) { value in
                 Button { amountText = String(Int(value)) } label: {
-                    presetLabel(Money.formatCompact(value), highlighted: false)
+                    presetLabel(Money.formatCompact(value).replacingOccurrences(of: "S/ ", with: ""),
+                                selected: Money.cents(value) == Money.cents(amount),
+                                icon: nil)
                 }
                 .buttonStyle(.plain)
             }
 
             if let average {
-                Button { amountText = String(Int(CategoryLimits.suggestedLimit(from: average))) } label: {
-                    presetLabel("Promedio " + Money.formatCompact(average), highlighted: true)
+                let suggested = CategoryLimits.suggestedLimit(from: average)
+                Button { amountText = String(Int(suggested)) } label: {
+                    presetLabel("Usar " + Money.formatCompact(average).replacingOccurrences(of: "S/ ", with: ""),
+                                selected: false, icon: "sparkles")
                 }
                 .buttonStyle(.plain)
             }
         }
-        .frame(maxWidth: .infinity)
     }
 
-    private func presetLabel(_ text: String, highlighted: Bool) -> some View {
-        Text(text)
-            .font(.subheadline.weight(highlighted ? .semibold : .medium))
-            .foregroundStyle(highlighted ? color : palette.label)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(highlighted ? color.opacity(0.18) : palette.surface)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule().stroke(highlighted ? color : palette.hairline, lineWidth: 0.5)
-            )
+    private func presetLabel(_ text: String, selected: Bool, icon: String?) -> some View {
+        HStack(spacing: 4) {
+            if let icon { Image(systemName: icon).font(.system(size: 11, weight: .semibold)) }
+            Text(text).font(.system(size: 13.5, weight: .semibold))
+        }
+        .foregroundStyle(selected ? Color.white : (icon == nil ? palette.label : accent.onSurface(scheme)))
+        .padding(.horizontal, 12)
+        .frame(height: 32)
+        .background(selected ? AnyShapeStyle(accent.color)
+                             : AnyShapeStyle(icon == nil ? palette.neutralSurface : accent.color.opacity(0.12)),
+                    in: Capsule())
     }
 
     /// Dos valores redondos cerca del actual. Con el campo vacío, dos valores
@@ -189,42 +186,6 @@ struct CategoryLimitEditorView: View {
         let lower = max(step, anchor - step)
         let upper = anchor + step
         return lower == upper ? [lower] : [lower, upper]
-    }
-
-    // MARK: - Histórico
-
-    private var historyCard: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            LimitHistoryChart(cycles: cycles, limit: amount, color: color)
-            Text(historyLegend)
-                .font(.caption)
-                .foregroundStyle(palette.secondaryLabel)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(14)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 0.5)
-        )
-        .padding(.horizontal, 16)
-    }
-
-    /// El texto se genera: cuenta cuántos ciclos quedan por debajo del límite.
-    private var historyLegend: String {
-        guard Money.cents(amount) > 0 else {
-            return "Escribe un monto y verás dónde queda la línea frente a lo que ya gastaste."
-        }
-        let list = cycles
-        let below = list.filter { Money.cents($0.total) <= Money.cents(amount) }.count
-        if below == list.count {
-            return "La línea del límite queda por encima de los \(list.count) ciclos. Es holgado: puedes bajarlo."
-        }
-        if below == 0 {
-            return "La línea queda por debajo de todos los ciclos. Con este monto te pasarías siempre."
-        }
-        return "La línea del límite queda por encima de \(below) de los \(list.count) ciclos. Es una meta alcanzable, no un recorte."
     }
 
     // MARK: - Ciclo
@@ -243,23 +204,82 @@ struct CategoryLimitEditorView: View {
 
             if draft.cycle.usesAnchorDay {
                 Button { showingAnchor = true } label: {
-                    Text(anchorNote)
-                        .font(.caption)
-                        .foregroundStyle(palette.secondaryLabel)
-                        .padding(.horizontal, 32)
-                        .multilineTextAlignment(.leading)
+                    HStack {
+                        Text("Día de corte").foregroundStyle(palette.label)
+                        Spacer()
+                        Text("Día \(draft.safeAnchorDay)").foregroundStyle(palette.secondaryLabel)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2).foregroundStyle(palette.secondaryLabel)
+                    }
+                    .padding(.horizontal, 14)
+                    .frame(height: 46)
+                    .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(palette.hairline, lineWidth: 0.5))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .padding(.horizontal, 16)
             }
         }
     }
 
-    private var cycleBinding: Binding<CategoryBudget.Cycle> {
-        Binding(get: { draft.cycle }, set: { draft.cycle = $0 })
+    // MARK: - Comportamiento
+
+    /// Las dos decisiones que el modelo ya soportaba y ninguna pantalla
+    /// ofrecía: el aviso previo y traspasar lo que sobra.
+    private var behaviorSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("CÓMO SE COMPORTA")
+
+            VStack(spacing: 0) {
+                behaviorToggle(title: "Avisarme al llegar al 80%",
+                               detail: "Una sola notificación por ciclo",
+                               isOn: Binding(get: { draft.alertThreshold != nil },
+                                             set: { draft.alertThreshold = $0 ? 0.8 : nil }))
+
+                Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 14)
+
+                behaviorToggle(title: "Traspasar lo que sobre",
+                               detail: "Lo no gastado se suma al mes siguiente",
+                               isOn: $draft.rollsOver)
+            }
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(palette.hairline, lineWidth: 0.5))
+            .padding(.horizontal, 16)
+        }
     }
 
-    private var anchorNote: String {
-        "El corte sigue tu día de pago: \(draft.safeAnchorDay) de cada mes. Tócalo para cambiarlo."
+    private func behaviorToggle(title: String, detail: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).foregroundStyle(palette.label)
+                Text(detail).font(.caption).foregroundStyle(palette.secondaryLabel)
+            }
+        }
+        .tint(accent.color)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    // MARK: - Guardar
+
+    private var saveButton: some View {
+        Button(action: save) {
+            Text(Money.cents(amount) > 0 ? "Guardar límite" : "Quitar límite")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(accent.color, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private var cycleBinding: Binding<CategoryBudget.Cycle> {
+        Binding(get: { draft.cycle }, set: { draft.cycle = $0 })
     }
 
     private var anchorPicker: some View {
@@ -332,10 +352,10 @@ struct CategoryLimitEditorView: View {
             .padding(.horizontal, 16)
 
             if !draft.overrides.isEmpty {
-                Text("Fuera de estos meses vuelve solo a " + Money.formatCompact(amount) + ".")
+                Text("Fuera de esos meses vuelve solo a " + Money.formatCompact(amount) + ".")
                     .font(.caption)
                     .foregroundStyle(palette.secondaryLabel)
-                    .padding(.horizontal, 32)
+                    .padding(.horizontal, 22)
             }
         }
     }
@@ -403,9 +423,10 @@ struct CategoryLimitEditorView: View {
 
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
-            .font(.caption.weight(.medium))
+            .font(.system(size: 11.5, weight: .bold))
+            .tracking(0.6)
             .foregroundStyle(palette.secondaryLabel)
-            .padding(.horizontal, 32)
+            .padding(.horizontal, 22)
     }
 
     private func save() {
@@ -418,60 +439,6 @@ struct CategoryLimitEditorView: View {
 }
 
 // MARK: - Histórico
-
-/// Cuatro barras —tres ciclos cerrados y el actual— con la línea del límite
-/// superpuesta. Sin la línea, las barras no responden a la pregunta que se está
-/// haciendo el usuario, que es si ese número es alcanzable.
-struct LimitHistoryChart: View {
-
-    let cycles: [(interval: DateInterval, total: Double)]
-    let limit: Double
-    let color: Color
-
-    @Environment(\.colorScheme) private var scheme
-    private var palette: Palette { Palette(scheme) }
-
-    private let barsHeight: CGFloat = 64
-
-    private var maxValue: Double {
-        let highest = cycles.map(\.total).max() ?? 0
-        return max(max(highest, limit), 1)
-    }
-
-    var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            HStack(alignment: .bottom, spacing: 6) {
-                ForEach(Array(cycles.enumerated()), id: \.offset) { index, cycle in
-                    bar(cycle: cycle, isCurrent: index == cycles.count - 1)
-                }
-            }
-
-            if Money.cents(limit) > 0 {
-                Rectangle()
-                    .fill(palette.label.opacity(0.5))
-                    .frame(height: 1)
-                    .offset(y: -(barsHeight * CGFloat(min(1, limit / maxValue))) - 14)
-            }
-        }
-    }
-
-    private func bar(cycle: (interval: DateInterval, total: Double), isCurrent: Bool) -> some View {
-        VStack(spacing: 5) {
-            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .fill(isCurrent ? color : palette.track)
-                .frame(height: max(3, barsHeight * CGFloat(cycle.total / maxValue)))
-            Text(label(for: cycle.interval))
-                .font(.system(size: 10))
-                .fontWeight(isCurrent ? .semibold : .regular)
-                .foregroundStyle(isCurrent ? color : palette.secondaryLabel)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func label(for interval: DateInterval) -> String {
-        Period.spanishMonthName(for: interval.start, abbreviated: true).uppercased()
-    }
-}
 
 // MARK: - Excepción de un mes
 

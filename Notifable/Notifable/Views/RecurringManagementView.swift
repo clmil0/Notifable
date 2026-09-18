@@ -27,15 +27,39 @@ struct RecurringManagementView: View {
     /// El recurrente que se tocó: abre su editor, con pausar y eliminar
     /// dentro, igual que un atajo.
     @State private var editingRule: RecurringExpense?
+    @State private var tab: Tab = .rules
+
+    private enum Tab: Hashable { case rules, quick }
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
 
     var body: some View {
-        List {
-            commitmentSection
-            rulesSection
-            quickSection
+        Group {
+            if tab == .quick && isReorderingQuick {
+                // Reordenar necesita `List` y su `onMove`; fuera de ese modo,
+                // la pantalla es la de tarjetas del rediseño.
+                List { quickSection }
+            } else {
+                ScrollView {
+                    VStack(spacing: 16) {
+                        commitmentCard
+
+                        ShellSegment(items: [Tab.rules, .quick], selection: $tab) {
+                            $0 == .rules ? "Activos · \(activeCount)" : "Atajos · \(quickExpenses.count)"
+                        }
+
+                        if tab == .rules {
+                            rulesCard
+                            quickGrid
+                        } else {
+                            quickListCard
+                        }
+                    }
+                    .padding(16)
+                }
+                .background(palette.background)
+            }
         }
         .navigationTitle("Recurrentes y atajos")
         .navigationBarTitleDisplayMode(.inline)
@@ -81,31 +105,31 @@ struct RecurringManagementView: View {
         RecurringEngine.monthlyCommitted(rules: rules, usdToPen: exchangeRateService.usdToPenRate)
     }
 
+    private var activeCount: Int { rules.filter { !$0.isPaused }.count }
+
     @ViewBuilder
-    private var commitmentSection: some View {
+    private var commitmentCard: some View {
         if !Money.isZero(committed) {
-            Section {
+            ShellCard(padding: 16) {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("COMPROMETIDO CADA MES")
-                        .font(.caption)
+                        .font(.system(size: 11.5, weight: .bold))
+                        .tracking(0.6)
                         .foregroundStyle(palette.secondaryLabel)
-
                     Text(Money.format(committed))
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .font(.system(size: 36, weight: .bold))
+                        .tracking(-1)
                         .foregroundStyle(palette.label)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
-
                     categoryBar
-
                     if let share = budgetShare {
                         Text(share)
-                            .font(.footnote)
+                            .font(.system(size: 12.5))
                             .foregroundStyle(palette.secondaryLabel)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(.vertical, 6)
             }
         }
     }
@@ -142,8 +166,7 @@ struct RecurringManagementView: View {
     private var budgetShare: String? {
         guard BudgetStore.hasBudget(monthlyBudget: monthlyBudget, enabled: budgetEnabled),
               let percent = Money.percent(committed, of: monthlyBudget) else { return nil }
-        return "\(Int(percent.rounded()))% de tu presupuesto de "
-            + Money.format(monthlyBudget) + " ya está comprometido antes de empezar el mes."
+        return "\(Int(percent.rounded()))% de tu presupuesto sale solo, antes de que decidas nada."
     }
 
     // MARK: - Reglas
@@ -157,80 +180,152 @@ struct RecurringManagementView: View {
     }
 
     @ViewBuilder
-    private var rulesSection: some View {
-        Section {
-            if rules.isEmpty {
-                Text("Nada programado todavía. Al crear un gasto, usa «Repetir».")
-                    .font(.footnote)
-                    .foregroundStyle(palette.secondaryLabel)
-            } else {
-                ForEach(sortedRules) { rule in
-                    Button {
-                        guard !isReorderingQuick else { return }
-                        editingRule = rule
-                    } label: {
-                        ruleRow(rule)
+    private var rulesCard: some View {
+        if rules.isEmpty {
+            ShellEmptyState(icon: "arrow.triangle.2.circlepath",
+                            title: "Nada programado todavía",
+                            message: "Al registrar un gasto, usa «Repetir» y aparecerá aquí.")
+        } else {
+            MovementCard {
+                ForEach(Array(sortedRules.enumerated()), id: \.element.id) { index, rule in
+                    Button { editingRule = rule } label: {
+                        cardRuleRow(rule)
                     }
                     .buttonStyle(.plain)
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        Button(role: .destructive) { ruleToDelete = rule } label: {
-                            Label("Eliminar", systemImage: "trash")
-                        }
+                    // Sin `List` no hay deslizar: pausar y eliminar viven en el
+                    // menú contextual y dentro del editor.
+                    .contextMenu {
                         Button { togglePause(rule) } label: {
                             Label(rule.isPaused ? "Reanudar" : "Pausar",
                                   systemImage: rule.isPaused ? "play.fill" : "pause.fill")
                         }
-                        .tint(.orange)
+                        Button(role: .destructive) { ruleToDelete = rule } label: {
+                            Label("Eliminar", systemImage: "trash")
+                        }
                     }
+                    if index < sortedRules.count - 1 { MovementSeparator() }
                 }
-            }
-        } header: {
-            Text("Activos")
-        } footer: {
-            if !rules.isEmpty {
-                Text("Toca uno para editar su monto, categoría o cuándo se repite, pausarlo o eliminarlo.")
             }
         }
     }
 
-    private func ruleRow(_ rule: RecurringExpense) -> some View {
+    /// Cada fila declara si se registra sola o pide confirmación (`5g`).
+    private func cardRuleRow(_ rule: RecurringExpense) -> some View {
         HStack(spacing: 12) {
-            ruleIcon(rule)
+            MovementIcon(icon: rule.isPaused ? "pause.fill" : CategoryStyle.icon(for: rule.category),
+                         color: rule.isPaused ? palette.tertiaryLabel
+                                              : CategoryStyle.color(for: rule.category, accent: accent.color),
+                         size: 38)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(Accounting.displayName(rule.merchant))
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(palette.label)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(rule.isPaused ? palette.secondaryLabel : palette.label)
                     .lineLimit(1)
                 Text(ruleSubtitle(rule))
-                    .font(.caption)
+                    .font(.system(size: 12.5))
                     .foregroundStyle(palette.secondaryLabel)
                     .lineLimit(1)
             }
 
             Spacer(minLength: 8)
 
-            Text(Money.format(rule.amount, currency: rule.currency))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(palette.label)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(Money.format(rule.amount, currency: rule.currency))
+                    .font(.system(size: 15.5, weight: .semibold))
+                    .foregroundStyle(rule.isPaused ? palette.secondaryLabel : palette.label)
+                if !rule.isPaused {
+                    Label(rule.autoConfirm ? "automático" : "confirmar",
+                          systemImage: rule.autoConfirm ? "checkmark.circle" : "clock")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(rule.autoConfirm ? palette.positive : palette.warning)
+                }
+            }
         }
-        .opacity(rule.isPaused ? 0.5 : 1)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
         .contentShape(Rectangle())
     }
 
-    private func ruleIcon(_ rule: RecurringExpense) -> some View {
-        let color = CategoryStyle.color(for: rule.category, accent: accent.color)
-        return ZStack {
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
-                .fill(color.opacity(0.2))
-                .frame(width: 38, height: 38)
-            Image(systemName: rule.isPaused ? "pause.fill" : CategoryStyle.icon(for: rule.category))
-                .foregroundStyle(color)
+    // MARK: - Atajos en rejilla
+
+    /// Los tres que salen en el `+`, con cuántas veces se usaron: es lo que
+    /// dice cuáles vale la pena tener arriba.
+    @ViewBuilder
+    private var quickGrid: some View {
+        if !quickExpenses.isEmpty {
+            VStack(spacing: 8) {
+                ShellSectionHeader(title: "Atajos · un toque en el +")
+                HStack(spacing: 8) {
+                    ForEach(quickExpenses.prefix(3)) { quick in
+                        Button { quickSheet = .edit(quick) } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Image(systemName: quick.iconName)
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundStyle(accent.color)
+                                Text(quick.label)
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(palette.label)
+                                    .lineLimit(1)
+                                Text(Money.format(quick.amount, currency: quick.currency))
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundStyle(palette.secondaryLabel)
+                                Text("usado \(quick.useCount) " + (quick.useCount == 1 ? "vez" : "veces"))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(palette.tertiaryLabel)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(palette.hairline, lineWidth: 0.5))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var quickListCard: some View {
+        if quickExpenses.isEmpty {
+            ShellEmptyState(icon: "bolt",
+                            title: "Ningún atajo todavía",
+                            message: "Toca + arriba para crear uno: el pasaje o el café de siempre, en un toque.")
+        } else {
+            VStack(spacing: 8) {
+                HStack {
+                    Spacer()
+                    if quickExpenses.count > 1 {
+                        Button("Ordenar") { withAnimation { isReorderingQuick = true } }
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(accent.onSurface(scheme))
+                    }
+                }
+                MovementCard {
+                    ForEach(Array(quickExpenses.enumerated()), id: \.element.id) { index, quick in
+                        Button { quickSheet = .edit(quick) } label: {
+                            quickRow(quick)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 11)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        if index < quickExpenses.count - 1 { MovementSeparator() }
+                    }
+                }
+                Text("Los tres primeros aparecen al registrar un gasto.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(palette.secondaryLabel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6)
+            }
         }
     }
 
     private func ruleSubtitle(_ rule: RecurringExpense) -> String {
-        if rule.isPaused { return "Pausado · no propone nada" }
+        if rule.isPaused { return "En pausa" }
         var parts = [rule.scheduleLabel]
         if rule.autoConfirm {
             parts.append("automático")

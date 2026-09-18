@@ -90,161 +90,83 @@ struct AppIconTile: View {
     }
 }
 
-/// Pantalla de bienvenida: la barra de reparto (el mismo lenguaje visual que
-/// usa Categorías) se arma gota a gota, y luego entran el ícono y el nombre.
+/// El splash (`5l`).
 ///
-/// No es el launch screen del sistema — ese sigue siendo instantáneo y en
-/// blanco, como lo pide Apple — sino lo que se ve encima mientras la app
-/// termina de montar su primera pantalla real. Dura ~1.7s y sólo una vez
-/// por lanzamiento.
+/// Sólo se ve cuando hay algo que esperar: si al abrir hay correos nuevos por
+/// leer, muestra el progreso; si no, dura un fotograma y no se ve. Antes
+/// reproducía una animación de 1.75 s en cada arranque — casi dos segundos
+/// de espera cada vez que se abría la app para mirar una cifra.
 struct SplashView: View {
 
     var onFinished: () -> Void
 
-    @Environment(\.colorScheme) private var scheme
-    @State private var dropsStarted = false
-    @State private var showIcon = false
-    @State private var showWordmark = false
+    @StateObject private var sync = GmailSyncService.shared
+    @State private var isReading = false
+    @State private var didFinish = false
 
-    private var palette: Palette { Palette(scheme) }
-
-    /// Ancho final, arrastre horizontal de caída y color — un segmento por
-    /// gota, con los mismos cinco colores del sistema que usa `Palette`
-    /// para las categorías (naranja, azul, celeste, verde, índigo).
-    private let drops: [DropSpec] = [
-        DropSpec(width: 62.6, cx: 20.3,
-                 light: Color(red: 1, green: 0.584, blue: 0), dark: Color(red: 1, green: 0.624, blue: 0.039),
-                 delay: 0.04),
-        DropSpec(width: 44.2, cx: 11.1,
-                 light: Color(red: 0.039, green: 0.518, blue: 1), dark: Color(red: 0.251, green: 0.612, blue: 1),
-                 delay: 0.15),
-        DropSpec(width: 33.1, cx: 5.6,
-                 light: Color(red: 0.188, green: 0.690, blue: 0.780), dark: Color(red: 0.353, green: 0.784, blue: 0.871),
-                 delay: 0.255),
-        DropSpec(width: 25.8, cx: 1.9,
-                 light: Color(red: 0.204, green: 0.780, blue: 0.349), dark: Color(red: 0.188, green: 0.820, blue: 0.345),
-                 delay: 0.345),
-        DropSpec(width: 18.4, cx: -1.8,
-                 light: AppBrand.accent, dark: Color(red: 0.463, green: 0.573, blue: 1),
-                 delay: 0.425)
-    ]
+    /// Tope de espera: una lectura larga sigue en segundo plano, y Hoy la
+    /// muestra en su chip. El splash no puede secuestrar la app.
+    private static let maxWait: Duration = .seconds(6)
 
     var body: some View {
         ZStack {
-            palette.background.ignoresSafeArea()
+            AppBrand.accent.ignoresSafeArea()
 
-            VStack(spacing: 30) {
-                ZStack {
-                    if showIcon {
-                        // El glifo necesita su fondo azul detrás: sin la
-                        // tarjeta, el sobre (blanco) desaparece sobre el
-                        // fondo claro y la moneda queda flotando sola.
-                        AppIconTile(size: 132,
-                                    coinFace: scheme == .dark ? Color(red: 0.969, green: 0.969, blue: 0.976) : .white)
-                            .transition(.asymmetric(
-                                insertion: .scale(scale: 0.74).combined(with: .opacity),
-                                removal: .identity))
+            if isReading {
+                VStack(spacing: 18) {
+                    Spacer()
+
+                    AppIconTile(size: 88, coinFace: .white)
+                        .overlay(RoundedRectangle(cornerRadius: 88 * 0.225, style: .continuous)
+                            .stroke(Color.white.opacity(0.9), lineWidth: 3))
+
+                    Text("AgruPay")
+                        .font(.system(size: 28, weight: .bold))
+                        .tracking(-0.6)
+                        .foregroundStyle(Color.white)
+
+                    Spacer()
+
+                    VStack(spacing: 10) {
+                        ProgressView(value: progress)
+                            .progressViewStyle(.linear)
+                            .tint(Color.white)
+                            .frame(width: 140)
+                        Text("Leyendo tus correos nuevos…")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.white.opacity(0.85))
                     }
+                    .padding(.bottom, 60)
                 }
-                .frame(height: 132)
-
-                HStack(spacing: 3) {
-                    ForEach(drops.indices, id: \.self) { i in
-                        DropSegment(spec: drops[i], scheme: scheme, start: dropsStarted)
-                    }
-                }
-                .frame(height: 16)
-
-                Text("AgruPay")
-                    .font(.system(size: 29, weight: .bold, design: .rounded))
-                    .tracking(-0.7)
-                    .foregroundStyle(palette.label)
-                    .opacity(showWordmark ? 1 : 0)
-                    .offset(y: showWordmark ? 0 : 9)
+                .transition(.opacity)
             }
         }
-        .onAppear { play() }
-    }
-
-    private func play() {
-        dropsStarted = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.02) {
-            withAnimation(.spring(response: 0.42, dampingFraction: 0.72)) { showIcon = true }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.21) {
-            withAnimation(.easeOut(duration: 0.38)) { showWordmark = true }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.75) {
-            onFinished()
-        }
-    }
-}
-
-/// Ancho final, arrastre horizontal de caída y color de una gota de la barra.
-private struct DropSpec {
-    let width: CGFloat
-    let cx: CGFloat
-    let light: Color
-    let dark: Color
-    let delay: Double
-}
-
-/// Una gota de la barra de reparto: entra como un puntito arriba, cae
-/// acelerando y estirándose, choca contra la base y se aplasta hasta
-/// esparcirse en su tramo final — el mismo tramo que después queda fijo
-/// como segmento de la barra.
-private struct DropSegment: View {
-
-    fileprivate enum Phase { case hidden, falling, landed }
-
-    let spec: DropSpec
-    let scheme: ColorScheme
-    let start: Bool
-
-    @State private var phase: Phase = .hidden
-
-    private var color: Color { scheme == .dark ? spec.dark : spec.light }
-
-    private var width: CGFloat {
-        switch phase {
-        case .hidden: return 20
-        case .falling: return 14
-        case .landed: return spec.width
+        .task { await run() }
+        .onChange(of: sync.isSyncing) { _, syncing in
+            if !syncing && isReading { finish() }
         }
     }
 
-    private var height: CGFloat {
-        switch phase {
-        case .hidden: return 20
-        case .falling: return 34
-        case .landed: return 16
-        }
+    private var progress: Double {
+        guard sync.totalEmailsToProcess > 0 else { return 0.1 }
+        return min(1, Double(sync.emailsProcessed) / Double(sync.totalEmailsToProcess))
     }
 
-    private var yOffset: CGFloat {
-        switch phase {
-        case .hidden: return -230
-        case .falling: return -2
-        case .landed: return 0
+    private func run() async {
+        // Un respiro para que la lectura del arranque, si la hay, se anuncie.
+        try? await Task.sleep(for: .milliseconds(120))
+        guard sync.isSyncing else {
+            finish()
+            return
         }
+        withAnimation(.easeOut(duration: 0.2)) { isReading = true }
+        try? await Task.sleep(for: Self.maxWait)
+        finish()
     }
 
-    private var xOffset: CGFloat { phase == .landed ? 0 : spec.cx }
-
-    var body: some View {
-        Capsule()
-            .fill(color)
-            .frame(width: width, height: height)
-            .offset(x: xOffset, y: yOffset)
-            .opacity(phase == .hidden ? 0 : 1)
-            .onChange(of: start) { _, newValue in
-                guard newValue else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + spec.delay) {
-                    withAnimation(.timingCurve(0.6, 0, 0.95, 0.5, duration: 0.30)) { phase = .falling }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.30) {
-                        withAnimation(.spring(response: 0.28, dampingFraction: 0.62)) { phase = .landed }
-                    }
-                }
-            }
+    private func finish() {
+        guard !didFinish else { return }
+        didFinish = true
+        onFinished()
     }
 }

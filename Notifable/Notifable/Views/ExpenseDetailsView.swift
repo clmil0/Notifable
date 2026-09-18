@@ -1,12 +1,10 @@
 import SwiftUI
 import SwiftData
 
-/// Detalle de un movimiento, con las acciones a la vista.
-///
-/// Antes las tres acciones —marcar deuda, ver detalles, eliminar— vivían en un
-/// context menu: sólo aparecían con una pulsación larga, que no se anuncia en
-/// ninguna parte. Aquí son tres botones, y el menú `ellipsis` de cada fila hace
-/// lo mismo desde la lista.
+/// Detalle de un movimiento (`4e`): cabecera con el monto grande y el resto
+/// como una lista de una fila por dato. Editar vive en la barra; «Por cobrar»
+/// es una fila más; borrar, al pie. El estado del cobro sólo existe si el
+/// gasto está marcado como deuda.
 struct ExpenseDetailsView: View {
 
     @Environment(\.modelContext) private var modelContext
@@ -16,19 +14,11 @@ struct ExpenseDetailsView: View {
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
 
-    /// `@State`, no `@Bindable`: nada aquí usa `$expense.algo` como binding,
-    /// y sí hace falta poder **reasignarlo** — tocar una barra del historial
-    /// del comercio cambia a esa transacción sin cerrar ni volver a abrir la
-    /// hoja.
+    /// `@State`, no `@Bindable`: nada aquí usa `$expense.algo` como binding.
     @State private var expense: Expense
-    /// La transacción con la que se abrió esta hoja, fija aunque `expense`
-    /// cambie de una barra a otra — es lo que la flecha de "aquí empezaste"
-    /// necesita para no perderse.
-    private let originalExpenseID: UUID
 
     init(expense: Expense) {
         self._expense = State(initialValue: expense)
-        self.originalExpenseID = expense.id
     }
 
     @Query private var allExpenses: [Expense]
@@ -37,24 +27,21 @@ struct ExpenseDetailsView: View {
     @State private var showingEditor = false
     @State private var showingCollect = false
     @State private var showingDeleteConfirmation = false
+    @State private var showingRecurrence = false
+    @State private var editingRule: RecurringExpense?
+    @State private var recurrence = RecurrenceDraft()
+    @Query private var recurringRules: [RecurringExpense]
     @ScaledAmountFont(40) private var amountSize
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var themeColor: Color { accent.color }
     private var palette: Palette { Palette(colorScheme) }
 
-    var allCategories: [String] {
-        let defaults = ["Comida", "Transporte", "Entretenimiento", "Supermercado", "Otros"]
-        let existing = Set(allExpenses.map { $0.category }.filter { $0 != Accounting.unclassified })
-        return Array(existing.union(defaults)).sorted()
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
                     header
-                    actionRow
                     foreignPaymentsWarning
                     properties
 
@@ -63,7 +50,7 @@ struct ExpenseDetailsView: View {
                             .transition(.opacity)
                     }
 
-                    merchantHistory
+                    deleteButton
 
                     Spacer(minLength: 24)
                 }
@@ -81,7 +68,20 @@ struct ExpenseDetailsView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cerrar") { dismiss() }
                 }
+                // Editar sube a la barra (`4e`): la fila de tres botones
+                // grandes ocupaba el sitio de los datos para ofrecer acciones
+                // que se usan de vez en cuando.
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Editar") { showingEditor = true }
+                }
             }
+            .sheet(isPresented: $showingRecurrence, onDismiss: saveRecurrence) {
+                RecurrenceSheet(draft: $recurrence,
+                                merchant: expense.merchant,
+                                amount: expense.amount,
+                                currency: expense.currency)
+            }
+            .sheet(item: $editingRule) { RecurringExpenseEditor(rule: $0) }
             .sheet(isPresented: $showingCategoryPicker) {
                 // `6a`: el mismo componente que la Bandeja y el modal de alta.
                 AssignCategorySheet(context: .expense(expense),
@@ -126,100 +126,47 @@ struct ExpenseDetailsView: View {
     // MARK: - Cabecera
 
     private var header: some View {
-        VStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(iconColor.opacity(0.2))
-                    .frame(width: 64, height: 64)
-                Image(systemName: iconName)
-                    .font(.title2)
-                    .foregroundStyle(iconColor)
-            }
+        VStack(spacing: 8) {
+            // `MovementStyle`, no un `switch` propio: antes esta cabecera tenía
+            // cuatro categorías fijas, así que una categoría creada por el
+            // usuario salía con una bolsa verde aquí y con su ícono real en la
+            // lista de la que venías.
+            MovementIcon(icon: MovementStyle.icon(for: expense),
+                         color: MovementStyle.color(for: expense, accent: themeColor, scheme: colorScheme),
+                         size: 56)
+                .padding(.bottom, 4)
 
-            Text(Money.format(expense.amount, currency: expense.currency))
-                .font(.system(size: amountSize, weight: .bold, design: .rounded))
+            Text("–" + Money.format(expense.amount, currency: expense.currency))
+                .font(.system(size: amountSize, weight: .bold))
+                .tracking(-1)
                 .foregroundStyle(palette.label)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
-            Text(subtitle)
-                .font(.headline)
-                .foregroundStyle(palette.secondaryLabel)
+            Text(Accounting.displayName(expense.merchant))
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(palette.label)
                 .multilineTextAlignment(.center)
+
+            Text(subtitle)
+                .font(.system(size: 13))
+                .foregroundStyle(palette.secondaryLabel)
         }
         .padding(.horizontal, 16)
     }
 
+    /// «Hoy, 17 set · 14:20 · BCP».
     private var subtitle: String {
+        let calendar = Period.calendar
         let f = DateFormatter()
         f.locale = Locale(identifier: "es_PE")
-        f.dateFormat = "EEEE d, HH:mm"
-        return Accounting.displayName(expense.merchant) + " · " + f.string(from: expense.date)
-    }
-
-    private var iconName: String {
-        switch expense.category {
-        case "Comida": return "fork.knife"
-        case "Transporte": return "car.fill"
-        case "Entretenimiento": return "play.tv.fill"
-        default: return "bag.fill"
-        }
-    }
-
-    private var iconColor: Color {
-        switch expense.category {
-        case "Comida": return .orange
-        case "Transporte": return .blue
-        case "Entretenimiento": return themeColor
-        case "Supermercado": return .teal
-        case Accounting.unclassified: return .gray
-        default: return .green
-        }
-    }
-
-    // MARK: - Acciones
-
-    private var actionRow: some View {
-        HStack(spacing: 12) {
-            actionButton(title: expense.isDebt ? "Saldada" : "Por cobrar",
-                         icon: expense.isDebt ? "checkmark.circle" : "exclamationmark.circle",
-                         tint: palette.warning) {
-                toggleDebt()
-            }
-
-            actionButton(title: "Editar", icon: "pencil", tint: themeColor) {
-                showingEditor = true
-            }
-
-            actionButton(title: "Eliminar", icon: "trash", tint: palette.negative) {
-                showingDeleteConfirmation = true
-            }
-        }
-        .padding(.horizontal, 16)
-    }
-
-    private func actionButton(title: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 20))
-                    .foregroundStyle(tint)
-                Text(title)
-                    .font(.footnote.bold())
-                    .foregroundStyle(palette.label)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(palette.hairline, lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
+        f.dateFormat = "d MMM"
+        let day = f.string(from: expense.date).replacingOccurrences(of: ".", with: "")
+        let prefix = calendar.isDateInToday(expense.date) ? "Hoy, "
+            : calendar.isDateInYesterday(expense.date) ? "Ayer, " : ""
+        var parts = [prefix + day, expense.date.formatted(.dateTime.hour().minute())]
+        if let source = MovementStyle.source(for: expense) { parts.append(source) }
+        return parts.joined(separator: " · ")
     }
 
     // MARK: - Aviso de multimoneda
@@ -244,7 +191,7 @@ struct ExpenseDetailsView: View {
     private var properties: some View {
         VStack(spacing: 0) {
             Button { showingCategoryPicker = true } label: {
-                propertyRow(title: "Categoría") {
+                propertyRow(title: "Categoría", icon: "tag") {
                     HStack(spacing: 6) {
                         Text(expense.category)
                             .fontWeight(.semibold)
@@ -260,7 +207,7 @@ struct ExpenseDetailsView: View {
             divider
 
             Button { showingEditor = true } label: {
-                propertyRow(title: "Descripción") {
+                propertyRow(title: "Descripción", icon: "text.alignleft") {
                     HStack(spacing: 6) {
                         Text(expense.notes?.isEmpty == false ? expense.notes! : "Agregar")
                             .lineLimit(1)
@@ -275,63 +222,133 @@ struct ExpenseDetailsView: View {
 
             divider
 
-            propertyRow(title: "Origen") {
+            propertyRow(title: "Origen", icon: "envelope") {
                 Text(origin)
                     .foregroundStyle(palette.secondaryLabel)
             }
 
             divider
 
-            propertyRow(title: "Moneda") {
-                Text(expense.currency == "PEN" ? "Soles (PEN)" : "Dólares (USD)")
-                    .foregroundStyle(palette.secondaryLabel)
-            }
-
-            if expense.currency != "PEN", let fx = expense.fxRateAtCapture {
-                divider
-                propertyRow(title: "Tipo de cambio") {
-                    // El del día del movimiento, no el de hoy: por eso el total
-                    // de un mes cerrado ya no se mueve.
-                    Text("S/ " + String(format: "%.3f", fx) + " por $ 1")
+            // La moneda sólo cuando no es soles: en soles es lo esperado y la
+            // fila no dice nada.
+            if expense.currency != "PEN" {
+                propertyRow(title: "Moneda", icon: "dollarsign.circle") {
+                    Text("Dólares (USD)")
                         .foregroundStyle(palette.secondaryLabel)
                 }
+
+                if let fx = expense.fxRateAtCapture {
+                    divider
+                    propertyRow(title: "Tipo de cambio", icon: "arrow.left.arrow.right") {
+                        // El del día del movimiento, no el de hoy: por eso el
+                        // total de un mes cerrado ya no se mueve.
+                        Text("S/ " + String(format: "%.3f", fx) + " por $ 1")
+                            .foregroundStyle(palette.secondaryLabel)
+                    }
+                }
+
+                divider
             }
+
+            Button(action: openRecurrence) {
+                propertyRow(title: "Repetir", icon: "arrow.triangle.2.circlepath") {
+                    HStack(spacing: 6) {
+                        Text(recurrenceLabel)
+                            .foregroundStyle(existingRule == nil ? palette.secondaryLabel
+                                                                 : accent.onSurface(colorScheme))
+                            .lineLimit(1)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(palette.secondaryLabel)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
 
             divider
 
-            Toggle(isOn: subscriptionBinding) {
-                Text("Es suscripción")
-                    .foregroundStyle(palette.label)
+            // «Por cobrar» baja de la fila de botones a una fila más: sigue a
+            // un toque, pero ya no compite en tamaño con los datos.
+            Toggle(isOn: Binding(get: { expense.isDebt }, set: { _ in toggleDebt() })) {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.circle")
+                        .font(.system(size: 15))
+                        .foregroundStyle(palette.secondaryLabel)
+                        .frame(width: 20)
+                    Text("Por cobrar")
+                        .foregroundStyle(palette.label)
+                }
             }
-            .tint(themeColor)
+            .tint(palette.warning)
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
+            .padding(.vertical, 10)
         }
         .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
         .padding(.horizontal, 16)
     }
 
-    private var subscriptionBinding: Binding<Bool> {
-        Binding(
-            get: { expense.isSubscription },
-            set: { newValue in
-                expense.isSubscription = newValue
-                ExpenseEditStore.record(expense, isSubscription: newValue)
-                try? modelContext.save()
-            }
-        )
+    // MARK: - Repetir
+
+    /// La regla que ya cubre este comercio, si la hay.
+    private var existingRule: RecurringExpense? {
+        recurringRules.first { $0.merchant == expense.merchant }
+    }
+
+    private var recurrenceLabel: String {
+        guard let rule = existingRule else { return "No se repite" }
+        return rule.isPaused ? "En pausa" : "Se repite"
+    }
+
+    /// Sin regla, se crea una a partir de este gasto. Con regla, se edita la
+    /// existente: crear otra duplicaría los cobros propuestos.
+    private func openRecurrence() {
+        if let rule = existingRule {
+            editingRule = rule
+        } else {
+            recurrence = RecurrenceDraft()
+            showingRecurrence = true
+        }
+    }
+
+    private func saveRecurrence() {
+        guard existingRule == nil, recurrence.repeats,
+              let rule = recurrence.build(merchant: expense.merchant,
+                                          category: expense.category,
+                                          amount: expense.amount,
+                                          currency: expense.currency) else { return }
+        // Este gasto ya está registrado: la regla arranca con su fecha resuelta
+        // para no proponerlo otra vez.
+        rule.lastResolvedOccurrence = expense.date
+        modelContext.insert(rule)
+        expense.isSubscription = true
+        ExpenseEditStore.record(expense, isSubscription: true)
+        try? modelContext.save()
+    }
+
+    // MARK: - Borrar
+
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            showingDeleteConfirmation = true
+        } label: {
+            Label("Borrar movimiento", systemImage: "trash")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(palette.negative)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
     }
 
     private var origin: String {
-        if let card = expense.cardLastDigits {
-            return "Correo · *" + card
-        }
-        return expense.emailID == nil ? "Manual" : "Correo"
+        guard expense.emailID != nil else { return "Manual" }
+        if let card = expense.cardLastDigits { return "Correo · •••• " + card }
+        return "Correo"
     }
 
     private var divider: some View {
@@ -341,11 +358,18 @@ struct ExpenseDetailsView: View {
             .padding(.leading, 16)
     }
 
-    private func propertyRow<Value: View>(title: String, @ViewBuilder value: () -> Value) -> some View {
-        HStack {
+    private func propertyRow<Value: View>(title: String, icon: String? = nil,
+                                          @ViewBuilder value: () -> Value) -> some View {
+        HStack(spacing: 12) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 15))
+                    .foregroundStyle(palette.secondaryLabel)
+                    .frame(width: 20)
+            }
             Text(title)
                 .foregroundStyle(palette.label)
-            Spacer()
+            Spacer(minLength: 12)
             value()
         }
         .padding(.horizontal, 16)
@@ -357,44 +381,29 @@ struct ExpenseDetailsView: View {
 
     @ViewBuilder
     private var paymentsSection: some View {
+        VStack(spacing: 8) {
+            ShellSectionHeader(title: "Estado del cobro")
+                .padding(.horizontal, 16)
+            paymentsCard
+        }
+    }
+
+    @ViewBuilder
+    private var paymentsCard: some View {
         let paid = Accounting.paid(of: expense)
         let pending = Accounting.outstanding(of: expense)
         let ratio = min(Money.ratio(paid, to: expense.amount) ?? 0, 1.0)
 
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Estado del cobro")
-                    .font(.headline)
-                    .foregroundStyle(palette.label)
+            HStack(alignment: .firstTextBaseline) {
+                Text(expense.isDebt ? "Te deben " + Money.format(pending, currency: expense.currency)
+                                    : pendingLabel(pending).capitalizedFirst)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundStyle(expense.isDebt ? palette.label : pendingColor(pending))
                 Spacer()
-                // Sólo mientras sigue por cobrar: saldada, no hay nada que
-                // registrar. Abre el ingreso ya asignado a este gasto.
-                if expense.isDebt {
-                    Button { showingCollect = true } label: {
-                        Label("Registrar cobro", systemImage: "plus")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(palette.positive)
-                            .padding(.horizontal, 10)
-                            .frame(height: 28)
-                            .background(palette.positive.opacity(0.14))
-                            .clipShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .transition(.opacity)
-                }
-            }
-
-            HStack {
-                Text(Money.format(paid, currency: expense.currency) + " devuelto")
-                    .font(.subheadline)
-                    .foregroundStyle(palette.positive)
-                Spacer()
-                // "Saldada" con saldo: ya no se persigue, pero el número no
-                // desaparece — sigue siendo lo que nunca volvió. "faltan" sólo
-                // aplica mientras sigue por cobrar; cerrado, es "sin cobrar".
-                Text(pendingLabel(pending))
-                    .font(.subheadline)
-                    .foregroundStyle(pendingColor(pending))
+                Text("de " + Money.format(expense.amount, currency: expense.currency))
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondaryLabel)
             }
 
             GeometryReader { geo in
@@ -424,9 +433,25 @@ struct ExpenseDetailsView: View {
                         .foregroundStyle(palette.positive)
                 }
             }
+
+            // Sólo mientras sigue por cobrar: saldada, no hay nada que
+            // registrar. Abre el alta de ingreso ya en modo abono.
+            if expense.isDebt {
+                Button { showingCollect = true } label: {
+                    Label("Registrar cobro", systemImage: "plus")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(accent.onSurface(colorScheme))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .background(themeColor.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .surfaceCard(radius: 16)
+        .surfaceCard(radius: 22)
         .padding(.horizontal, 16)
     }
 
@@ -445,107 +470,6 @@ struct ExpenseDetailsView: View {
             return Money.isZero(pending) ? palette.positive : palette.warning
         }
         return Money.isZero(pending) ? palette.positive : palette.secondaryLabel
-    }
-
-    // MARK: - Historial del comercio
-
-    /// Las últimas compras del mismo comercio. Da contexto —"¿esto es lo normal
-    /// o me pasé?"— sin salir de la pantalla.
-    @ViewBuilder
-    private var merchantHistory: some View {
-        let recent = recentAtMerchant
-        if recent.count > 1 {
-            let maxAmount = recent.map(\.amount).max() ?? 0
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text(Accounting.displayName(expense.merchant))
-                    .font(.headline)
-                    .foregroundStyle(palette.label)
-
-                HStack(alignment: .bottom, spacing: 8) {
-                    ForEach(recent) { item in
-                        // La flecha sólo aparece si ya te moviste de la
-                        // transacción con la que abriste — mientras la sigas
-                        // viendo, no hay "dónde empezaste" que señalar.
-                        let showsOrigin = item.id == originalExpenseID && expense.id != originalExpenseID
-                        let isSelected = item.id == expense.id
-
-                        VStack(spacing: 4) {
-                            Image(systemName: "arrow.down")
-                                .font(.caption2.weight(.bold))
-                                .foregroundStyle(themeColor)
-                                .opacity(showsOrigin ? 1 : 0)
-
-                            Text(Money.formatCompact(item.amount))
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundStyle(isSelected ? themeColor : palette.secondaryLabel)
-                                .lineLimit(1)
-                                .fixedSize()
-
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(isSelected ? themeColor : palette.track)
-                                .frame(height: barHeight(item.amount, max: maxAmount))
-
-                            Text(dayMonthLabel(item.date))
-                                .font(.caption2)
-                                .foregroundStyle(palette.secondaryLabel)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.8)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            guard !isSelected else { return }
-                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                expense = item
-                            }
-                        }
-                    }
-                }
-
-                Text(historySummary(recent))
-                    .font(.footnote)
-                    .foregroundStyle(palette.secondaryLabel)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .surfaceCard(radius: 16)
-            .padding(.horizontal, 16)
-        }
-    }
-
-    private var recentAtMerchant: [Expense] {
-        allExpenses
-            .filter { $0.merchant == expense.merchant }
-            .sorted { $0.date > $1.date }
-            .prefix(5)
-            .sorted { $0.date < $1.date }
-    }
-
-    private func barHeight(_ amount: Double, max maxAmount: Double) -> CGFloat {
-        guard let ratio = Money.ratio(amount, to: maxAmount) else { return 4 }
-        return Swift.max(4, 60 * CGFloat(min(1, ratio)))
-    }
-
-    /// "8 sept", "4 oct" — antes era sólo el número de día, y sin el mes no
-    /// se entendía cuando el historial cruzaba fin de mes.
-    private func dayMonthLabel(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
-        f.dateFormat = "d MMM"
-        return f.string(from: date)
-    }
-
-    private func historySummary(_ recent: [Expense]) -> String {
-        let count = recent.count
-        let compras = count == 1 ? "1 compra" : "\(count) compras"
-        guard let highest = recent.max(by: { Money.cents($0.amount) < Money.cents($1.amount) }) else {
-            return compras
-        }
-        if highest.id == expense.id { return compras + " · ésta es la más alta" }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
-        f.dateFormat = "d MMM"
-        return compras + " · la más alta fue el " + f.string(from: highest.date)
     }
 
     // MARK: - Acciones

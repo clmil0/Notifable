@@ -45,8 +45,6 @@ struct SettingsView: View {
     // Igual que los avisos: se lee aquí para que la fila de la raíz refleje el
     // valor sin tener que volver a entrar.
     @AppStorage(AppLock.enabledKey) private var lockEnabled = false
-    @AppStorage(DashboardView.tapTitleFiltersKey) private var tapTitleFilters = true
-    @AppStorage(PeriodHeader.pinnedBarKey) private var pinsPeriodBar = true
 
     @State private var query = ""
 
@@ -54,19 +52,17 @@ struct SettingsView: View {
     private var appearance: AppAppearance { AppAppearance(rawValue: appearanceRaw) ?? .dark }
     private var palette: Palette { Palette(scheme) }
 
-    /// Azul de "Captura automática": el color separa las secciones sin necesidad
-    /// de leerlas.
-    private var captureTint: Color {
-        scheme == .dark ? Color(red: 0.392, green: 0.710, blue: 1.0)
-                        : Color(red: 0.0, green: 0.349, blue: 0.698)
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 22) {
                     if query.isEmpty {
-                        statusCard
+                        // Conectado, la tarjeta sobra: la fila de Gmail ya dice
+                        // la cuenta y los bancos. Sin conectar, es la única
+                        // forma visible de empezar, y se queda arriba.
+                        if !gmailAuth.isAuthenticated {
+                            statusCard
+                        }
 
                         moneySection
                         captureSection
@@ -82,15 +78,11 @@ struct SettingsView: View {
             .onAppear(perform: refreshCounts)
             .searchable(text: $query, prompt: "Buscar en configuración")
             .navigationTitle("Configuración")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { dismiss() } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.secondary)
-                            .font(.title3)
-                    }
+                    Button("Listo") { dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
             .appAppearance()
@@ -162,17 +154,17 @@ struct SettingsView: View {
     private var moneySection: some View {
         SettingsSection(title: "Tu dinero") {
             SettingsRow(title: "Presupuesto", icon: "chart.bar.fill",
-                        tint: accent.color, value: budgetValue) {
+                        tint: .blue, value: budgetValue) {
                 BudgetScreen()
             }
             SettingsSeparator()
-            SettingsRow(title: "Recurrentes y atajos", icon: "arrow.clockwise",
-                        tint: accent.color, value: recurringValue) {
+            SettingsRow(title: "Recurrentes y atajos", icon: "arrow.triangle.2.circlepath",
+                        tint: .blue, value: recurringValue) {
                 RecurringManagementView()
             }
             SettingsSeparator()
-            SettingsRow(title: "Categorías y reglas", icon: "tray.full.fill",
-                        tint: accent.color, value: rulesValue) {
+            SettingsRow(title: "Categorías y reglas", icon: "tag.fill",
+                        tint: .blue, value: rulesValue) {
                 CategoryRulesScreen()
             }
         }
@@ -181,12 +173,13 @@ struct SettingsView: View {
     private var captureSection: some View {
         SettingsSection(title: "Captura automática") {
             SettingsRow(title: "Gmail y bancos", icon: "building.columns.fill",
-                        tint: captureTint, value: gmailValue) {
+                        tint: .teal, value: gmailValue,
+                        subtitle: gmailAuth.isAuthenticated ? "Sólo lectura del correo" : nil) {
                 GmailBanksView()
             }
             SettingsSeparator()
             SettingsRow(title: "Leer un rango pasado", icon: "calendar",
-                        tint: captureTint, value: "Acción") {
+                        tint: .green) {
                 RangeSyncView()
             }
         }
@@ -195,42 +188,27 @@ struct SettingsView: View {
     private var appSection: some View {
         SettingsSection(title: "La app") {
             SettingsRow(title: "Apariencia", icon: "paintbrush.fill",
-                        tint: .orange, value: appearance.rawValue, valueDot: accent.color) {
+                        tint: .purple, value: accent.rawValue + " · " + appearance.rawValue) {
                 AppearanceSettingsView()
             }
             SettingsSeparator()
-            SettingsRow(title: "A tu medida", icon: "slider.horizontal.3",
-                        tint: .orange, value: TailoredSettings.summary(tapTitleFilters: tapTitleFilters,
-                                                           pinsPeriodBar: pinsPeriodBar)) {
-                TailoredSettingsView()
-            }
-            SettingsSeparator()
-            SettingsRow(title: "Notificaciones", icon: "bell.badge.fill",
-                        tint: .orange, value: notificationsValue) {
+            SettingsRow(title: "Notificaciones", icon: "bell.fill",
+                        tint: .red, value: notificationsValue) {
                 NotificationSettingsView()
             }
             SettingsSeparator()
             SettingsRow(title: "Bloqueo", icon: AppLock.biometryIcon,
-                        tint: .orange, value: lockValue) {
+                        tint: Color(white: 0.35), value: lockValue) {
                 AppLockSettingsView()
             }
             SettingsSeparator()
             SettingsRow(title: "Datos y respaldo", icon: "externaldrive.fill",
-                        tint: .gray, value: "\(counts.total) gastos") {
+                        tint: Color(white: 0.35)) {
                 DataBackupView()
             }
-            SettingsSeparator()
-            SettingsRow(title: "Diagnóstico", icon: "stethoscope",
-                        tint: .gray, value: "Registros") {
-                DiagnosticsView()
-            }
-            #if DEBUG
-            SettingsSeparator()
-            SettingsRow(title: "FinanceKit (POC)", icon: "wallet.pass.fill",
-                        tint: .gray, value: "Debug") {
-                FinanceKitPOCView()
-            }
-            #endif
+            // Diagnóstico y FinanceKit salen de la lista visible (`5a`): se
+            // llega a los dos buscándolos. FinanceKit es una prueba de
+            // desarrollo y sólo existe en DEBUG (`SettingsEntry.searchable`).
         }
     }
 
@@ -245,11 +223,15 @@ struct SettingsView: View {
         return Money.format(monthlyBudget)
     }
 
+    /// «6 activos · 3 atajos».
     private var recurringValue: String {
         let active = recurringRules.filter { !$0.isPaused }.count
-        if active == 0 && quickExpenses.isEmpty { return "Ninguno" }
-        if active == 0 { return "\(quickExpenses.count) atajos" }
-        return active == 1 ? "1 activo" : "\(active) activos"
+        var parts: [String] = []
+        if active > 0 { parts.append(active == 1 ? "1 activo" : "\(active) activos") }
+        if !quickExpenses.isEmpty {
+            parts.append(quickExpenses.count == 1 ? "1 atajo" : "\(quickExpenses.count) atajos")
+        }
+        return parts.isEmpty ? "Ninguno" : parts.joined(separator: " · ")
     }
 
     private var lockValue: String {
@@ -257,10 +239,11 @@ struct SettingsView: View {
         return lockEnabled ? AppLock.biometryName : "Desactivado"
     }
 
+    /// «11 · 9 reglas»: las categorías y cuántas reglas las alimentan.
     private var rulesValue: String {
-        let count = MerchantRules.all().count
-        if count == 0 { return "Ninguna" }
-        return count == 1 ? "1 regla" : "\(count) reglas"
+        let rules = MerchantRules.all().count
+        let rulesLabel = rules == 1 ? "1 regla" : "\(rules) reglas"
+        return "\(counts.categories) · " + rulesLabel
     }
 
     private var gmailValue: String {
@@ -337,17 +320,26 @@ struct SettingsView: View {
         case "gmail":         GmailBanksView()
         case "range":         RangeSyncView()
         case "appearance":    AppearanceSettingsView()
-        case "tailored":      TailoredSettingsView()
         case "notifications": NotificationSettingsView()
         case "lock":          AppLockSettingsView()
+        case "diagnostics":   DiagnosticsView()
+        #if DEBUG
+        case "financekit":    FinanceKitPOCView()
+        #endif
         default:              DataBackupView()
         }
     }
 
     // MARK: - Pie
 
+    /// La versión del bundle (`MARKETING_VERSION`), no un texto a mano que se
+    /// queda atrás en cada release.
+    static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+    }
+
     private var versionFooter: some View {
-        Text("AgruPay 1.0 · PoC")
+        Text("AgruPay " + Self.appVersion)
             .font(.caption)
             .foregroundStyle(palette.tertiaryLabel)
             .frame(maxWidth: .infinity)
@@ -370,10 +362,226 @@ struct BudgetScreen: View {
     }
 }
 
-/// Las reglas de comercio, que antes sólo se podían borrar desde "Gestión de
-/// Datos Avanzada" y en bloque.
+/// Categorías y reglas (`5f`).
+///
+/// Cada fila dice las dos cosas que se vienen a editar: el límite y cuántos
+/// comercios caen ahí por regla. El bloque «sin usar» propone la limpieza en
+/// vez de dejar que la lista crezca sin fin.
 struct CategoryRulesScreen: View {
 
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.modelContext) private var modelContext
+    @StateObject private var budgets = CategoryBudgetStore.shared
+    @StateObject private var catalog = CategoryCatalog.shared
+
+    @State private var stats = CategoryRulesStats()
+    @State private var editing: CategoryRef?
+    @State private var creating = false
+    @State private var merging: CategoryRef?
+    @State private var history: [Expense] = []
+
+    private var palette: Palette { Palette(scheme) }
+    private var accent: AppThemeColor { .current }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                rulesCard
+
+                VStack(spacing: 8) {
+                    ShellSectionHeader(title: "Tus categorías · \(stats.active.count)")
+                    MovementCard {
+                        ForEach(Array(stats.active.enumerated()), id: \.element) { index, name in
+                            categoryRow(name)
+                            if index < stats.active.count - 1 { MovementSeparator() }
+                        }
+                    }
+                }
+
+                if !stats.unused.isEmpty {
+                    VStack(spacing: 8) {
+                        ShellSectionHeader(title: "Sin usar hace 3 meses")
+                        MovementCard {
+                            ForEach(Array(stats.unused.enumerated()), id: \.element) { index, name in
+                                unusedRow(name)
+                                if index < stats.unused.count - 1 { MovementSeparator() }
+                            }
+                        }
+                        Text("Al fusionar, sus movimientos y reglas pasan a la categoría que elijas. Nada se borra.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(palette.secondaryLabel)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 6)
+                    }
+                }
+            }
+            .padding(16)
+        }
+        .background(palette.background)
+        .navigationTitle("Categorías y reglas")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { creating = true } label: { Image(systemName: "plus") }
+                    .accessibilityLabel("Nueva categoría")
+            }
+        }
+        .onAppear(perform: reload)
+        .sheet(item: $editing, onDismiss: reload) { ref in
+            CategorySettingsView(category: ref.name, history: history)
+        }
+        .sheet(isPresented: $creating, onDismiss: reload) {
+            CategorySettingsView(category: "", isNew: true, history: history)
+        }
+        .sheet(item: $merging) { ref in
+            CategoryMergeSheet(source: ref.name, onDone: reload)
+        }
+    }
+
+    // MARK: - Reglas
+
+    private var rulesCard: some View {
+        NavigationLink {
+            MerchantRulesList()
+        } label: {
+            ShellCard {
+                HStack(spacing: 12) {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(accent.color)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(stats.ruleCount == 1 ? "1 regla activa" : "\(stats.ruleCount) reglas activas")
+                            .font(.system(size: 15.5, weight: .semibold))
+                            .foregroundStyle(palette.label)
+                        Text(stats.ruleCount == 0
+                             ? "Se crean al asignar una categoría a un comercio"
+                             : "Clasifican solas el \(stats.coveragePercent)% de tus gastos")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(palette.secondaryLabel)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(palette.tertiaryLabel)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Filas
+
+    private func categoryRow(_ name: String) -> some View {
+        Button { editing = CategoryRef(name: name) } label: {
+            HStack(spacing: 12) {
+                MovementIcon(icon: CategoryStyle.icon(for: name),
+                             color: CategoryStyle.color(for: name, accent: accent.color),
+                             size: 38)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(palette.label)
+                    Text(detail(for: name))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(palette.tertiaryLabel)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// «Límite S/ 900 · 4 comercios», «Sin límite · sin comercios».
+    private func detail(for name: String) -> String {
+        let limit = budgets.budget(for: name).map { "Límite " + Money.formatCompact($0.amount) } ?? "Sin límite"
+        let merchants = stats.merchantsByCategory[name] ?? 0
+        let merchantLabel = merchants == 0 ? "sin comercios"
+            : merchants == 1 ? "1 comercio" : "\(merchants) comercios"
+        return limit + " · " + merchantLabel
+    }
+
+    private func unusedRow(_ name: String) -> some View {
+        HStack(spacing: 12) {
+            MovementIcon(icon: CategoryStyle.icon(for: name), color: palette.tertiaryLabel, size: 38)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(palette.label)
+                let total = stats.totalByCategory[name] ?? 0
+                Text(total == 1 ? "1 movimiento" : "\(total) movimientos")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+            Spacer()
+            Button("Fusionar") { merging = CategoryRef(name: name) }
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(palette.label)
+                .padding(.horizontal, 12)
+                .frame(height: 30)
+                .background(palette.neutralSurface, in: Capsule())
+                .overlay(Capsule().stroke(palette.hairline, lineWidth: 0.5))
+                .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private func reload() {
+        stats = CategoryRulesStats(context: modelContext, catalog: catalog)
+        history = (try? modelContext.fetch(FetchDescriptor<Expense>(
+            sortBy: [SortDescriptor(\.date, order: .reverse)]))) ?? []
+    }
+}
+
+/// Los números de Categorías y reglas, contados una vez al entrar.
+private struct CategoryRulesStats {
+    var active: [String] = []
+    var unused: [String] = []
+    var ruleCount = 0
+    var coveragePercent = 0
+    var merchantsByCategory: [String: Int] = [:]
+    var totalByCategory: [String: Int] = [:]
+
+    init() {}
+
+    init(context: ModelContext, catalog: CategoryCatalog) {
+        let rules = MerchantRules.all()
+        ruleCount = rules.count
+        for (_, category) in rules { merchantsByCategory[category, default: 0] += 1 }
+
+        var descriptor = FetchDescriptor<Expense>()
+        descriptor.propertiesToFetch = [\.category, \.merchant, \.date]
+        let expenses = (try? context.fetch(descriptor)) ?? []
+
+        let cutoff = Period.calendar.date(byAdding: .month, value: -3, to: Date()) ?? Date()
+        var recent: Set<String> = []
+        var recentCount = 0, recentByRule = 0
+        for expense in expenses {
+            totalByCategory[expense.category, default: 0] += 1
+            guard expense.date >= cutoff else { continue }
+            recent.insert(expense.category)
+            recentCount += 1
+            if rules[expense.merchant] != nil { recentByRule += 1 }
+        }
+        // Sobre los últimos 3 meses: es lo que dice cómo funcionan las reglas
+        // hoy, no lo que clasificaste a mano hace dos años.
+        coveragePercent = recentCount == 0 ? 0 : Int((Double(recentByRule) / Double(recentCount) * 100).rounded())
+
+        let all = Set(totalByCategory.keys).union(catalog.entries.keys).subtracting([Accounting.unclassified])
+        active = all.filter { recent.contains($0) || CategoryCatalog.isSystem($0) }.sorted()
+        unused = all.subtracting(active).sorted()
+    }
+}
+
+/// La lista de reglas por comercio. Antes era la pantalla entera; ahora es un
+/// nivel más abajo, detrás de la tarjeta que dice cuánto hacen.
+struct MerchantRulesList: View {
     @Environment(\.colorScheme) private var scheme
     @State private var rules: [String: String] = [:]
 
@@ -387,18 +595,16 @@ struct CategoryRulesScreen: View {
     var body: some View {
         List {
             if sorted.isEmpty {
-                Text("Todavía no has clasificado ningún comercio. Al asignarle una categoría a uno en la Bandeja, la regla aparece aquí.")
+                Text("Todavía no has clasificado ningún comercio. Al asignarle una categoría a uno en Pendientes, la regla aparece aquí.")
                     .font(.footnote)
                     .foregroundStyle(palette.secondaryLabel)
             } else {
                 Section {
                     ForEach(sorted, id: \.merchant) { rule in
                         HStack {
-                            Text(Accounting.displayName(rule.merchant))
-                                .lineLimit(1)
+                            Text(Accounting.displayName(rule.merchant)).lineLimit(1)
                             Spacer()
-                            Text(rule.category)
-                                .foregroundStyle(palette.secondaryLabel)
+                            Text(rule.category).foregroundStyle(palette.secondaryLabel)
                         }
                     }
                     .onDelete(perform: delete)
@@ -407,15 +613,13 @@ struct CategoryRulesScreen: View {
                 }
             }
         }
-        .navigationTitle("Categorías y reglas")
+        .navigationTitle("Reglas")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { rules = MerchantRules.all() }
     }
 
     private func delete(at offsets: IndexSet) {
-        for index in offsets {
-            MerchantRules.remove(sorted[index].merchant)
-        }
+        for index in offsets { MerchantRules.remove(sorted[index].merchant) }
         rules = MerchantRules.all()
     }
 }
@@ -431,6 +635,7 @@ private struct SettingsCounts {
     var total = 0
     var thisMonth = 0
     var unclassifiedMerchants = 0
+    var categories = 0
 
     init() {}
 
@@ -447,5 +652,10 @@ private struct SettingsCounts {
         pending.propertiesToFetch = [\.merchant]
         let merchants = ((try? context.fetch(pending)) ?? []).map(\.merchant)
         unclassifiedMerchants = Set(merchants).count
+
+        var all = FetchDescriptor<Expense>()
+        all.propertiesToFetch = [\.category]
+        categories = Set(((try? context.fetch(all)) ?? []).map(\.category))
+            .subtracting([unclassified]).count
     }
 }

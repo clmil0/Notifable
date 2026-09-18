@@ -97,15 +97,17 @@ struct LockScreenView: View {
     // MARK: - Cabecera
 
     private var header: some View {
-        HStack(spacing: 9) {
-            AppIconTile(size: 30, accent: accent, coinFace: .white, detail: false)
+        VStack(spacing: 8) {
+            AppIconTile(size: 64, accent: accent, coinFace: .white, detail: false)
             Text("AgruPay")
-                .font(.subheadline.weight(.semibold))
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(palette.label)
+            Text("Bloqueado")
+                .font(.system(size: 13))
                 .foregroundStyle(palette.secondaryLabel)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 24)
-        .padding(.top, 18)
+        .frame(maxWidth: .infinity)
+        .padding(.top, 90)
     }
 
     // MARK: - 2b · en reposo
@@ -122,14 +124,14 @@ struct LockScreenView: View {
                         breathingRing(delay: 0)
                         breathingRing(delay: 0.7)
                     }
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    Circle()
                         .fill(palette.surface)
-                        .frame(width: 96, height: 96)
-                        .shadow(color: accent.opacity(0.16), radius: 16, y: 3)
+                        .frame(width: 72, height: 72)
+                        .overlay(Circle().stroke(palette.hairline, lineWidth: 0.5))
                         .overlay(
                             Image(systemName: AppLock.biometryIcon)
-                                .font(.system(size: 46, weight: .light))
-                                .foregroundStyle(accent)
+                                .font(.system(size: 30, weight: .light))
+                                .foregroundStyle(palette.label)
                         )
                 }
                 .frame(width: 96, height: 96)
@@ -137,17 +139,33 @@ struct LockScreenView: View {
             .buttonStyle(.plain)
             .disabled(isWorking)
 
-            Text(isScanning ? "Mira tu iPhone" : "Toca para entrar")
-                .font(.system(size: 26, weight: .bold))
+            Text(isScanning ? "Desbloquea con " + AppLock.biometryName : "Toca para entrar")
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(palette.label)
-                .padding(.top, 28)
+                .padding(.top, 14)
 
-            Text(idleSubtitle)
-                .font(.subheadline)
-                .foregroundStyle(palette.secondaryLabel)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 260)
-                .padding(.top, 8)
+            if !isScanning {
+                Text(idleSubtitle)
+                    .font(.footnote)
+                    .foregroundStyle(palette.secondaryLabel)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 260)
+                    .padding(.top, 6)
+            }
+
+            // La salida al código, junto a la acción y no al pie (`5l`).
+            Button { run(.usePasscode) } label: {
+                Text("Usar código")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(palette.label)
+                    .padding(.horizontal, 16)
+                    .frame(height: 36)
+                    .background(palette.surface, in: Capsule())
+                    .overlay(Capsule().stroke(palette.hairline, lineWidth: 0.5))
+            }
+            .buttonStyle(.plain)
+            .disabled(isWorking)
+            .padding(.top, 18)
 
             Spacer(minLength: 20)
         }
@@ -170,9 +188,9 @@ struct LockScreenView: View {
 
     /// Los anillos: nacen pegados al sello y se van abriendo hasta desaparecer.
     private func breathingRing(delay: Double) -> some View {
-        RoundedRectangle(cornerRadius: 30, style: .continuous)
+        Circle()
             .stroke(accent, lineWidth: 2)
-            .frame(width: 96, height: 96)
+            .frame(width: 72, height: 72)
             .scaleEffect(isScanning ? 1.45 : 1)
             .opacity(isScanning ? 0 : 0.55)
             .animation(.easeOut(duration: 2.1).repeatForever(autoreverses: false).delay(delay),
@@ -252,13 +270,14 @@ struct LockScreenView: View {
 
     private func footer(_ guidance: AppLockFailure?) -> some View {
         VStack(spacing: 16) {
-            HStack(spacing: 8) {
-                Image(systemName: "lock.fill")
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "lock")
                     .font(.system(size: 11))
-                Text("Tus movimientos siguen cifrados en el iPhone.")
+                Text(privacyLine)
                     .font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .foregroundStyle(palette.tertiaryLabel)
+            .foregroundStyle(palette.secondaryLabel)
 
             if let failure = guidance {
                 let primary = failure.primary
@@ -269,14 +288,20 @@ struct LockScreenView: View {
                         .foregroundStyle(palette.secondaryLabel)
                         .disabled(isWorking)
                 }
-            } else {
-                // En reposo el único botón es la salida, no la acción: la
-                // acción es mirar el teléfono, y ya está ocurriendo.
-                outlinedButton("Usar código del iPhone") { run(.usePasscode) }
             }
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 46)
+    }
+
+    /// La frase del cifrado, verdadera según el caso. «No los sube a ningún
+    /// servidor» sólo es cierto sin respaldo: con él, los movimientos anotados
+    /// a mano viajan a tu copia en la nube (los del correo nunca, se rearman
+    /// releyéndolo). Ver `ConfigBackupManager.buildSnapshot`.
+    private var privacyLine: String {
+        ConfigBackupManager.shared.isEnabled
+            ? "Tus movimientos siguen cifrados en el iPhone. Sólo los que anotas a mano viajan a tu respaldo."
+            : "Tus movimientos siguen cifrados en el iPhone. AgruPay no los sube a ningún servidor."
     }
 
     private func filledButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -290,23 +315,6 @@ struct LockScreenView: View {
             .frame(maxWidth: .infinity)
             .frame(height: 54)
             .background(accent, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .disabled(isWorking)
-    }
-
-    private func outlinedButton(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.headline)
-                .foregroundStyle(accent)
-                .frame(maxWidth: .infinity)
-                .frame(height: 52)
-                .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(palette.hairline, lineWidth: 0.5)
-                )
         }
         .buttonStyle(.plain)
         .disabled(isWorking)

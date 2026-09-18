@@ -205,11 +205,6 @@ struct SettingsEntry: Identifiable, Hashable {
         SettingsEntry(id: "appearance", title: "Apariencia",
                       keywords: ["tema", "oscuro", "claro", "color", "acento", "texto", "tamaño", "categorías"],
                       section: "La app", destination: "appearance"),
-        SettingsEntry(id: "tailored", title: "A tu medida",
-                      keywords: ["personalizar", "detalles", "actividad reciente", "tocar",
-                                 "nombre", "comercio", "filtrar", "comportamiento",
-                                 "fijar", "barra", "periodo", "header", "desplazar"],
-                      section: "La app", destination: "tailored"),
         SettingsEntry(id: "notifications", title: "Notificaciones",
                       keywords: ["aviso", "recordatorio", "deuda", "cobro", "presupuesto"],
                       section: "La app", destination: "notifications"),
@@ -219,15 +214,31 @@ struct SettingsEntry: Identifiable, Hashable {
                       section: "La app", destination: "lock"),
         SettingsEntry(id: "data", title: "Datos y respaldo",
                       keywords: ["csv", "exportar", "backup", "nube", "borrar", "caché"],
-                      section: "La app", destination: "data")
+                      section: "La app", destination: "data"),
+        // Fuera de la lista visible (`5a`): sólo aparece al buscarlo. Es una
+        // herramienta de soporte, no un ajuste.
+        SettingsEntry(id: "diagnostics", title: "Diagnóstico",
+                      keywords: ["registros", "logs", "soporte", "error", "fallo"],
+                      section: "La app", destination: "diagnostics")
     ]
+
+    /// Lo que se puede buscar, más las pruebas de desarrollo en DEBUG.
+    static var searchable: [SettingsEntry] {
+        #if DEBUG
+        return all + [SettingsEntry(id: "financekit", title: "FinanceKit (POC)",
+                                    keywords: ["financekit", "wallet", "apple card", "debug"],
+                                    section: "Desarrollo", destination: "financekit")]
+        #else
+        return all
+        #endif
+    }
 
     static func matching(_ query: String) -> [SettingsEntry] {
         let q = query.folding(options: [.diacriticInsensitive, .caseInsensitive],
                               locale: Locale(identifier: "es_PE"))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return [] }
-        return all.filter { entry in
+        return searchable.filter { entry in
             let haystack = ([entry.title, entry.section] + entry.keywords)
                 .joined(separator: " ")
                 .folding(options: [.diacriticInsensitive, .caseInsensitive],

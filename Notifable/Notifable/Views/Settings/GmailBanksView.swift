@@ -35,12 +35,15 @@ struct GmailBanksView: View {
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
 
-    private static let standardPeriods = [1, 3, 6, 12]
+    private static let standardPeriods = [1, 3, 12]
 
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
                 accountCard
+                if gmailAuth.isAuthenticated {
+                    readingSection
+                }
                 banksSection
                 captureLimitsCard
             }
@@ -113,7 +116,7 @@ struct GmailBanksView: View {
                         .truncationMode(.middle)
                         .minimumScaleFactor(0.8)
                     Text(gmailAuth.isAuthenticated
-                         ? "Conectado · sólo lectura"
+                         ? "● Conectado · sólo lectura"
                          : "AgruPay lee los avisos de tu banco para registrar gastos solo.")
                         .font(.footnote)
                         .foregroundStyle(gmailAuth.isAuthenticated ? palette.positive : palette.secondaryLabel)
@@ -128,27 +131,16 @@ struct GmailBanksView: View {
                 if gmailAuth.isAuthenticated {
                     Button { showUnlinkDialog = true } label: {
                         Text("Desvincular")
-                            .font(.caption.weight(.semibold))
+                            .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(palette.negative)
-                            .padding(.horizontal, 10)
-                            .frame(height: 30)
-                            .background(palette.negative.opacity(0.12))
-                            .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
             .padding(16)
 
-            Rectangle().fill(palette.separator).frame(height: 0.5)
-
-            if gmailAuth.isAuthenticated {
-                if gmailSync.isSyncing {
-                    syncProgress
-                } else {
-                    lastReadRow
-                }
-            } else {
+            if !gmailAuth.isAuthenticated {
+                Rectangle().fill(palette.separator).frame(height: 0.5)
                 Button {
                     isLinking = true
                     gmailAuth.signIn()
@@ -166,12 +158,32 @@ struct GmailBanksView: View {
             }
         }
         .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
         .padding(.horizontal, 16)
+    }
+
+    // MARK: - Lectura
+
+    private var readingSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("LECTURA")
+                .font(.system(size: 11.5, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(palette.secondaryLabel)
+                .padding(.horizontal, 22)
+
+            Group {
+                if gmailSync.isSyncing { syncProgress } else { lastReadRow }
+            }
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(palette.hairline, lineWidth: 0.5))
+            .padding(.horizontal, 16)
+        }
     }
 
     // MARK: - Selector de periodo de lectura
@@ -192,17 +204,17 @@ struct GmailBanksView: View {
                         .font(.caption)
                 }
                 Spacer()
-                Text("\(cachedEmailCount) en caché")
+                Text("\(cachedEmailCount.formatted()) correos")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(palette.tertiaryLabel)
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("DESDE")
+                Text("CUÁNTO ATRÁS")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(palette.tertiaryLabel)
 
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     ForEach(Self.standardPeriods, id: \.self) { months in
                         periodChip(label: periodChipLabel(months), isActive: !showCustomStepper && readPeriodMonths == months) {
                             showCustomStepper = false
@@ -241,11 +253,9 @@ struct GmailBanksView: View {
                 }
             }
 
-            (Text(rangeLabel + " ")
-                .foregroundStyle(palette.label)
-             + Text("· sin duplicar lo que ya tienes")
-                .foregroundStyle(palette.secondaryLabel))
+            Text(rangeLabel + " · sin duplicar lo que ya tienes")
                 .font(.caption)
+                .foregroundStyle(palette.secondaryLabel)
 
             Button {
                 gmailSync.modelContext = modelContext
@@ -256,13 +266,13 @@ struct GmailBanksView: View {
                     startSync()
                 }
             } label: {
-                Text("Leer " + periodLabel(readPeriodMonths))
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
+                Label("Leer ahora", systemImage: "arrow.down.to.line")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(accent.onSurface(scheme))
                     .frame(maxWidth: .infinity)
-                    .frame(height: 40)
-                    .background(accent.color)
-                    .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .frame(height: 44)
+                    .background(accent.color.opacity(0.12))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .buttonStyle(.plain)
         }
@@ -275,9 +285,9 @@ struct GmailBanksView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(isActive ? .white : palette.label)
                 .lineLimit(1)
-                .frame(maxWidth: .infinity)
-                .frame(height: 30)
-                .background(isActive ? accent.color : palette.track)
+                .padding(.horizontal, 12)
+                .frame(height: 32)
+                .background(isActive ? accent.color : palette.neutralSurface)
                 .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -302,8 +312,7 @@ struct GmailBanksView: View {
     /// "3 meses" y "Personalizado" desbordaban y la fila se veía rota. El botón
     /// de abajo sí dice el periodo completo, que es donde importa.
     private func periodChipLabel(_ months: Int) -> String {
-        if months > 0, months % 12 == 0 { return "\(months / 12) A" }
-        return "\(months) M"
+        periodLabel(months)
     }
 
     /// "1 mes" / "3 meses" / "1 año" / "2 años" / "N meses" para el resto.
@@ -411,17 +420,13 @@ struct GmailBanksView: View {
                 }
             }
             .background(palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
                     .stroke(palette.hairline, lineWidth: 0.5)
             )
             .padding(.horizontal, 16)
 
-            Text("Lo que cada banco detecta va bajo su nombre, no detrás de un botón de info dentro del interruptor.")
-                .font(.caption)
-                .foregroundStyle(palette.secondaryLabel)
-                .padding(.horizontal, 20)
         }
     }
 
@@ -429,6 +434,13 @@ struct GmailBanksView: View {
         let isOn = bankStates[bank.storageKey] ?? bank.isEnabled
 
         return HStack(spacing: 12) {
+            Image(bank.logoAsset)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 32, height: 32)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .opacity(isOn ? 1 : 0.5)
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(bank.name)
                     .foregroundStyle(isOn ? palette.label : palette.secondaryLabel)

@@ -299,14 +299,16 @@ struct AddTransactionSheet: View {
 
     @ViewBuilder
     private var expenseFields: some View {
-        // Lo primero que se ve: el caso de los S/ 2.50 de pasaje tiene que
-        // resolverse sin bajar la vista.
-        quickExpenseRow
+        // Los atajos sólo mientras no hay monto (`4b`): son una forma de
+        // rellenar, y con el monto ya escrito ocupan el sitio de la categoría.
+        if !draft.hasAmount {
+            quickExpenseRow
+        }
 
         merchantField
         descriptionField
 
-        if !merchantSuggestions.isEmpty {
+        if focused != .amount, !merchantSuggestions.isEmpty {
             chipRow {
                 ForEach(merchantSuggestions, id: \.self) { name in
                     Button { pickMerchant(name) } label: {
@@ -317,8 +319,17 @@ struct AddTransactionSheet: View {
             }
         }
 
-        categoryChips
-        dateAndSubscriptionCard
+        // Con el teclado del monto abierto la categoría espera: sin comercio
+        // no hay sugerencia que dar, y el teclado ya tapa la mitad de abajo.
+        if focused != .amount {
+            categoryChips
+        }
+
+        // Fecha, Repetir y «Guardar como atajo» sólo con el teclado cerrado
+        // (`4c`): son ajustes de un gasto ya escrito, no de uno que empieza.
+        if focused == nil {
+            dateAndSubscriptionCard
+        }
     }
 
     // MARK: - Atajos
@@ -352,6 +363,11 @@ struct AddTransactionSheet: View {
                     }
                     addQuickButton
                 }
+
+                Text("Un toque rellena · dos toques guardan")
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
+                    .padding(.horizontal, 16)
             }
         }
     }
@@ -527,9 +543,9 @@ struct AddTransactionSheet: View {
         .padding(.horizontal, 14)
         .frame(height: 46)
         .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
         .padding(.horizontal, 16)
@@ -603,7 +619,7 @@ struct AddTransactionSheet: View {
                 .padding(.horizontal, 16)
 
             chipRow {
-                ForEach(selectableCategories.prefix(6), id: \.self) { category in
+                ForEach(orderedCategories.prefix(6), id: \.self) { category in
                     Button {
                         withAnimation(.easeInOut(duration: 0.15)) { draft.category = category }
                     } label: {
@@ -624,7 +640,45 @@ struct AddTransactionSheet: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Más categorías")
             }
+
+            if let reason = suggestionReason {
+                Label(reason, systemImage: "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
+                    .padding(.horizontal, 16)
+                    .transition(.opacity)
+            }
         }
+    }
+
+    /// La sugerida primero: el chip que se enciende solo tiene que estar a la
+    /// vista, no perdido al final de una fila que hay que desplazar.
+    private var orderedCategories: [String] {
+        let all = selectableCategories
+        let current = draft.category
+        guard all.contains(current) else { return all }
+        return [current] + all.filter { $0 != current }
+    }
+
+    /// Por qué hay una categoría preseleccionada. Sin esta línea el chip se
+    /// encendía solo, sin motivo visible, y parecía un error.
+    private var suggestionReason: String? {
+        let merchant = draft.merchant.trimmed
+        let category = draft.category
+        guard !merchant.isEmpty, !category.isEmpty, category != Accounting.unclassified else { return nil }
+
+        if MerchantRules.category(for: merchant) == category {
+            return "Por tu regla para " + merchant
+        }
+
+        let count = history.filter {
+            Accounting.displayName($0.merchant).caseInsensitiveCompare(merchant) == .orderedSame
+                && $0.category == category
+        }.count
+        guard count > 0 else { return nil }
+        return count == 1
+            ? "Sugerida por tu compra anterior en " + merchant
+            : "Sugerida por tus \(count) compras anteriores en " + merchant
     }
 
     private var selectableCategories: [String] {
@@ -641,14 +695,14 @@ struct AddTransactionSheet: View {
             Text(category)
                 .font(.caption.weight(.semibold))
         }
-        .foregroundStyle(selected ? color : palette.secondaryLabel)
+        // Elegida: relleno sólido del color de la categoría y texto blanco.
+        // El tinte suave de antes se confundía con las no elegidas en claro.
+        .foregroundStyle(selected ? Color.white : palette.label)
         .padding(.horizontal, 12)
         .frame(height: 34)
-        .background(selected ? color.opacity(0.2) : palette.surface)
+        .background(selected ? color : palette.surface)
         .clipShape(Capsule())
-        .overlay(
-            Capsule().stroke(selected ? color.opacity(0.55) : Color.clear, lineWidth: 1)
-        )
+        .overlay(Capsule().stroke(selected ? Color.clear : palette.hairline, lineWidth: 0.5))
     }
 
     private var dateAndSubscriptionCard: some View {
@@ -663,9 +717,9 @@ struct AddTransactionSheet: View {
             }
         }
         .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
         .padding(.horizontal, 16)
@@ -673,30 +727,40 @@ struct AddTransactionSheet: View {
 
     /// **Campo nuevo:** el gasto no tenía fecha, siempre se guardaba con `Date()`.
     /// Registrar el almuerzo de ayer era imposible.
+    /// Una sola fila con el día y la hora (`4c`). Los chips Hoy/Ayer/Otra
+    /// ocupaban el ancho entero para decir lo que una fecha escrita dice sola.
     private var dateRow: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "calendar")
-                .font(.system(size: 17))
-                .foregroundStyle(palette.secondaryLabel)
-            Text("Fecha")
-                .foregroundStyle(palette.label)
+        Button { showDatePicker = true } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "calendar")
+                    .font(.system(size: 17))
+                    .foregroundStyle(palette.secondaryLabel)
 
-            Spacer()
+                Text(dateLabel)
+                    .foregroundStyle(palette.label)
 
-            HStack(spacing: 6) {
-                dateChip("Hoy", isActive: isSameDay(draft.date, Date())) {
-                    draft.date = Date()
-                }
-                dateChip("Ayer", isActive: isSameDay(draft.date, yesterday)) {
-                    draft.date = yesterday
-                }
-                dateChip(otherDateLabel, isActive: isOtherDate) {
-                    showDatePicker = true
-                }
+                Spacer()
+
+                Text(draft.date.formatted(.dateTime.hour().minute()))
+                    .foregroundStyle(palette.secondaryLabel)
             }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 46)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 14)
-        .frame(minHeight: 46)
+        .buttonStyle(.plain)
+    }
+
+    /// «Hoy, 17 set», «Ayer, 16 set», o el día con su fecha.
+    private var dateLabel: String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_PE")
+        f.dateFormat = "d MMM"
+        let day = f.string(from: draft.date).replacingOccurrences(of: ".", with: "")
+        if isSameDay(draft.date, Date()) { return "Hoy, " + day }
+        if isSameDay(draft.date, yesterday) { return "Ayer, " + day }
+        f.dateFormat = "EEEE d MMM"
+        return f.string(from: draft.date).replacingOccurrences(of: ".", with: "").capitalizedFirst
     }
 
     private var yesterday: Date {
@@ -705,32 +769,6 @@ struct AddTransactionSheet: View {
 
     private func isSameDay(_ a: Date, _ b: Date) -> Bool {
         Period.calendar.isDate(a, inSameDayAs: b)
-    }
-
-    private var isOtherDate: Bool {
-        !isSameDay(draft.date, Date()) && !isSameDay(draft.date, yesterday)
-    }
-
-    private var otherDateLabel: String {
-        guard isOtherDate else { return "Otra" }
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
-        f.dateFormat = "d MMM"
-        return f.string(from: draft.date)
-    }
-
-    private func dateChip(_ title: String, isActive: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isActive ? Color.white : palette.secondaryLabel)
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .background(isActive ? accentFill : palette.track)
-                .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(isActive ? [.isSelected] : [])
     }
 
     /// El toggle "Es suscripción" desaparece: sólo ponía una marca en un gasto
@@ -747,7 +785,9 @@ struct AddTransactionSheet: View {
 
                 Spacer()
 
-                Text(recurrence.label(merchant: draft.merchant, amount: draft.amount, currency: draft.currency))
+                Text(recurrence.repeats
+                     ? recurrence.label(merchant: draft.merchant, amount: draft.amount, currency: draft.currency)
+                     : "No se repite")
                     .foregroundStyle(recurrence.repeats ? accentText : palette.secondaryLabel)
                     .lineLimit(1)
 
@@ -816,7 +856,7 @@ struct AddTransactionSheet: View {
 
     private var sourceChips: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("ORIGEN")
+            Text("FUENTE")
                 .font(.caption)
                 .tracking(0.3)
                 .foregroundStyle(palette.secondaryLabel)
@@ -867,14 +907,12 @@ struct AddTransactionSheet: View {
             Text(source.name)
                 .font(.caption.weight(.semibold))
         }
-        .foregroundStyle(selected ? accentText : palette.secondaryLabel)
+        .foregroundStyle(selected ? Color.white : palette.label)
         .padding(.horizontal, 12)
         .frame(height: 34)
-        .background(selected ? accentFill.opacity(0.2) : palette.surface)
+        .background(selected ? accentFill : palette.surface)
         .clipShape(Capsule())
-        .overlay(
-            Capsule().stroke(selected ? accentFill.opacity(0.55) : Color.clear, lineWidth: 1)
-        )
+        .overlay(Capsule().stroke(selected ? Color.clear : palette.hairline, lineWidth: 0.5))
     }
 
     private var titleAndDateCard: some View {
@@ -930,9 +968,9 @@ struct AddTransactionSheet: View {
             dateRow
         }
         .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
         .padding(.horizontal, 16)
@@ -959,12 +997,14 @@ struct AddTransactionSheet: View {
                 .tint(accentFill)
         }
         .padding(.horizontal, 14)
-        .frame(minHeight: 52)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .frame(minHeight: 56)
+        // Tinte de aviso: es la única decisión del formulario que cambia lo
+        // que el ingreso significa, y tiene que verse distinta del resto.
+        .background(palette.warning.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(palette.warning.opacity(0.35), lineWidth: 0.5)
         )
         .padding(.horizontal, 16)
     }
@@ -989,7 +1029,9 @@ struct AddTransactionSheet: View {
     /// La distinción que ACCOUNTING.md §3 y §4 exigen y que ninguna pantalla
     /// explicaba: por qué un abono no aparece en el balance.
     private var explanationNote: some View {
-        Text("Un ingreso normal cuenta en tu balance. Un cobro no: sólo reduce lo que te deben.")
+        Text(activeDebts.isEmpty
+             ? "Un ingreso normal cuenta en tu balance. Un cobro no: sólo reduce lo que te deben."
+             : "Al activarlo, el monto se abona a una deuda y deja de contar como ingreso del mes.")
             .font(.footnote)
             .foregroundStyle(palette.secondaryLabel)
             .fixedSize(horizontal: false, vertical: true)
@@ -1429,92 +1471,3 @@ struct AddTransactionSheet: View {
 
 // MARK: - Teclado numérico
 
-/// Teclado numérico propio. Lo usa el editor de límites por categoría.
-///
-/// El alta de gasto/ingreso lo usaba también, y se cambió al `.decimalPad` del
-/// sistema a petición: escribir un monto con el teclado de siempre pesa más que
-/// las ventajas que tenía éste —no tapar el formulario, no mover la altura del
-/// contenido y poder validar tecla a tecla—. Esa última la cubre ahora
-/// `TransactionDraft.sanitizedAmount(_:)` sobre el texto completo.
-struct Keypad: View {
-
-    let background: Color
-    let onKey: (TransactionDraft.KeypadKey) -> Void
-    let onClear: () -> Void
-
-    @Environment(\.colorScheme) private var scheme
-    private var palette: Palette { Palette(scheme) }
-
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 7), count: 3)
-
-    var body: some View {
-        LazyVGrid(columns: columns, spacing: 7) {
-            ForEach(1...9, id: \.self) { digit in
-                key(label: "\(digit)", accessibility: Keypad.spelled[digit] ?? "\(digit)") {
-                    onKey(.digit(digit))
-                }
-            }
-
-            key(label: ".", accessibility: "Punto decimal") { onKey(.decimal) }
-            key(label: "0", accessibility: "Cero") { onKey(.digit(0)) }
-            backspaceKey
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(background)
-    }
-
-    private static let spelled: [Int: String] = [
-        1: "Uno", 2: "Dos", 3: "Tres", 4: "Cuatro", 5: "Cinco",
-        6: "Seis", 7: "Siete", 8: "Ocho", 9: "Nueve"
-    ]
-
-    private func key(label: String, accessibility: String, action: @escaping () -> Void) -> some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            action()
-        } label: {
-            Text(label)
-                .font(.system(size: 26))
-                .foregroundStyle(palette.label)
-                .frame(maxWidth: .infinity)
-                .frame(height: 46)
-                .background(keyBackground)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibility)
-    }
-
-    private var backspaceKey: some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            onKey(.backspace)
-        } label: {
-            Image(systemName: "delete.left")
-                .font(.system(size: 22))
-                .foregroundStyle(palette.label)
-                .frame(maxWidth: .infinity)
-                .frame(height: 46)
-                .background(backspaceBackground)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Borrar")
-        .onLongPressGesture {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            onClear()
-        }
-    }
-
-    private var keyBackground: some View {
-        RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .fill(scheme == .dark ? palette.surface : Color.white)
-            .shadow(color: .black.opacity(scheme == .dark ? 0 : 0.12), radius: 1, y: 1)
-    }
-
-    private var backspaceBackground: some View {
-        RoundedRectangle(cornerRadius: 11, style: .continuous)
-            .fill(scheme == .dark ? palette.surface : Color(red: 0.835, green: 0.835, blue: 0.859))
-    }
-}

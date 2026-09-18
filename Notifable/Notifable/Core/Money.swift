@@ -152,12 +152,26 @@ enum Money {
         return f.string(from: NSNumber(value: safe)) ?? "—"
     }
 
-    /// Sin decimales, para gráficos y etiquetas compactas.
+    /// Sin decimales, para el monto grande de Resumen, los gráficos y las
+    /// etiquetas compactas.
+    ///
+    /// Agrupa los miles: "S/ 4,945", no "S/ 4945". A 68 pt —el tamaño del
+    /// titular de Hoy— un número de cuatro o cinco cifras sin separador se lee
+    /// como una matrícula, no como dinero.
     static func formatCompact(_ value: Double, currency: String = "PEN") -> String {
         let symbol = currency == "USD" ? "$" : "S/"
         let units = Int((Double(cents(value)) / 100.0).rounded())
-        return symbol + " " + String(units)
+        return symbol + " " + compactFormatter.string(from: NSNumber(value: units))!
     }
+
+    private static let compactFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        f.groupingSeparator = ","
+        f.usesGroupingSeparator = true
+        f.maximumFractionDigits = 0
+        return f
+    }()
 
     /// Porcentaje para pantalla. `nil` (divisor cero) se muestra como "—",
     /// nunca como "nan%". Ver ACCOUNTING.md §13.

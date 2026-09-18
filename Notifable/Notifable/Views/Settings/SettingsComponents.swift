@@ -12,6 +12,8 @@ struct SettingsRow<Destination: View>: View {
     let icon: String
     let tint: Color
     var value: String = ""
+    /// Segunda línea bajo el título («Sólo lectura del correo»).
+    var subtitle: String? = nil
     /// Punto de color delante del valor (el acento actual, en Apariencia).
     var valueDot: Color?
     @ViewBuilder let destination: () -> Destination
@@ -29,9 +31,20 @@ struct SettingsRow<Destination: View>: View {
             HStack(spacing: 12) {
                 SettingsRowIcon(systemName: icon, tint: tint)
 
-                Text(title)
-                    .foregroundStyle(palette.label)
-                    .lineLimit(1)
+                // El título manda sobre el valor: si no cabe todo, se acorta
+                // el valor («1 activo · 1 atajo»), nunca el nombre de la fila.
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .foregroundStyle(palette.label)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.caption)
+                            .foregroundStyle(palette.secondaryLabel)
+                            .lineLimit(1)
+                    }
+                }
 
                 Spacer(minLength: 8)
 
@@ -66,12 +79,15 @@ struct SettingsRowIcon: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(tint.opacity(0.22))
+            // Relleno sólido y glifo blanco (`5a`): con el tinte al 22 % los
+            // colores de sección apenas se distinguían en claro, y el color es
+            // lo que permite encontrar una fila sin leerla.
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(tint)
                 .frame(width: 30, height: 30)
             Image(systemName: systemName)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(tint)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Color.white)
         }
     }
 }

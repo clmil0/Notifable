@@ -25,7 +25,6 @@ struct IncomeDetailsView: View {
     @ScaledAmountFont(40) private var amountSize
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
-    private var themeColor: Color { accent.color }
     private var palette: Palette { Palette(colorScheme) }
 
     var body: some View {
@@ -33,13 +32,14 @@ struct IncomeDetailsView: View {
             ScrollView {
                 VStack(spacing: 20) {
                     header
-                    actionRow
                     properties
                     explanationNote
 
                     if income.isDebtPayment {
                         debtStatusSection
                     }
+
+                    deleteButton
 
                     Spacer(minLength: 24)
                 }
@@ -51,6 +51,9 @@ struct IncomeDetailsView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cerrar") { dismiss() }
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Editar") { showingEditor = true }
                 }
             }
             .sheet(isPresented: $showingDestino) {
@@ -76,150 +79,54 @@ struct IncomeDetailsView: View {
 
     // MARK: - Cabecera
 
+    /// Misma estructura que el gasto (`4f`), para que el par se lea igual.
     private var header: some View {
-        VStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 20, style: .continuous)
-                    .fill(iconColor.opacity(0.2))
-                    .frame(width: 64, height: 64)
-                if isAssetIcon {
-                    Image(iconName)
-                        .resizable()
-                        .scaledToFill()
-                        .frame(width: 32, height: 32)
-                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                } else {
-                    Image(systemName: iconName)
-                        .font(.title2)
-                        .foregroundStyle(iconColor)
-                }
-            }
+        VStack(spacing: 8) {
+            MovementIcon(icon: iconName, color: iconColor, size: 56)
+                .padding(.bottom, 4)
 
+            // Un abono no lleva «+» ni va en verde: no es ingreso, devuelve
+            // lo prestado (`Income.amountSign`).
             Text(income.amountSign + Money.format(income.amount, currency: income.currency))
-                .font(.system(size: amountSize, weight: .bold, design: .rounded))
-                .foregroundStyle(palette.label)
+                .font(.system(size: amountSize, weight: .bold))
+                .tracking(-1)
+                .foregroundStyle(income.isDebtPayment ? palette.label : accent.incomeColor(colorScheme))
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
 
-            Text(subtitle)
-                .font(.headline)
-                .foregroundStyle(palette.secondaryLabel)
+            Text(income.title?.isEmpty == false ? income.title! : income.source)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(palette.label)
                 .multilineTextAlignment(.center)
+
+            Text(subtitle)
+                .font(.system(size: 13))
+                .foregroundStyle(palette.secondaryLabel)
         }
         .padding(.horizontal, 16)
     }
 
+    /// «1 set · Transferencia».
     private var subtitle: String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "es_PE")
-        f.dateFormat = "EEEE d, HH:mm"
-        return (income.title ?? income.source) + " · " + f.string(from: income.date)
+        f.dateFormat = "d MMM"
+        return f.string(from: income.date).replacingOccurrences(of: ".", with: "") + " · " + income.source
     }
 
     private var iconName: String { IncomeStyle.iconAndColor(for: income, accent: accent.incomeFillColor).1 }
     private var iconColor: Color { IncomeStyle.iconAndColor(for: income, accent: accent.incomeFillColor).0 }
-    private var isAssetIcon: Bool {
-        ["plin_icon", "yape_icon", "bbva_icon"].contains(iconName)
-    }
-
-    // MARK: - Acciones
-
-    private var actionRow: some View {
-        HStack(spacing: 12) {
-            actionButton(title: "¿A dónde va?", icon: "mappin.and.ellipse", tint: palette.warning) {
-                showingDestino = true
-            }
-            actionButton(title: "Editar", icon: "pencil", tint: themeColor) {
-                showingEditor = true
-            }
-            actionButton(title: "Eliminar", icon: "trash", tint: palette.negative) {
-                showingDeleteConfirmation = true
-            }
-        }
-        .padding(.horizontal, 16)
-    }
-
-    private func actionButton(title: String, icon: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 20))
-                    .foregroundStyle(tint)
-                Text(title)
-                    .font(.footnote.bold())
-                    .foregroundStyle(palette.label)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(palette.hairline, lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: - Propiedades
 
     private var properties: some View {
         VStack(spacing: 0) {
-            // Título y Fuente sólo se editan desde el botón "Editar" de
-            // arriba: estas filas son de sólo lectura a propósito, para que no
-            // haya dos caminos distintos a la misma edición.
-            propertyRow(title: "Título") {
-                Text(income.title ?? "Sin título")
-                    .foregroundStyle(palette.secondaryLabel)
-            }
-
-            divider
-
-            propertyRow(title: "Fuente") {
-                Text(income.source)
-                    .foregroundStyle(palette.secondaryLabel)
-            }
-
-            divider
-
-            Button { showingEditor = true } label: {
-                propertyRow(title: "Descripción") {
-                    HStack(spacing: 6) {
-                        Text(income.notes?.isEmpty == false ? income.notes! : "Agregar")
-                            .lineLimit(1)
-                            .foregroundStyle(income.notes?.isEmpty == false ? accent.onSurface(colorScheme) : palette.secondaryLabel)
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(palette.secondaryLabel)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-
-            divider
-
-            propertyRow(title: "Origen") {
-                Text(origin)
-                    .foregroundStyle(palette.secondaryLabel)
-            }
-
-            divider
-
-            propertyRow(title: "Moneda") {
-                Text(income.currency == "PEN" ? "Soles (PEN)" : "Dólares (USD)")
-                    .foregroundStyle(palette.secondaryLabel)
-            }
-
-            divider
-
+            // La única fila con decisión, arriba: ingreso libre o abono.
             Button { showingDestino = true } label: {
-                propertyRow(title: "¿Está asignado a una deuda?") {
+                propertyRow(title: "¿A dónde va?", icon: "scope") {
                     HStack(spacing: 6) {
                         Text(destinoValue)
                             .fontWeight(.semibold)
-                            .foregroundStyle(accent.onSurface(colorScheme))
+                            .foregroundStyle(palette.label)
                             .multilineTextAlignment(.trailing)
                         Image(systemName: "chevron.right")
                             .font(.caption2)
@@ -228,23 +135,89 @@ struct IncomeDetailsView: View {
                 }
             }
             .buttonStyle(.plain)
+
+            divider
+
+            // Fuente y fecha sólo se editan desde «Editar»: estas filas son de
+            // lectura a propósito, para que no haya dos caminos a la misma
+            // edición.
+            propertyRow(title: "Fuente", icon: "building.columns") {
+                Text(income.source)
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+
+            divider
+
+            Button { showingEditor = true } label: {
+                propertyRow(title: "Descripción", icon: "text.alignleft") {
+                    HStack(spacing: 6) {
+                        Text(income.notes?.isEmpty == false ? income.notes! : "Sin descripción")
+                            .lineLimit(1)
+                            .foregroundStyle(palette.secondaryLabel)
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(palette.secondaryLabel)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            divider
+
+            propertyRow(title: "Fecha", icon: "calendar") {
+                Text(fullDate)
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+
+            if income.currency != "PEN" {
+                divider
+                propertyRow(title: "Moneda", icon: "dollarsign.circle") {
+                    Text("Dólares (USD)")
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+            }
+
+            if income.emailID != nil {
+                divider
+                propertyRow(title: "Origen", icon: "envelope") {
+                    Text("Correo")
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+            }
         }
         .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
         .padding(.horizontal, 16)
     }
 
+    /// «1 set 2026, 09:12».
+    private var fullDate: String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_PE")
+        f.dateFormat = "d MMM yyyy, HH:mm"
+        return f.string(from: income.date).replacingOccurrences(of: ".", with: "")
+    }
+
+    private var deleteButton: some View {
+        Button(role: .destructive) {
+            showingDeleteConfirmation = true
+        } label: {
+            Label("Borrar ingreso", systemImage: "trash")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(palette.negative)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
+    }
+
     private var destinoValue: String {
         guard let debt = income.debtReference else { return "Ingreso libre" }
         return Accounting.displayName(debt.merchant)
-    }
-
-    private var origin: String {
-        income.emailID == nil ? "Manual" : "Correo"
     }
 
     private var divider: some View {
@@ -254,11 +227,18 @@ struct IncomeDetailsView: View {
             .padding(.leading, 16)
     }
 
-    private func propertyRow<Value: View>(title: String, @ViewBuilder value: () -> Value) -> some View {
-        HStack {
+    private func propertyRow<Value: View>(title: String, icon: String? = nil,
+                                          @ViewBuilder value: () -> Value) -> some View {
+        HStack(spacing: 12) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 15))
+                    .foregroundStyle(palette.secondaryLabel)
+                    .frame(width: 20)
+            }
             Text(title)
                 .foregroundStyle(palette.label)
-            Spacer()
+            Spacer(minLength: 12)
             value()
         }
         .padding(.horizontal, 16)
@@ -301,7 +281,7 @@ struct IncomeDetailsView: View {
                 .frame(height: 8)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .surfaceCard(radius: 16)
+            .surfaceCard(radius: 22)
             .padding(.horizontal, 16)
         }
     }
@@ -309,11 +289,12 @@ struct IncomeDetailsView: View {
     // MARK: - Explicación
 
     private var explanationNote: some View {
-        Text("Un ingreso normal cuenta en tu balance. Un cobro no: sólo reduce lo que te deben.")
-            .font(.footnote)
-            .foregroundStyle(palette.secondaryLabel)
+        ShellNote(icon: "info.circle",
+                  text: income.isDebtPayment
+                      ? "Es un abono a un cobro: no cuenta en tu balance, sólo reduce lo que te deben."
+                      : "Como ingreso libre, cuenta en tu balance del mes. Si lo abonas a un cobro, deja de contar y baja la deuda.")
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 20)
     }
 
     private var deleteNote: String {

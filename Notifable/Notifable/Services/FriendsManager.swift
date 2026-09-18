@@ -409,7 +409,7 @@ final class FriendsManager {
         return UserDefaults.standard.string(forKey: Self.friendCodeKey(uid))
     }
 
-    private static func friendCodeKey(_ uid: String) -> String { "socialFriendCode.\(uid)" }
+    static func friendCodeKey(_ uid: String) -> String { "socialFriendCode.\(uid)" }
 
     private func fetchOrCreateFriendCode(uid: String) async -> String? {
         if let code = await fetchMyFriendCode(uid: uid) { return code }

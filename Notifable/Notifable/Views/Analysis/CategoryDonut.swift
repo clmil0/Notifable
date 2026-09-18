@@ -1,0 +1,129 @@
+import SwiftUI
+
+/// El donut de distribución de Análisis › Categorías (`2d`).
+///
+/// Dibujado a mano y no con Swift Charts: el gráfico necesita el monto del
+/// periodo centrado dentro del anillo, y los colores tienen que salir de
+/// `CategoryStyle` —el mismo que pinta los íconos de cada fila— para que la
+/// porción y el cuadradito de la lista de abajo sean del mismo color. Un
+/// `SectorMark` con su propia escala de color rompería justo eso.
+struct CategoryDonut: View {
+    struct Slice: Identifiable {
+        let category: String
+        let total: Double
+        let color: Color
+        var id: String { category }
+    }
+
+    let slices: [Slice]
+    let centerTitle: String
+    let centerValue: String
+
+    var lineWidth: CGFloat = 19
+    var size: CGFloat = 130
+
+    @Environment(\.colorScheme) private var scheme
+    private var palette: Palette { Palette(scheme) }
+
+    private var total: Double { Money.sum(slices) { $0.total } }
+
+    /// Inicio y fin de cada arco, en fracciones de vuelta.
+    private var arcs: [(slice: Slice, start: Double, end: Double)] {
+        guard Money.cents(total) > 0 else { return [] }
+        var cursor = 0.0
+        return slices.map { slice in
+            let fraction = max(0, slice.total / total)
+            let arc = (slice, cursor, cursor + fraction)
+            cursor += fraction
+            return arc
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            // `inset` mete el anillo dentro del marco: con `stroke` a secas la
+            // mitad del grosor se salía y el donut ocupaba más de lo que medía.
+            Circle()
+                .inset(by: lineWidth / 2)
+                .stroke(palette.track, lineWidth: lineWidth)
+
+            ForEach(arcs, id: \.slice.id) { arc in
+                Circle()
+                    .inset(by: lineWidth / 2)
+                    .trim(from: arc.start, to: max(arc.start, arc.end - 0.004))
+                    .stroke(arc.slice.color,
+                            style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
+            }
+            // El primer arco arranca arriba, no a las tres en punto.
+            .rotationEffect(.degrees(-90))
+
+            VStack(spacing: 1) {
+                Text(centerTitle)
+                    .font(.system(size: 10))
+                    .foregroundStyle(palette.secondaryLabel)
+                Text(centerValue)
+                    .font(.system(size: 19, weight: .bold))
+                    .tracking(-0.5)
+                    .foregroundStyle(palette.label)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+            }
+            .padding(.horizontal, lineWidth + 4)
+        }
+        .rotationEffect(.degrees(-90))
+        .frame(width: size, height: size)
+        // La rotación de arriba gira también el texto del centro; ésta lo
+        // devuelve a su sitio sin tocar los arcos.
+        .rotationEffect(.degrees(90))
+    }
+}
+
+/// La leyenda del donut: nombre y porcentaje, con el punto del color de la
+/// porción. Hace de resumen; el detalle está en la lista de abajo.
+struct DonutLegend: View {
+    let slices: [CategoryDonut.Slice]
+    let total: Double
+    /// A partir de aquí el resto se agrupa en «Otras N».
+    var maxRows: Int = 4
+
+    @Environment(\.colorScheme) private var scheme
+    private var palette: Palette { Palette(scheme) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(slices.prefix(maxRows)) { slice in
+                row(color: slice.color,
+                    name: slice.category,
+                    percent: Money.formatPercent(slice.total, of: total))
+            }
+
+            if slices.count > maxRows {
+                let rest = slices.dropFirst(maxRows)
+                let restTotal = Money.sum(Array(rest)) { $0.total }
+                row(color: palette.tertiaryLabel,
+                    name: "Otras \(rest.count)",
+                    percent: Money.formatPercent(restTotal, of: total),
+                    muted: true)
+            }
+        }
+    }
+
+    private func row(color: Color, name: String, percent: String, muted: Bool = false) -> some View {
+        HStack(spacing: 7) {
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(color)
+                .frame(width: 9, height: 9)
+
+            Text(name)
+                .font(.system(size: 12.5))
+                .foregroundStyle(muted ? palette.secondaryLabel : palette.label)
+                .lineLimit(1)
+
+            Spacer(minLength: 6)
+
+            Text(percent)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(muted ? palette.secondaryLabel : palette.label)
+        }
+    }
+}

@@ -264,14 +264,17 @@ struct AssignCategorySheet: View {
 
     /// La misma fila que la Bandeja (`2d`): si aquí se viera distinta, el
     /// usuario tendría que aprender dos veces qué significa el rayo.
+    /// La sugerencia como acción de un toque (`4g`). En el acento y no en
+    /// verde: el verde de la app significa «dinero que entra», y aquí no entra
+    /// nada — es una propuesta.
     private func suggestionRow(_ suggestion: CategorySuggestion) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "bolt.fill")
                 .font(.footnote.weight(.bold))
-                .foregroundStyle(palette.positive)
+                .foregroundStyle(accent.color)
 
             VStack(alignment: .leading, spacing: 1) {
-                Text(suggestion.category)
+                Text(suggestion.category + " · sugerida")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(palette.label)
                 Text(suggestion.reason)
@@ -288,17 +291,17 @@ struct AssignCategorySheet: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
-                    .background(palette.positive)
+                    .background(accent.color)
                     .clipShape(Capsule())
             }
             .buttonStyle(.plain)
         }
-        .padding(10)
-        .background(palette.positive.opacity(scheme == .dark ? 0.16 : 0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .padding(12)
+        .background(accent.color.opacity(scheme == .dark ? 0.16 : 0.09))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(palette.positive.opacity(0.5), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(accent.color.opacity(0.35), lineWidth: 0.5)
         )
     }
 

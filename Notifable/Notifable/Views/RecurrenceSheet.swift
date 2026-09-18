@@ -156,48 +156,27 @@ struct RecurrenceSheet: View {
 
     // MARK: - Frecuencia
 
-    /// Lista y no `Picker` segmentado: "Cada semana" no cabe en un segmentado,
-    /// y el nativo no admite el color de acento.
+    /// Segmentado con etiquetas cortas (`5h`). La lista de antes existía
+    /// porque «Cada semana» no cabía en un segmento; «Semanal» sí.
     private var frequencyList: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(RecurrenceFrequency.allCases.enumerated()), id: \.element.id) { index, frequency in
-                Button {
-                    withAnimation(.spring(response: 0.28, dampingFraction: 0.85)) {
-                        working.frequency = frequency
-                        if frequency == .weekly && working.weekdays.isEmpty {
-                            working.weekdays = [Period.calendar.component(.weekday, from: Date())]
-                        }
-                    }
-                } label: {
-                    HStack {
-                        Text(frequency.rawValue)
-                            .foregroundStyle(palette.label)
-                        Spacer()
-                        if working.frequency == frequency {
-                            Image(systemName: "checkmark")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundStyle(accent.onSurface(scheme))
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .frame(height: 48)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(working.frequency == frequency ? [.isSelected] : [])
-
-                if index < RecurrenceFrequency.allCases.count - 1 {
-                    Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 16)
-                }
+        ShellSegment(items: RecurrenceFrequency.allCases, selection: frequencyBinding) { frequency in
+            switch frequency {
+            case .never:   return "Nunca"
+            case .weekly:  return "Semanal"
+            case .monthly: return "Mensual"
+            case .yearly:  return "Anual"
             }
         }
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 0.5)
-        )
         .padding(.horizontal, 16)
+    }
+
+    private var frequencyBinding: Binding<RecurrenceFrequency> {
+        Binding(get: { working.frequency }, set: { frequency in
+            working.frequency = frequency
+            if frequency == .weekly && working.weekdays.isEmpty {
+                working.weekdays = [Period.calendar.component(.weekday, from: Date())]
+            }
+        })
     }
 
     // MARK: - Semanal
@@ -398,36 +377,49 @@ struct RecurrenceSheet: View {
 
     // MARK: - Próximas fechas
 
-    /// La verificación de que la regla quedó como el usuario cree.
+    /// La verificación de que la regla quedó como el usuario cree: cuatro
+    /// fechas calculadas en vivo, como hojas de calendario (`5h`).
     private var upcomingCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("PRÓXIMAS FECHAS")
-                .font(.caption)
+                .font(.system(size: 11.5, weight: .bold))
+                .tracking(0.6)
                 .foregroundStyle(palette.secondaryLabel)
-
-            ForEach(Array(upcomingDates.enumerated()), id: \.offset) { index, date in
-                HStack {
-                    Text(longDate(date))
-                        .font(.subheadline)
-                        .foregroundStyle(index == 0 ? palette.label : palette.secondaryLabel)
-                    Spacer()
-                    Text(Money.format(amount, currency: currency))
-                        .font(.subheadline.weight(index == 0 ? .semibold : .regular))
-                        .foregroundStyle(index == 0 ? palette.label : palette.secondaryLabel)
-                }
-            }
+                .padding(.horizontal, 6)
 
             if upcomingDates.isEmpty {
                 Text("Con esta configuración no hay fechas por delante.")
                     .font(.footnote)
                     .foregroundStyle(palette.secondaryLabel)
+                    .padding(.horizontal, 6)
+            } else {
+                HStack(spacing: 8) {
+                    ForEach(Array(upcomingDates.enumerated()), id: \.offset) { index, date in
+                        VStack(spacing: 2) {
+                            Text(shortMonth(date))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(index == 0 ? accent.onSurface(scheme) : palette.secondaryLabel)
+                            Text("\(Period.calendar.component(.day, from: date))")
+                                .font(.system(size: 22, weight: .bold))
+                                .foregroundStyle(palette.label)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(index == 0 ? accent.color.opacity(0.5) : palette.hairline, lineWidth: index == 0 ? 1 : 0.5))
+                    }
+                }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(accent.softFill(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .padding(.horizontal, 16)
+    }
+
+    private func shortMonth(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_PE")
+        f.dateFormat = "MMM"
+        return f.string(from: date).replacingOccurrences(of: ".", with: "").lowercased()
     }
 
     private var upcomingDates: [Date] {
@@ -438,14 +430,7 @@ struct RecurrenceSheet: View {
         let cal = Period.calendar
         let from = cal.startOfDay(for: Date())
         guard let horizon = cal.date(byAdding: .year, value: 2, to: from) else { return [] }
-        return Array(rule.occurrences(in: DateInterval(start: from, end: horizon)).prefix(3))
-    }
-
-    private func longDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
-        f.dateFormat = "EEEE d 'de' MMMM"
-        return f.string(from: date).capitalizedFirst
+        return Array(rule.occurrences(in: DateInterval(start: from, end: horizon)).prefix(4))
     }
 
     // MARK: - Nota de deduplicación

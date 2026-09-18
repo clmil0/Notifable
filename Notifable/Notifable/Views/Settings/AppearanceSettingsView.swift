@@ -21,16 +21,23 @@ struct AppearanceSettingsView: View {
     private var palette: Palette { Palette(scheme, accent: accent, intense: intenseThemeTint) }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 22) {
-                preview
-                colorThemeRow
-                themePicker
-                textSizePicker
-                intenseTintSection
-                categoryColorsSection
+        VStack(spacing: 0) {
+            // Fija arriba y siempre visible (`5b`): cada cambio se ve sin
+            // volver a subir.
+            preview
+                .padding(.vertical, 12)
+                .background(palette.background)
+
+            ScrollView {
+                VStack(spacing: 22) {
+                    colorThemeRow
+                    themePicker
+                    textSizePicker
+                    intenseTintSection
+                    categoryColorsSection
+                }
+                .padding(.vertical, 12)
             }
-            .padding(.vertical, 16)
         }
         .background(palette.background)
         .navigationTitle("Apariencia")
@@ -44,12 +51,20 @@ struct AppearanceSettingsView: View {
         }
     }
 
-    private func sectionTitle(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .foregroundStyle(palette.secondaryLabel)
-            .padding(.horizontal, 20)
-            .frame(maxWidth: .infinity, alignment: .leading)
+    private func sectionTitle(_ text: String, trailing: (String, () -> Void)? = nil) -> some View {
+        HStack {
+            Text(text)
+                .font(.system(size: 11.5, weight: .bold))
+                .tracking(0.6)
+                .foregroundStyle(palette.secondaryLabel)
+            Spacer()
+            if let trailing {
+                Button(trailing.0, action: trailing.1)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(accent.onSurface(scheme))
+            }
+        }
+        .padding(.horizontal, 20)
     }
 
     // MARK: - Vista previa
@@ -71,26 +86,21 @@ struct AppearanceSettingsView: View {
                     }
 
                     Text(Money.format(1842.50))
-                        .font(.system(size: 29, weight: .bold, design: .rounded))
-                        .foregroundStyle(palette.label)
+                        .font(.system(size: 30, weight: .bold))
+                        .foregroundStyle(accent.onSurface(scheme))
                         .padding(.top, 4)
 
                     previewBar
                         .padding(.top, 10)
 
                     HStack(spacing: 6) {
-                        previewChip("Comida 34%", fill: accent.softFill(scheme), ink: accent.onSurface(scheme))
+                        previewChip("Comida 34%", fill: accent.color, ink: .white)
                         previewChip("Ingresos", fill: accent.secondarySoftFill(scheme), ink: accent.secondaryOnSurface(scheme))
                         previewChip("Transporte", fill: palette.track, ink: palette.secondaryLabel)
                     }
                     .padding(.top, 11)
-
-                    previewBanner
-                        .padding(.top, 11)
                 }
                 .padding(14)
-
-                previewTabBar
             }
             .background(palette.surface)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -132,112 +142,42 @@ struct AppearanceSettingsView: View {
             .lineLimit(1)
     }
 
-    private var previewBanner: some View {
-        HStack(spacing: 9) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(accent.color)
-                .frame(width: 26, height: 26)
-                .overlay(
-                    Image(systemName: "tray.full.fill")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white)
-                )
-            VStack(alignment: .leading, spacing: 1) {
-                Text("3 comercios sin clasificar")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(palette.label)
-                Text(Money.format(214.90) + " sin categoría")
-                    .font(.caption2)
-                    .foregroundStyle(palette.secondaryLabel)
-            }
-            Spacer(minLength: 0)
-            Text("Clasificar")
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 9)
-                .padding(.vertical, 4)
-                .background(accent.color)
-                .clipShape(Capsule())
-        }
-        .padding(9)
-        .background(accent.softFill(scheme))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private var previewTabBar: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 5) {
-                Image(systemName: AppTab.home.icon)
-                    .font(.caption2)
-                    .foregroundStyle(.white)
-                    .frame(width: 22, height: 16)
-                    .background(accent.color)
-                    .clipShape(Capsule())
-                Text(AppTab.home.title)
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(accent.onSurface(scheme))
-            }
-            ForEach([AppTab.categories, AppTab.trends], id: \.self) { tab in
-                HStack(spacing: 5) {
-                    Image(systemName: tab.icon)
-                        .font(.caption2)
-                    Text(tab.title)
-                        .font(.caption2)
-                }
-                .foregroundStyle(palette.secondaryLabel)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 9)
-        .background(palette.surfaceElevated.opacity(0.6))
-        .overlay(alignment: .top) {
-            Rectangle().fill(palette.separator).frame(height: 0.5)
-        }
-    }
-
     // MARK: - Tema de color
 
+    /// Los temas son pares de color —gasto e ingreso—, no un swatch suelto
+    /// (`5b`). Tres a la vista: el actual y dos más; el resto en «Ver todos».
     private var colorThemeRow: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("TEMA DE COLOR")
+        let others = AppThemeColor.allCases.filter { $0 != accent }
+        let shown = [accent] + Array(others.prefix(2))
 
-            Button { showsThemeGallery = true } label: {
-                HStack(spacing: 12) {
-                    ThemeSwatch(theme: accent, size: 30)
+        return VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("TEMA DE COLOR", trailing: ("Ver todos", { showsThemeGallery = true }))
 
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(accent.rawValue)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(palette.label)
-                        Text(accent.themeKindLabel + " · \(AppThemeColor.allCases.count) temas disponibles")
-                            .font(.caption)
-                            .foregroundStyle(palette.secondaryLabel)
+            HStack(spacing: 10) {
+                ForEach(shown, id: \.self) { theme in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { appAccentColor = theme.rawValue }
+                    } label: {
+                        VStack(spacing: 6) {
+                            HStack(spacing: -6) {
+                                Circle().fill(theme.color).frame(width: 22, height: 22)
+                                Circle().fill(theme.incomeFillColor).frame(width: 22, height: 22)
+                            }
+                            Text(theme.rawValue)
+                                .font(.system(size: 12.5, weight: theme == accent ? .semibold : .regular))
+                                .foregroundStyle(palette.label)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(theme == accent ? accent.color : palette.hairline, lineWidth: theme == accent ? 1.5 : 0.5))
                     }
-
-                    Spacer(minLength: 8)
-
-                    Text("Ver todos")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(accent.onSurface(scheme))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(accent.softFill(scheme))
-                        .clipShape(Capsule())
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(theme == accent ? [.isSelected] : [])
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 13)
-                .background(palette.surface)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(palette.hairline, lineWidth: 0.5)
-                )
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .padding(.horizontal, 16)
-            .accessibilityLabel("Tema de color: \(accent.rawValue). Ver todos los temas")
         }
     }
 
@@ -245,64 +185,17 @@ struct AppearanceSettingsView: View {
 
     private var themePicker: some View {
         VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("TEMA")
+            sectionTitle("MODO")
 
-            HStack(spacing: 10) {
-                ForEach(AppAppearance.allCases) { option in
-                    Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                            appearanceRaw = option.rawValue
-                        }
-                    } label: {
-                        themeCard(option)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(appearance == option ? [.isSelected] : [])
-                }
+            ShellSegment(items: AppAppearance.allCases, selection: appearanceBinding) { option in
+                option == .system ? "Auto" : option.rawValue
             }
             .padding(.horizontal, 16)
         }
     }
 
-    /// La opción elegida se marca con el tinte del tema, sin borde de color.
-    private func themeCard(_ option: AppAppearance) -> some View {
-        let selected = appearance == option
-
-        return VStack(spacing: 7) {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(sample(option))
-                .frame(height: 40)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .stroke(palette.hairline, lineWidth: 0.5)
-                )
-
-            Text(option.rawValue)
-                .font(.caption.weight(selected ? .semibold : .regular))
-                .foregroundStyle(selected ? accent.onSurface(scheme) : palette.secondaryLabel)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-        }
-        .padding(8)
-        .frame(maxWidth: .infinity)
-        .background(selected ? accent.softFill(scheme) : palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 0.5)
-        )
-    }
-
-    private func sample(_ option: AppAppearance) -> AnyShapeStyle {
-        switch option {
-        case .system:
-            return AnyShapeStyle(LinearGradient(colors: [.white, .black],
-                                                startPoint: .topLeading, endPoint: .bottomTrailing))
-        case .light:
-            return AnyShapeStyle(Color.white)
-        case .dark:
-            return AnyShapeStyle(Color.black)
-        }
+    private var appearanceBinding: Binding<AppAppearance> {
+        Binding(get: { appearance }, set: { appearanceRaw = $0.rawValue })
     }
 
     // MARK: - Tamaño de texto
@@ -311,13 +204,8 @@ struct AppearanceSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             sectionTitle("TAMAÑO DE TEXTO")
 
-            Picker("Tamaño de letra", selection: $appTextSize) {
-                ForEach(AppTextSize.allCases) { size in
-                    Text(size.rawValue).tag(size.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
-            .padding(.horizontal, 16)
+            ShellSegment(items: AppTextSize.allCases.map(\.rawValue), selection: $appTextSize) { $0 }
+                .padding(.horizontal, 16)
 
             Text(appTextSize == AppTextSize.sistema.rawValue
                  ? "Se usa el tamaño de letra que tengas configurado en iOS."
