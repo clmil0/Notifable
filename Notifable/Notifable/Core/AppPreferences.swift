@@ -34,7 +34,11 @@ enum AppPreferences {
         .init(key: "appAppearance", kind: .string, note: "Tema: claro, oscuro o automático"),
         .init(key: "appAccentColor", kind: .string, note: "Color de acento"),
         .init(key: "appTextSize", kind: .string, note: "Tamaño de letra"),
+        .init(key: AppFontDesign.storageKey, kind: .string, note: "Tipo de letra"),
         .init(key: "circularReveal", kind: .bool, note: "Animación al cambiar de tema"),
+        .init(key: AppThemeColor.intenseTintKey, kind: .bool, note: "Tinte intenso del color de acento"),
+        .init(key: AppThemeColor.themedCategoryColorsKey, kind: .bool, note: "Categorías con el color del tema"),
+        .init(key: WidgetSnapshotBuilder.showAmountsKey, kind: .bool, note: "Montos visibles en los widgets"),
 
         // Presupuesto
         .init(key: "monthlyBudget", kind: .double, note: "Presupuesto mensual"),
@@ -72,7 +76,7 @@ enum AppPreferences {
         .init(key: SocialProfileStore.Keys.status, kind: .string, note: "Tu estado en Amigos"),
         .init(key: SocialProfileStore.Keys.avatarEmoji, kind: .string, note: "Emoji de tu avatar en Amigos"),
         .init(key: SocialProfileStore.Keys.bannerIndex, kind: .int, note: "Cabecera de tu perfil en Amigos"),
-        .init(key: SocialProfileStore.Keys.penguin, kind: .string, note: "Tu pingüino en Amigos"),
+        .init(key: SocialProfileStore.Keys.penguin, kind: .string, note: "Tu personaje en Amigos"),
         .init(key: SocialProfileStore.Keys.friendPreferences, kind: .string,
               note: "Apodo, color y qué compartes con cada amigo")
     ]

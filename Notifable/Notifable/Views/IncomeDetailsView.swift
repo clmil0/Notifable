@@ -432,7 +432,7 @@ struct IncomeDestinoSheet: View {
             .foregroundStyle(palette.secondaryLabel)
     }
 
-    /// Lleva a la deuda en Actividad Reciente: Resumen cierra estas hojas,
+    /// Lleva a la deuda en Resumen › Hoy: se cierran estas hojas,
     /// cambia al día del movimiento si hace falta y lo resalta.
     private func linkedDebtRow(_ debt: Expense) -> some View {
         let color = CategoryStyle.color(for: debt.category, accent: accent.color)
@@ -453,7 +453,7 @@ struct IncomeDestinoSheet: View {
                         .foregroundStyle(palette.label)
                         .lineLimit(1)
                     Text(Money.format(debt.amount, currency: debt.currency) + " · "
-                         + debt.date.formatted(.dateTime.day().month()) + " · Ver en Actividad reciente")
+                         + debt.date.formatted(.dateTime.day().month()) + " · Ver en Resumen")
                         .font(.footnote)
                         .foregroundStyle(palette.secondaryLabel)
                         .lineLimit(1)

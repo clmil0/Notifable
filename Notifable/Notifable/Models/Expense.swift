@@ -16,6 +16,9 @@ final class Expense {
     var emailID: String?
     var relatedEmailID: String?
     var isDebt: Bool = false
+    /// La deuda se dio por saldada aunque quedara saldo: lo que no se cobró
+    /// pasa a ser gasto propio. Sólo tiene sentido con `isDebt == false`.
+    var debtSettled: Bool = false
     var cardLastDigits: String?
 
     /// Soles por 1 USD el día del movimiento.
@@ -71,9 +74,41 @@ extension Expense {
     /// cero (ver `debtBand`), lo único que cambia aquí es `isDebt`.
     func toggleDebt(in modelContext: ModelContext) {
         isDebt.toggle()
-        ExpenseEditStore.record(self, isDebt: isDebt)
+        // Volver a marcarla por cobrar reabre la deuda.
+        if isDebt { debtSettled = false }
+        ExpenseEditStore.record(self, isDebt: isDebt, debtSettled: isDebt ? false : nil)
         try? modelContext.save()
+        Self.refreshDebtNotification(in: modelContext)
+    }
 
+    /// «Deuda saldada»: nadie va a devolver lo que falta, así que ese saldo
+    /// queda como gasto propio. Deja de sumar a «por cobrar» igual que al
+    /// desmarcarla, pero la ficha lo muestra en verde y no como pendiente.
+    func settleDebt(in modelContext: ModelContext) {
+        isDebt = false
+        debtSettled = true
+        ExpenseEditStore.record(self, isDebt: false, debtSettled: true)
+        try? modelContext.save()
+        Self.refreshDebtNotification(in: modelContext)
+    }
+
+    /// Borra el gasto. Si vino de un correo, su id queda anotado para que
+    /// «Recuperar borrados» pueda traerlo de vuelta.
+    func deleteRecordingRecovery(in modelContext: ModelContext) {
+        if let emailID {
+            var recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
+            if !recoveryIDs.contains(emailID) {
+                recoveryIDs.append(emailID)
+                UserDefaults.standard.set(recoveryIDs, forKey: "pendingRecoveryIDs")
+            }
+        }
+        let wasDebt = isDebt
+        modelContext.delete(self)
+        try? modelContext.save()
+        if wasDebt { Self.refreshDebtNotification(in: modelContext) }
+    }
+
+    private static func refreshDebtNotification(in modelContext: ModelContext) {
         // Fuera del fotograma en el que la fila empieza a crecer: contar las
         // deudas y reprogramar el aviso es trabajo síncrono que, hecho aquí
         // mismo, se come el primer paso de la animación de alto.

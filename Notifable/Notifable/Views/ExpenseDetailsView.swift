@@ -37,6 +37,12 @@ struct ExpenseDetailsView: View {
     private var themeColor: Color { accent.color }
     private var palette: Palette { Palette(colorScheme) }
 
+    /// Por cobrar, con abonos, o dada por saldada: hay estado de cobro que
+    /// mostrar.
+    private var showsPayments: Bool {
+        expense.isDebt || expense.debtSettled || !(expense.payments ?? []).isEmpty
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -45,7 +51,7 @@ struct ExpenseDetailsView: View {
                     foreignPaymentsWarning
                     properties
 
-                    if expense.isDebt || !(expense.payments ?? []).isEmpty {
+                    if showsPayments {
                         paymentsSection
                             .transition(.opacity)
                     }
@@ -59,7 +65,7 @@ struct ExpenseDetailsView: View {
                 // alto de la sección se anima siempre que el estado cambie,
                 // sin depender de qué transacción disparó el cambio.
                 .animation(.spring(response: 0.4, dampingFraction: 0.86),
-                          value: expense.isDebt || !(expense.payments ?? []).isEmpty)
+                          value: showsPayments)
             }
             .background(palette.background)
             .navigationTitle("Movimiento")
@@ -392,18 +398,35 @@ struct ExpenseDetailsView: View {
     private var paymentsCard: some View {
         let paid = Accounting.paid(of: expense)
         let pending = Accounting.outstanding(of: expense)
-        let ratio = min(Money.ratio(paid, to: expense.amount) ?? 0, 1.0)
+        let settled = !expense.isDebt && expense.debtSettled
+        // Saldada, la barra se llena: lo que no se cobró ya es gasto propio y
+        // no queda nada pendiente.
+        let ratio = settled ? 1.0 : min(Money.ratio(paid, to: expense.amount) ?? 0, 1.0)
 
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
-                Text(expense.isDebt ? "Te deben " + Money.format(pending, currency: expense.currency)
-                                    : pendingLabel(pending).capitalizedFirst)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(expense.isDebt ? palette.label : pendingColor(pending))
+                if settled {
+                    Label("Deuda saldada", systemImage: "checkmark.seal.fill")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(palette.positive)
+                } else {
+                    Text(expense.isDebt ? "Te deben " + Money.format(pending, currency: expense.currency)
+                                        : pendingLabel(pending).capitalizedFirst)
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(expense.isDebt ? palette.label : pendingColor(pending))
+                }
                 Spacer()
                 Text("de " + Money.format(expense.amount, currency: expense.currency))
                     .font(.system(size: 13))
                     .foregroundStyle(palette.secondaryLabel)
+            }
+
+            if settled, Money.cents(pending) > 0 {
+                Text("Los " + Money.format(pending, currency: expense.currency)
+                     + " que no se cobraron quedan como gasto tuyo.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondaryLabel)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             GeometryReader { geo in
@@ -448,6 +471,19 @@ struct ExpenseDetailsView: View {
                 }
                 .buttonStyle(.plain)
                 .transition(.opacity)
+
+                // Cerrar la deuda con saldo: nadie va a devolver el resto.
+                Button { settleDebt() } label: {
+                    Label("Deuda saldada", systemImage: "checkmark.seal")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(palette.positive)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .background(palette.positive.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -486,16 +522,14 @@ struct ExpenseDetailsView: View {
         }
     }
 
-    private func delete() {
-        if let emailID = expense.emailID {
-            var recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
-            if !recoveryIDs.contains(emailID) {
-                recoveryIDs.append(emailID)
-                UserDefaults.standard.set(recoveryIDs, forKey: "pendingRecoveryIDs")
-            }
+    private func settleDebt() {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+            expense.settleDebt(in: modelContext)
         }
-        modelContext.delete(expense)
-        try? modelContext.save()
+    }
+
+    private func delete() {
+        expense.deleteRecordingRecovery(in: modelContext)
         dismiss()
     }
 }

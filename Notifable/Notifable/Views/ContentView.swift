@@ -46,6 +46,9 @@ struct ContentView: View {
     @StateObject private var appLock = AppLock.shared
     @State private var tabWidth: CGFloat = 0
     @State private var scrollToTopTrigger: Bool = false
+    /// Un movimiento que Resumen › Hoy debe mostrar y resaltar
+    /// (`ActivityFocus`).
+    @State private var focusRequest: ActivityFocus.Request?
     @State private var themeButtonCenter: CGPoint = CGPoint(x: UIScreen.main.bounds.width - 80, y: 60)
     
     
@@ -191,6 +194,10 @@ struct ContentView: View {
                                    progress: scrollProgress,
                                    isAddMenuOpen: showAddPicker,
                                    isDictating: showsDictation,
+                                   badge: { tab in
+                                       let requests = FriendsManager.shared.incomingRequests.count
+                                       return tab == .social && requests > 0 ? requests : nil
+                                   },
                                    onReselect: reselect,
                                    onAdd: {
                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
@@ -219,6 +226,11 @@ struct ContentView: View {
                 showAddPicker = false
             }
             .gmailLinkFlow(isEnabled: !showSettings)
+            // Las solicitudes de amistad pintan un número en la pestaña
+            // Social: se piden al abrir, sin esperar a que se visite.
+            .task {
+                if SupabaseAuthManager.shared.isReady { await FriendsManager.shared.refresh() }
+            }
             .fullScreenCover(isPresented: $showSettings) {
                 SettingsView()
             }
@@ -241,6 +253,12 @@ struct ContentView: View {
                 applyPendingLinkIfReady()
             }
             .onChange(of: appLock.isLocked) { _, _ in applyPendingLinkIfReady() }
+            .onReceive(NotificationCenter.default.publisher(for: ActivityFocus.notification)) { note in
+                guard let request = ActivityFocus.request(from: note) else { return }
+                focusRequest = request
+                selectedTab = .summary
+                summarySub = .today
+            }
             .onChange(of: showSplash) { _, _ in applyPendingLinkIfReady() }
             
             // Blindaje instantáneo: montado siempre, sin `.task` ni
@@ -311,7 +329,8 @@ struct ContentView: View {
         case .summary:
             switch summarySub {
             case .today:
-                TodayScreen(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
+                TodayScreen(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress,
+                            focus: $focusRequest)
             case .movements:
                 MovementsView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
             case .balance:

@@ -84,6 +84,21 @@ final class DictationSession: ObservableObject {
         }
     }
 
+    /// «Listo». Si hay algo dicho que todavía no se entendió, eso marca el
+    /// final del movimiento: se interpreta ya, su tarjeta aparece y se sigue
+    /// escuchando. Si no queda nada por entender, devuelve `true` y la hoja se
+    /// cierra (lo que estaba contando se registra en `finish`).
+    func done() -> Bool {
+        if isThinking { return false }
+        let spoken = speech.takePhrase()
+        let pending = [story, spoken ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
+        guard !pending.isEmpty else { return true }
+        patience?.cancel()
+        story = ""
+        process(pending)
+        return false
+    }
+
     // MARK: - Frases
 
     private func enqueue(_ text: String) {
@@ -109,11 +124,19 @@ final class DictationSession: ObservableObject {
         process(combined)
     }
 
+    /// Frases en cola o interpretándose. Mientras haya alguna, «Listo» no
+    /// cierra: se perdería el movimiento que está por aparecer.
+    private var inFlight = 0 {
+        didSet { isThinking = inFlight > 0 }
+    }
+
     private func process(_ text: String) {
+        inFlight += 1
         let previous = queue
         queue = Task { [weak self] in
             await previous?.value
             await self?.handle(text)
+            self?.inFlight -= 1
         }
     }
 
@@ -145,9 +168,7 @@ final class DictationSession: ObservableObject {
             }
         }
 
-        isThinking = true
         let movements = await VoiceMovementAI.parse(text, categories: categories)
-        isThinking = false
         guard !movements.isEmpty else { return }
 
         // Algo nuevo reemplaza a la pregunta que no se contestó.

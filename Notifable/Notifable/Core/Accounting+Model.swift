@@ -93,6 +93,18 @@ extension Accounting {
         Money.value(penCents(expense.accountingSnapshot, fallbackRate: fallbackRate))
     }
 
+    /// Lo que un gasto te costó de verdad, en soles: su importe menos lo que
+    /// te devolvieron. Es el mismo criterio de `PeriodTotals.spent`; cualquier
+    /// suma de gastos debe usar ésta y no `amountInPEN`, o un gasto con
+    /// devolución cuenta entero aunque su fila muestre el neto.
+    static func netCostInPEN(_ expense: Expense, fallbackRate: Double) -> Double {
+        let snapshot = expense.accountingSnapshot
+        return Money.value(penCents(amount: netCost(of: snapshot),
+                                    currency: snapshot.currency,
+                                    fxRateAtCapture: snapshot.fxRateAtCapture,
+                                    fallbackRate: fallbackRate))
+    }
+
     static func amountInPEN(_ income: Income, fallbackRate: Double) -> Double {
         Money.value(penCents(income.accountingSnapshot, fallbackRate: fallbackRate))
     }

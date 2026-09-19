@@ -30,7 +30,8 @@ struct AssignCategoryContext: Equatable, Identifiable {
     enum RuleScope: Equatable {
         /// "No volver a preguntar": regla para lo que llegue, apagado por defecto.
         case forward
-        /// "Asignar también los anteriores": encendido por defecto.
+        /// "Asignar también los anteriores": apagado por defecto; reclasificar
+        /// el historial es algo que se pide, no que se descubre después.
         case past
     }
 
@@ -202,10 +203,7 @@ struct AssignCategorySheet: View {
 
     private func prepare() {
         selected = context.current
-        switch context.ruleScope {
-        case .forward: ruleEnabled = false
-        case .past: ruleEnabled = context.merchant != nil
-        }
+        ruleEnabled = false
     }
 
     // MARK: - Cabecera

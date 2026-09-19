@@ -18,6 +18,8 @@ struct TodayView: View {
     /// cambiarlo tiene que volver a construir las consultas, y eso sólo pasa
     /// si el `init` se vuelve a llamar con otro valor.
     @Binding var monthOffset: Int
+    /// Movimiento a mostrar y resaltar unos segundos (`ActivityFocus`).
+    @Binding var focus: ActivityFocus.Request?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
@@ -37,10 +39,12 @@ struct TodayView: View {
     @Query private var incomes: [Income]
     @StateObject private var rates = ExchangeRateService.shared
 
-    init(scrollToTopTrigger: Binding<Bool>, progress: ScrollProgress, monthOffset: Binding<Int>) {
+    init(scrollToTopTrigger: Binding<Bool>, progress: ScrollProgress, monthOffset: Binding<Int>,
+         focus: Binding<ActivityFocus.Request?>) {
         self._scrollToTopTrigger = scrollToTopTrigger
         self.progress = progress
         self._monthOffset = monthOffset
+        self._focus = focus
 
         let shown = Self.month(offset: monthOffset.wrappedValue)
         self.month = shown
@@ -58,6 +62,8 @@ struct TodayView: View {
     @State private var selectedExpense: Expense?
     @State private var selectedIncome: Income?
     @State private var expenseToCategorize: Expense?
+    @State private var scrollTarget: UUID?
+    @State private var highlighted: UUID?
 
     private var palette: Palette { Palette(scheme) }
     private var accent: AppThemeColor { .current }
@@ -104,7 +110,7 @@ struct TodayView: View {
             let items = (buckets[day] ?? []).sorted { $0.date > $1.date }
             let spent = Money.sum(items.compactMap { item -> Double? in
                 guard case .expense(let e) = item else { return nil }
-                return Accounting.amountInPEN(e, fallbackRate: rate)
+                return Accounting.netCostInPEN(e, fallbackRate: rate)
             })
             return DayGroup(day: day, items: items, spent: spent)
         }
@@ -120,7 +126,7 @@ struct TodayView: View {
         let totals = self.totals
         let previousSpent = previousTotals.spent
 
-        TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
+        TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger, scrollTarget: $scrollTarget) {
             VStack(spacing: 0) {
                 hero(totals: totals, previousSpent: previousSpent)
 
@@ -157,6 +163,26 @@ struct TodayView: View {
             geometry.contentOffset.y + geometry.contentInsets.top
         } action: { _, offset in
             progress.update(offset)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ActivityFocus.notification)) { _ in
+            selectedExpense = nil
+            selectedIncome = nil
+        }
+        .task(id: focus) {
+            guard let request = focus else { return }
+            // Espera a que bajen las hojas y a que el mes (si cambió) cargue:
+            // desplazarse con la hoja todavía encima no se ve.
+            try? await Task.sleep(for: .milliseconds(650))
+            guard !Task.isCancelled else { return }
+            focus = nil
+            scrollTarget = request.id
+            withAnimation(.easeInOut(duration: 0.25)) { highlighted = request.id }
+        }
+        .task(id: highlighted) {
+            guard highlighted != nil else { return }
+            try? await Task.sleep(for: .seconds(2.5))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.4)) { highlighted = nil }
         }
         .sheet(item: $selectedExpense) { ExpenseDetailsView(expense: $0) }
         .sheet(item: $selectedIncome) { IncomeDetailsView(income: $0) }
@@ -328,15 +354,18 @@ struct TodayView: View {
 
             MovementCard {
                 ForEach(Array(group.items.enumerated()), id: \.element.id) { index, item in
-                    switch item {
-                    case .expense(let expense):
-                        MovementRow(expense: expense,
-                                    onTap: { selectedExpense = expense },
-                                    onAssignCategory: { expenseToCategorize = expense },
-                                    onEdit: { selectedExpense = expense })
-                    case .income(let income):
-                        IncomeRow(income: income, onTap: { selectedIncome = income })
+                    SwiftUI.Group {
+                        switch item {
+                        case .expense(let expense):
+                            MovementRow(expense: expense,
+                                        onTap: { selectedExpense = expense },
+                                        onAssignCategory: { expenseToCategorize = expense })
+                        case .income(let income):
+                            IncomeRow(income: income, onTap: { selectedIncome = income })
+                        }
                     }
+                    .background(highlightBackground(for: item.id))
+                    .id(item.id)
 
                     if index < group.items.count - 1 {
                         MovementSeparator()
@@ -344,6 +373,17 @@ struct TodayView: View {
                 }
             }
         }
+    }
+
+    private func highlightBackground(for id: UUID) -> some View {
+        let isOn = highlighted == id
+        return RoundedRectangle(cornerRadius: 18, style: .continuous)
+            .fill(accent.color.opacity(isOn ? 0.18 : 0))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(accent.color.opacity(isOn ? 0.9 : 0), lineWidth: 1.5)
+            )
+            .padding(2)
     }
 
     // MARK: - Vacíos
@@ -447,11 +487,30 @@ struct TodayScreen: View {
     @Binding var scrollToTopTrigger: Bool
     let progress: ScrollProgress
 
+    @Binding var focus: ActivityFocus.Request?
+
     @State private var monthOffset = 0
 
     var body: some View {
         TodayView(scrollToTopTrigger: $scrollToTopTrigger,
                   progress: progress,
-                  monthOffset: $monthOffset)
+                  monthOffset: $monthOffset,
+                  focus: $focus)
+            .onChange(of: focus, initial: true) { _, request in
+                // El movimiento puede ser de un mes anterior: Hoy sólo monta
+                // el mes que muestra.
+                guard let request else { return }
+                let offset = Self.offset(for: request.date)
+                if offset != monthOffset { monthOffset = offset }
+            }
+    }
+
+    /// Cuántos meses hay entre hoy y `date`.
+    private static func offset(for date: Date) -> Int {
+        let calendar = Calendar.current
+        let now = calendar.dateComponents([.year, .month], from: Date())
+        let then = calendar.dateComponents([.year, .month], from: date)
+        let months = ((now.year ?? 0) - (then.year ?? 0)) * 12 + ((now.month ?? 0) - (then.month ?? 0))
+        return max(0, months)
     }
 }

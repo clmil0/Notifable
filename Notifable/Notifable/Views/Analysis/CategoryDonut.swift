@@ -16,10 +16,11 @@ struct CategoryDonut: View {
     }
 
     let slices: [Slice]
-    let centerTitle: String
-    let centerValue: String
+    /// Igual que en `DonutLegend`: a partir de aquí el resto se junta en una
+    /// sola porción gris, para que el anillo se lea de un vistazo.
+    var maxSlices: Int = 4
 
-    var lineWidth: CGFloat = 19
+    var lineWidth: CGFloat = 34
     var size: CGFloat = 130
 
     @Environment(\.colorScheme) private var scheme
@@ -27,11 +28,22 @@ struct CategoryDonut: View {
 
     private var total: Double { Money.sum(slices) { $0.total } }
 
+    /// Las primeras `maxSlices` y, si sobran, «Otras» con el resto.
+    private var visibleSlices: [Slice] {
+        guard slices.count > maxSlices else { return slices }
+        let rest = slices.dropFirst(maxSlices)
+        return Array(slices.prefix(maxSlices)) + [
+            Slice(category: "Otras",
+                  total: Money.sum(Array(rest)) { $0.total },
+                  color: palette.tertiaryLabel)
+        ]
+    }
+
     /// Inicio y fin de cada arco, en fracciones de vuelta.
     private var arcs: [(slice: Slice, start: Double, end: Double)] {
         guard Money.cents(total) > 0 else { return [] }
         var cursor = 0.0
-        return slices.map { slice in
+        return visibleSlices.map { slice in
             let fraction = max(0, slice.total / total)
             let arc = (slice, cursor, cursor + fraction)
             cursor += fraction
@@ -54,27 +66,10 @@ struct CategoryDonut: View {
                     .stroke(arc.slice.color,
                             style: StrokeStyle(lineWidth: lineWidth, lineCap: .butt))
             }
-            // El primer arco arranca arriba, no a las tres en punto.
-            .rotationEffect(.degrees(-90))
-
-            VStack(spacing: 1) {
-                Text(centerTitle)
-                    .font(.system(size: 10))
-                    .foregroundStyle(palette.secondaryLabel)
-                Text(centerValue)
-                    .font(.system(size: 19, weight: .bold))
-                    .tracking(-0.5)
-                    .foregroundStyle(palette.label)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.5)
-            }
-            .padding(.horizontal, lineWidth + 4)
         }
+        // El primer arco arranca arriba, no a las tres en punto.
         .rotationEffect(.degrees(-90))
         .frame(width: size, height: size)
-        // La rotación de arriba gira también el texto del centro; ésta lo
-        // devuelve a su sitio sin tocar los arcos.
-        .rotationEffect(.degrees(90))
     }
 }
 

@@ -4,19 +4,14 @@ import Security
 /// Sesión de Supabase para Amigos. Decide **quién eres** para `auth.uid()` y,
 /// con eso, de quién son las amistades, los compartidos y el código de amigo.
 ///
-/// Dos identidades posibles, en este orden:
+/// Amigos exige **la cuenta de Google** (`BackupAccount`, la misma del
+/// respaldo de configuración): no cambia al reinstalar ni al cambiar de
+/// teléfono, y una cuenta real no se puede fabricar en masa como una sesión
+/// anónima (ver `agrupay_friends_v9_private_invites.sql`).
 ///
-/// 1. **La cuenta de Google** (`BackupAccount`, la misma del respaldo de
-///    configuración). No cambia al reinstalar ni al cambiar de teléfono. La
-///    primera vez, `adopt_social_identity` le pasa todo lo del perfil anónimo
-///    anterior (ver `agrupay_friends_v6_google_identity.sql`).
-/// 2. **Una sesión anónima**, sólo para quien nunca conectó Google. Vive en el
-///    Llavero, que sobrevive a borrar la app; antes vivía en UserDefaults y
-///    cada reinstalación creaba una persona nueva sin amigos.
-///
-/// Una vez que el teléfono usó la cuenta de Google para Amigos, ya no vuelve a
-/// crear sesiones anónimas: si Google no responde, Amigos espera en vez de
-/// empezar de cero con otra identidad.
+/// La sesión anónima de versiones anteriores ya no identifica a nadie: sólo
+/// se conserva (en el Llavero) para firmar el vale con el que
+/// `adopt_social_identity` pasa sus amigos a la cuenta de Google.
 ///
 /// Comparte proyecto de Supabase con `SyncManager` (Views/SocialView.swift),
 /// pero no su tabla: Amigos nunca sube movimientos ni comercios, sólo los
@@ -71,11 +66,11 @@ final class SupabaseAuthManager {
         if let linked = linkedGoogleUserID, BackupAccount.shared.userID == linked {
             userID = linked
             isReady = true
-        } else if linkedGoogleUserID == nil, let anonUserID, anonAccessToken != nil {
-            userID = anonUserID
-            isReady = true
         }
     }
+
+    /// Sin cuenta de Google conectada no hay Amigos: la pantalla lo explica.
+    private(set) var needsGoogleAccount = false
 
     // MARK: - Entrar
 
@@ -86,14 +81,13 @@ final class SupabaseAuthManager {
     func ensureSession(defaultName: String) async -> Bool {
         if await resolveGoogleIdentity() {
             userID = linkedGoogleUserID
-        } else if linkedGoogleUserID != nil {
-            // Ya se enlazó Google en este teléfono: no se crea otra persona.
-            print("Amigos: la cuenta de Google no respondió; se reintenta al volver a abrir Amigos.")
+            needsGoogleAccount = false
+        } else {
+            let account = BackupAccount.shared
+            needsGoogleAccount = !account.isSignedIn && !account.canSignInSilently
+            print("Amigos: sin cuenta de Google lista; se reintenta al volver a abrir Amigos.")
             isReady = false
             return false
-        } else {
-            if anonAccessToken == nil { await signInAnonymously() }
-            userID = anonUserID
         }
 
         let token = await validAccessToken()
@@ -130,16 +124,12 @@ final class SupabaseAuthManager {
 
         linkedGoogleUserID = googleID
         clearAnonymousSession()
-        if let code = result.code {
-            UserDefaults.standard.set(code, forKey: FriendsManager.friendCodeKey(googleID))
-        }
         print("Amigos: identidad de Google lista (\(result.merged) perfil(es) adoptado(s)).")
         return true
     }
 
     private struct AdoptResult: Decodable {
         let merged: Int
-        let code: String?
     }
 
     private func adopt(linkToken: String?) async -> AdoptResult? {
@@ -175,7 +165,7 @@ final class SupabaseAuthManager {
     // MARK: - Perfil propio
 
     /// Si el servidor ya tiene mi perfil (reinstalación, otro teléfono), manda
-    /// el servidor: se baja nombre, estado, emoji y pingüino. Antes se subía
+    /// el servidor: se baja nombre, estado, emoji y personaje. Antes se subía
     /// el nombre local, y en un teléfono recién instalado ese nombre era
     /// "Amigo" y pisaba el de verdad. Si no hay perfil, se crea con lo local.
     private func syncOwnProfile(defaultName: String) async {
@@ -188,7 +178,9 @@ final class SupabaseAuthManager {
             }
             if let status = remote.status { store.status = status }
             if let emoji = remote.avatar_emoji { store.avatarEmoji = emoji.isEmpty ? nil : emoji }
-            if let penguin = remote.penguin { store.penguin = penguin }
+            // `avatar` trae el personaje completo; `penguin`, lo que
+            // entienden las versiones que sólo saben de pingüinos.
+            if let look = remote.avatar ?? remote.penguin { store.penguin = look }
             return
         }
         if displayName == nil { displayName = defaultName }
@@ -200,6 +192,7 @@ final class SupabaseAuthManager {
         let status: String?
         let avatar_emoji: String?
         let penguin: PenguinLook?
+        let avatar: PenguinLook?
     }
 
     private func fetchOwnProfile() async -> OwnProfile? {
@@ -219,7 +212,7 @@ final class SupabaseAuthManager {
     }
 
     /// Nombre, estado y emoji de una vez: es lo que guarda el modal de perfil.
-    /// El pingüino (`SocialProfileStore.penguin`) va con los demás campos.
+    /// El personaje (`SocialProfileStore.penguin`) va con los demás campos.
     func updateProfile(name: String, status: String, avatarEmoji: String?) async {
         displayName = name
         SocialProfileStore.shared.displayName = name
@@ -252,10 +245,24 @@ final class SupabaseAuthManager {
             "status": sentStatus, "avatar_emoji": sentEmoji ?? ""
         ]
         if supportsProfileExtras && supportsPenguin,
-           let data = try? JSONEncoder().encode(store.penguin),
-           let penguin = try? JSONSerialization.jsonObject(with: data) {
+           let full = Self.json(store.penguin),
+           let legacy = Self.json(store.penguin.legacyPenguin) {
             var withPenguin = extended
-            withPenguin["penguin"] = penguin
+            if supportsAvatar {
+                // Una versión anterior lee `penguin` y dibuja un pingüino; la
+                // de ahora lee `avatar`, con especie y objetos.
+                var withAvatar = extended
+                withAvatar["penguin"] = legacy
+                withAvatar["avatar"] = full
+                let code = await postProfile(fields: withAvatar)
+                if Self.isSuccess(code) { return }
+                guard code == 400 else { return }
+                supportsAvatar = false
+                print("Amigos: `profiles` todavía no tiene `avatar` (agrupay_friends_v7_avatar.sql).")
+            }
+            // Sin `avatar`, el personaje entero va en `penguin`: las versiones
+            // anteriores ignoran los campos que no conocen.
+            withPenguin["penguin"] = full
             let code = await postProfile(fields: withPenguin)
             if Self.isSuccess(code) { return }
             guard code == 400 else { return }
@@ -281,6 +288,14 @@ final class SupabaseAuthManager {
     /// `false` mientras `profiles` no tenga la columna `penguin`.
     private var supportsPenguin = true
 
+    /// `false` mientras `profiles` no tenga la columna `avatar`.
+    private var supportsAvatar = true
+
+    private static func json(_ look: PenguinLook) -> Any? {
+        guard let data = try? JSONEncoder().encode(look) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+
     /// El código HTTP con el que respondió el servidor, `nil` sin sesión o
     /// sin red. El `id` se pone aquí, que es donde se sabe que hay sesión.
     private func postProfile(fields: [String: Any]) async -> Int? {
@@ -304,11 +319,8 @@ final class SupabaseAuthManager {
     /// Todo lo que hable con Supabase desde Amigos (REST y Realtime) pasa por
     /// aquí, no por un token guardado: el JWT dura una hora.
     func validAccessToken() async -> String? {
-        guard let userID else { return nil }
-        if userID == linkedGoogleUserID {
-            return await BackupAccount.shared.validAccessToken()
-        }
-        return await validAnonymousAccessToken()
+        guard let userID, userID == linkedGoogleUserID else { return nil }
+        return await BackupAccount.shared.validAccessToken()
     }
 
     /// Base para que `FriendsManager` arme sus propias peticiones REST/RPC
@@ -330,37 +342,6 @@ final class SupabaseAuthManager {
     var baseURL: String { projectURL }
 
     // MARK: - Sesión anónima
-
-    private func signInAnonymously() async {
-        guard let url = URL(string: "\(projectURL)/auth/v1/signup") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.addValue(apiKey, forHTTPHeaderField: "apikey")
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: [String: String]())
-
-        struct AuthResponse: Decodable {
-            let access_token: String
-            let refresh_token: String
-            let user: UserPayload
-            struct UserPayload: Decodable { let id: String }
-        }
-
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                print("Amigos: no se pudo crear la sesión anónima. ¿Activaste 'Anonymous sign-ins' en Supabase Auth?")
-                return
-            }
-            let decoded = try JSONDecoder().decode(AuthResponse.self, from: data)
-            anonUserID = decoded.user.id
-            anonAccessToken = decoded.access_token
-            anonRefreshToken = decoded.refresh_token
-            saveAnonymousSession()
-        } catch {
-            print("Amigos: error de red creando sesión anónima: \(error)")
-        }
-    }
 
     private func validAnonymousAccessToken() async -> String? {
         if let anonAccessToken, !Self.isExpired(anonAccessToken) { return anonAccessToken }
@@ -419,10 +400,10 @@ final class SupabaseAuthManager {
     /// Del Llavero; si no está, de UserDefaults (versiones anteriores), y se
     /// muda al Llavero para que la próxima reinstalación la encuentre.
     private func loadAnonymousSession() {
-        if let id = Keychain.read(Keys.anonUserID), let refresh = Keychain.read(Keys.anonRefreshToken) {
+        if let id = amigosStore.read(Keys.anonUserID), let refresh = amigosStore.read(Keys.anonRefreshToken) {
             anonUserID = id
             anonRefreshToken = refresh
-            anonAccessToken = Keychain.read(Keys.anonAccessToken)
+            anonAccessToken = amigosStore.read(Keys.anonAccessToken)
             return
         }
         let d = UserDefaults.standard
@@ -435,9 +416,9 @@ final class SupabaseAuthManager {
     }
 
     private func saveAnonymousSession() {
-        Keychain.write(anonUserID, for: Keys.anonUserID)
-        Keychain.write(anonAccessToken, for: Keys.anonAccessToken)
-        Keychain.write(anonRefreshToken, for: Keys.anonRefreshToken)
+        amigosStore.write(anonUserID, for: Keys.anonUserID)
+        amigosStore.write(anonAccessToken, for: Keys.anonAccessToken)
+        amigosStore.write(anonRefreshToken, for: Keys.anonRefreshToken)
         let d = UserDefaults.standard
         [Keys.anonUserID, Keys.anonAccessToken, Keys.anonRefreshToken].forEach { d.removeObject(forKey: $0) }
     }
@@ -451,36 +432,9 @@ final class SupabaseAuthManager {
     }
 }
 
-/// Lo mínimo del Llavero para tres textos. `AfterFirstUnlock`: Realtime y los
-/// intents pueden pedir el token con el teléfono bloqueado.
-private enum Keychain {
-    private static let service = "clmilo.Notifable.amigos"
-
-    static func read(_ key: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func write(_ value: String?, for key: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: key
-        ]
-        SecItemDelete(query as CFDictionary)
-        guard let value else { return }
-        var attributes = query
-        attributes[kSecValueData as String] = Data(value.utf8)
-        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(attributes as CFDictionary, nil)
-    }
-}
+/// La sesión anónima de Amigos. `AfterFirstUnlock` (sin `ThisDeviceOnly`):
+/// Realtime y los intents piden el token con el teléfono bloqueado, y esta
+/// identidad tiene que sobrevivir a reinstalar y a cambiar de teléfono con
+/// un respaldo cifrado — si se pierde, se pierden los amigos.
+private let amigosStore = SecureStore(service: "clmilo.Notifable.amigos",
+                                   accessible: kSecAttrAccessibleAfterFirstUnlock)

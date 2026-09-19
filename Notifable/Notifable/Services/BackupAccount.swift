@@ -24,12 +24,14 @@ final class BackupAccount {
     private let projectURL = "https://zjzzqaeusmxmtszgdncl.supabase.co"
     private let apiKey = "sb_publishable_NVM2GcvxZFmf0VLNbaBr7A_y_8EMS97"
 
-    private enum Keys {
+    enum Keys {
+        // `UserDefaults`: no abren nada por sí solos.
         static let userID = "backupAccountUserID"
         static let email = "backupAccountEmail"
-        static let accessToken = "backupAccountAccessToken"
-        static let refreshToken = "backupAccountRefreshToken"
         static let expiresAt = "backupAccountExpiresAt"
+        // `SecureStore.backup`.
+        static let accessToken = "accessToken"
+        static let refreshToken = "refreshToken"
     }
 
     private(set) var userID: String?
@@ -46,11 +48,12 @@ final class BackupAccount {
     var canSignInSilently: Bool { GmailAuthService.shared.hasIdentityToken }
 
     private init() {
+        CredentialMigration.runIfNeeded()
         let d = UserDefaults.standard
         userID = d.string(forKey: Keys.userID)
         email = d.string(forKey: Keys.email)
-        accessToken = d.string(forKey: Keys.accessToken)
-        refreshToken = d.string(forKey: Keys.refreshToken)
+        accessToken = SecureStore.backup.read(Keys.accessToken)
+        refreshToken = SecureStore.backup.read(Keys.refreshToken)
         expiresAt = d.object(forKey: Keys.expiresAt) as? Date
     }
 
@@ -160,9 +163,9 @@ final class BackupAccount {
         let d = UserDefaults.standard
         d.set(userID, forKey: Keys.userID)
         d.set(email, forKey: Keys.email)
-        d.set(accessToken, forKey: Keys.accessToken)
-        d.set(refreshToken, forKey: Keys.refreshToken)
         d.set(expiresAt, forKey: Keys.expiresAt)
+        SecureStore.backup.write(accessToken, for: Keys.accessToken)
+        SecureStore.backup.write(refreshToken, for: Keys.refreshToken)
     }
 
     func signOut() {
@@ -172,8 +175,8 @@ final class BackupAccount {
         refreshToken = nil
         expiresAt = nil
         let d = UserDefaults.standard
-        [Keys.userID, Keys.email, Keys.accessToken, Keys.refreshToken, Keys.expiresAt]
-            .forEach { d.removeObject(forKey: $0) }
+        [Keys.userID, Keys.email, Keys.expiresAt].forEach { d.removeObject(forKey: $0) }
+        SecureStore.backup.removeAll()
     }
 
     // MARK: - Token vivo

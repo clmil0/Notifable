@@ -62,6 +62,7 @@ struct DiagnosticsView: View {
             HStack {
                 Text(url.deletingPathExtension().lastPathComponent)
                     .font(.footnote.monospaced())
+                    .fontDesign(.monospaced)
                     .lineLimit(1)
                 Spacer()
                 if badge > 0 {
@@ -92,6 +93,7 @@ private struct DiagnosticFileView: View {
         ScrollView([.vertical, .horizontal]) {
             Text(text)
                 .font(.caption2.monospaced())
+                .fontDesign(.monospaced)
                 .textSelection(.enabled)
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)

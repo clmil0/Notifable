@@ -60,7 +60,7 @@ struct BulkClassifyView: View {
             for expense in unclassified { grouped[expense.merchant, default: []].append(expense) }
             return grouped.map { merchant, items in
                 Row(id: merchant, merchant: merchant, expenses: items,
-                    total: Money.sum(items) { Accounting.amountInPEN($0, fallbackRate: rate) },
+                    total: Money.sum(items) { Accounting.netCostInPEN($0, fallbackRate: rate) },
                     suggestion: suggest(merchant))
             }
             .sorted { Money.cents($0.total) > Money.cents($1.total) }
@@ -68,7 +68,7 @@ struct BulkClassifyView: View {
         case .byDate:
             return unclassified.map { expense in
                 Row(id: expense.id.uuidString, merchant: expense.merchant, expenses: [expense],
-                    total: Accounting.amountInPEN(expense, fallbackRate: rate),
+                    total: Accounting.netCostInPEN(expense, fallbackRate: rate),
                     suggestion: suggest(expense.merchant))
             }
         }

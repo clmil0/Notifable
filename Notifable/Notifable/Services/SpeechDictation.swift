@@ -25,6 +25,9 @@ final class SpeechDictation: ObservableObject {
     @Published private(set) var partial = ""
     /// Volumen del micrófono, 0…1, suavizado. Mueve las barras.
     @Published private(set) var level: Double = 0
+    /// Silenciado: el micrófono sigue abierto pero no se escucha nada, y la
+    /// sesión espera a que se vuelva a activar.
+    @Published private(set) var isMuted = false
 
     var onPhrase: ((String) -> Void)?
 
@@ -109,7 +112,36 @@ final class SpeechDictation: ObservableObject {
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         partial = ""
         level = 0
+        isMuted = false
         phase = .idle
+    }
+
+    /// Silenciar entrega lo que se estaba diciendo y deja de escuchar sin
+    /// apagar el micrófono; al volver se empieza una frase nueva.
+    func setMuted(_ muted: Bool) {
+        guard muted != isMuted, phase == .listening else { return }
+        isMuted = muted
+        if muted {
+            closePhrase()
+            generation += 1
+            task?.cancel()
+            task = nil
+            feed.set(nil)
+            level = 0
+        } else {
+            beginRequest()
+        }
+    }
+
+    /// Cierra ya la frase en curso —sin esperar al silencio— y la devuelve en
+    /// vez de entregarla por `onPhrase`. Sigue escuchando.
+    func takePhrase() -> String? {
+        silence?.cancel()
+        let text = partial.trimmingCharacters(in: .whitespacesAndNewlines)
+        partial = ""
+        guard !text.isEmpty else { return nil }
+        if phase == .listening, !isMuted { beginRequest() }
+        return text
     }
 
     // MARK: - Frases
@@ -183,6 +215,7 @@ final class SpeechDictation: ObservableObject {
     // MARK: - Volumen
 
     private func updateLevel(_ value: Double) {
+        guard !isMuted else { level = 0; return }
         // Sube rápido y baja despacio: las barras no tiemblan entre sílabas.
         level = value > level ? value : level * 0.82 + value * 0.18
     }

@@ -30,12 +30,24 @@ struct ExpenseEdit: Codable, Equatable {
     var notes: String?
     var isSubscription: Bool?
     var isDebt: Bool?
+    var debtSettled: Bool?
     var cardLastDigits: String?
+    /// Soles por dólar con que se registró el gasto la primera vez. No es una
+    /// edición del usuario sino un dato que el correo no trae: al releerlo en
+    /// otro teléfono el gasto nacería con el tipo de cambio de ese día y los
+    /// meses pasados en USD cambiarían. Viaja por el mismo camino que las
+    /// ediciones porque usa la misma llave. Ver `recordFxRate`.
+    var fxRate: Double?
     var updatedAt: Date = Date()
 
-    var isEmpty: Bool {
-        category == nil && merchant == nil && amount == nil && occurredAt == nil
-            && notes == nil && isSubscription == nil && isDebt == nil && cardLastDigits == nil
+    var isEmpty: Bool { !isUserEdit && fxRate == nil }
+
+    /// Algo que el usuario cambió a mano. Lo que cuenta Ajustes y la
+    /// advertencia de reemplazar la copia: el tipo de cambio no lo es.
+    var isUserEdit: Bool {
+        category != nil || merchant != nil || amount != nil || occurredAt != nil
+            || notes != nil || isSubscription != nil || isDebt != nil || debtSettled != nil
+            || cardLastDigits != nil
     }
 
     /// Lo nuevo pisa a lo viejo campo por campo: dos ediciones distintas del
@@ -49,19 +61,24 @@ struct ExpenseEdit: Codable, Equatable {
                     notes: newer.notes ?? notes,
                     isSubscription: newer.isSubscription ?? isSubscription,
                     isDebt: newer.isDebt ?? isDebt,
+                    debtSettled: newer.debtSettled ?? debtSettled,
                     cardLastDigits: newer.cardLastDigits ?? cardLastDigits,
+                    // Al revés que el resto: gana el **primero**. El tipo de
+                    // cambio que vale es el del día del gasto, no el de una
+                    // relectura posterior en otro teléfono.
+                    fxRate: fxRate ?? newer.fxRate,
                     updatedAt: max(updatedAt, newer.updatedAt))
     }
 
     enum CodingKeys: String, CodingKey {
         case markKey, category, merchant, amount, occurredAt, notes
-        case isSubscription, isDebt, cardLastDigits, updatedAt
+        case isSubscription, isDebt, debtSettled, cardLastDigits, fxRate, updatedAt
     }
 
     init(markKey: String, category: String? = nil, merchant: String? = nil,
          amount: Double? = nil, occurredAt: Date? = nil, notes: String? = nil,
-         isSubscription: Bool? = nil, isDebt: Bool? = nil,
-         cardLastDigits: String? = nil, updatedAt: Date = Date()) {
+         isSubscription: Bool? = nil, isDebt: Bool? = nil, debtSettled: Bool? = nil,
+         cardLastDigits: String? = nil, fxRate: Double? = nil, updatedAt: Date = Date()) {
         self.markKey = markKey
         self.category = category
         self.merchant = merchant
@@ -70,7 +87,9 @@ struct ExpenseEdit: Codable, Equatable {
         self.notes = notes
         self.isSubscription = isSubscription
         self.isDebt = isDebt
+        self.debtSettled = debtSettled
         self.cardLastDigits = cardLastDigits
+        self.fxRate = fxRate
         self.updatedAt = updatedAt
     }
 
@@ -94,7 +113,9 @@ struct ExpenseEdit: Codable, Equatable {
         notes = try c.decodeIfPresent(String.self, forKey: .notes)
         isSubscription = try c.decodeIfPresent(Bool.self, forKey: .isSubscription)
         isDebt = try c.decodeIfPresent(Bool.self, forKey: .isDebt)
+        debtSettled = try c.decodeIfPresent(Bool.self, forKey: .debtSettled)
         cardLastDigits = try c.decodeIfPresent(String.self, forKey: .cardLastDigits)
+        fxRate = (try? c.decodeIfPresent(RateCoded.self, forKey: .fxRate))??.wrappedValue
         updatedAt = (try? c.decode(Date.self, forKey: .updatedAt)) ?? Date()
     }
 
@@ -108,7 +129,9 @@ struct ExpenseEdit: Codable, Equatable {
         try c.encodeIfPresent(notes, forKey: .notes)
         try c.encodeIfPresent(isSubscription, forKey: .isSubscription)
         try c.encodeIfPresent(isDebt, forKey: .isDebt)
+        try c.encodeIfPresent(debtSettled, forKey: .debtSettled)
         try c.encodeIfPresent(cardLastDigits, forKey: .cardLastDigits)
+        try c.encodeIfPresent(fxRate.map { RateCoded(wrappedValue: $0) }, forKey: .fxRate)
         try c.encode(updatedAt, forKey: .updatedAt)
     }
 }
@@ -145,6 +168,7 @@ enum ExpenseEditStore {
                        notes: String? = nil,
                        isSubscription: Bool? = nil,
                        isDebt: Bool? = nil,
+                       debtSettled: Bool? = nil,
                        cardLastDigits: String? = nil,
                        defaults: UserDefaults = .standard) {
         guard expense.emailID != nil else { return }
@@ -152,6 +176,7 @@ enum ExpenseEditStore {
                                category: category, merchant: merchant, amount: amount,
                                occurredAt: occurredAt, notes: notes,
                                isSubscription: isSubscription, isDebt: isDebt,
+                               debtSettled: debtSettled,
                                cardLastDigits: cardLastDigits)
         guard !edit.isEmpty else { return }
         save(edit, defaults: defaults)
@@ -177,6 +202,62 @@ enum ExpenseEditStore {
             }
         }
         persist(current, defaults: defaults)
+    }
+
+    /// Anota el tipo de cambio de un gasto del correo en otra moneda, **sólo
+    /// si no había uno**: el primero que se registró es el del día del gasto.
+    /// Tras restaurar, el respaldado ya está aquí antes de releer el correo,
+    /// así que el que traería la relectura (el de hoy) no lo pisa.
+    static func recordFxRate(for expense: Expense, defaults: UserDefaults = .standard) {
+        guard expense.emailID != nil, expense.currency != "PEN",
+              let rate = expense.fxRateAtCapture, rate.isFinite, rate > 0 else { return }
+        let key = TransactionKey.key(for: expense)
+        var current = all(defaults)
+        if current[key]?.fxRate != nil { return }
+        current[key] = current[key]?.merged(with: ExpenseEdit(markKey: key, fxRate: rate))
+            ?? ExpenseEdit(markKey: key, fxRate: rate)
+        persist(current, defaults: defaults)
+    }
+
+    /// `recordFxRate` para todos los gastos en otra moneda que aún no lo
+    /// tengan. Cubre los que existían antes de esta versión y los que llegan
+    /// en cada lectura del correo; va antes de `apply` para que un tipo de
+    /// cambio ya respaldado gane al de la relectura.
+    static func captureFxRates(in modelContext: ModelContext, defaults: UserDefaults = .standard) {
+        let descriptor = FetchDescriptor<Expense>(predicate: #Predicate {
+            $0.emailID != nil && $0.currency != "PEN"
+        })
+        let expenses = (try? modelContext.fetch(descriptor)) ?? []
+        guard !expenses.isEmpty else { return }
+        var current = all(defaults)
+        var changed = false
+        for expense in expenses {
+            guard let rate = expense.fxRateAtCapture, rate.isFinite, rate > 0 else { continue }
+            let key = TransactionKey.key(for: expense)
+            if current[key]?.fxRate != nil { continue }
+            current[key] = current[key]?.merged(with: ExpenseEdit(markKey: key, fxRate: rate))
+                ?? ExpenseEdit(markKey: key, fxRate: rate)
+            changed = true
+        }
+        if changed { persist(current, defaults: defaults) }
+    }
+
+    /// Renombrar, fusionar o borrar una categoría cambia los gastos de hoy,
+    /// pero las ediciones guardadas seguían apuntando al nombre viejo: tras
+    /// reinstalar, `apply` devolvía esos gastos a una categoría que ya no
+    /// existe y el nombre reaparecía. `nil` como destino no se usa: borrar
+    /// manda a `Sin Clasificar`, que también es un nombre.
+    static func replaceCategory(_ old: String, with new: String, defaults: UserDefaults = .standard) {
+        var current = all(defaults)
+        var changed = false
+        for (key, edit) in current where edit.category == old {
+            var updated = edit
+            updated.category = new
+            updated.updatedAt = Date()
+            current[key] = updated
+            changed = true
+        }
+        if changed { persist(current, defaults: defaults) }
     }
 
     static func removeAll(_ defaults: UserDefaults = .standard) {
@@ -221,8 +302,14 @@ enum ExpenseEditStore {
                 expense.isSubscription = value; touched = true
             }
             if let value = edit.isDebt, expense.isDebt != value { expense.isDebt = value; touched = true }
+            if let value = edit.debtSettled, expense.debtSettled != value {
+                expense.debtSettled = value; touched = true
+            }
             if let value = edit.cardLastDigits, expense.cardLastDigits != value {
                 expense.cardLastDigits = value; touched = true
+            }
+            if let value = edit.fxRate, expense.currency != "PEN", expense.fxRateAtCapture != value {
+                expense.fxRateAtCapture = value; touched = true
             }
             if touched { applied += 1 }
         }

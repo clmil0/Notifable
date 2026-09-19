@@ -36,6 +36,8 @@ struct ConfigBackupView: View {
 
     // Confirmación antes de sobrescribir lo de este teléfono.
     @State private var pendingRestore: BackupHeader?
+    /// Advertencia antes de reemplazar la copia desde la tarjeta de pausa.
+    @State private var pendingOverwrite: BackupHeader?
     @State private var pendingRestoreCode: String?
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
@@ -64,6 +66,17 @@ struct ConfigBackupView: View {
         .background(palette.background)
         .navigationTitle("Sincronización")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $pendingOverwrite) { header in
+            OverwriteBackupSheet(header: header, accent: accent) {
+                pendingOverwrite = nil
+                Task { await run { await manager.resumeAfterWipe(restoreFirst: true) } }
+            } onOverwrite: {
+                pendingOverwrite = nil
+                Task { await run { await manager.confirmOverwrite() } }
+            } onLater: {
+                pendingOverwrite = nil
+            }
+        }
         .sheet(item: $pendingRestore) { header in
             RestoreConfirmSheet(header: header, accent: accent) {
                 let code = pendingRestoreCode
@@ -191,6 +204,7 @@ struct ConfigBackupView: View {
                 HStack {
                     Text(code)
                         .font(.footnote.monospaced())
+                        .fontDesign(.monospaced)
                         .foregroundStyle(palette.label)
                         .textSelection(.enabled)
                     Spacer(minLength: 8)
@@ -308,7 +322,8 @@ struct ConfigBackupView: View {
             Rectangle().fill(palette.separator).frame(height: 0.5)
 
             Button {
-                Task { await run { await manager.resumeAfterWipe(restoreFirst: false) } }
+                // Nunca directo: primero se enseña qué se va a perder.
+                Task { await askBeforeOverwrite() }
             } label: {
                 choiceRow(icon: "trash",
                           title: "Empezar de cero también en la copia",
@@ -385,6 +400,7 @@ struct ConfigBackupView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .font(.subheadline.monospaced())
+                        .fontDesign(.monospaced)
                         .padding(12)
                         .background(palette.track)
                         .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
@@ -464,6 +480,24 @@ struct ConfigBackupView: View {
         }
         pendingRestoreCode = (clean?.isEmpty == false) ? clean : nil
         pendingRestore = header
+    }
+
+    /// La copia está vacía: no hay nada que perder y se reanuda sin más. Si
+    /// tiene datos, la advertencia. Sin respuesta del servidor no se toca nada.
+    private func askBeforeOverwrite() async {
+        isWorking = true
+        feedback = nil
+        let header = await manager.pausedBackupHeader()
+        isWorking = false
+        guard let header else {
+            feedback = manager.lastErrorMessage ?? "No se pudo revisar la copia. Inténtalo de nuevo."
+            return
+        }
+        if header.hasData {
+            pendingOverwrite = header
+        } else {
+            await run { await manager.confirmOverwrite() }
+        }
     }
 
     /// Un solo sitio donde se enciende el spinner y se traduce el resultado:

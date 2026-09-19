@@ -40,14 +40,53 @@ enum AppTextSize: String, CaseIterable, Identifiable {
     }
 }
 
-/// Aplica el tamaño elegido. Se pone en la raíz y en cada sheet: un sheet crea su
-/// propia jerarquía de presentación, así que conviene no dar por hecho que el
-/// entorno viaja hasta él.
+/// Tipo de letra de toda la app: la misma familia del sistema (SF) en tres
+/// diseños. Como es la fuente del sistema, conserva Dynamic Type, los pesos y
+/// las cifras tabulares sin incluir archivos de fuentes.
+///
+/// Se aplica con `fontDesign`, que manda sobre el diseño de cualquier fuente
+/// del sistema de debajo —también de las que piden `.rounded`—. Por eso
+/// «Sistema» no fija nada, y los códigos que deben seguir alineados en columna
+/// repiten `.fontDesign(.monospaced)` a su lado.
+enum AppFontDesign: String, CaseIterable, Identifiable {
+    case sistema = "Sistema"
+    case redondeada = "Redondeada"
+    case clasica = "Clásica"
+
+    var id: String { rawValue }
+
+    static let storageKey = "appFontDesign"
+
+    var design: Font.Design {
+        switch self {
+        case .sistema: return .default
+        case .redondeada: return .rounded
+        case .clasica: return .serif
+        }
+    }
+
+    /// Lo que se aplica a toda la app: `nil` deja a cada fuente con el suyo.
+    var override: Font.Design? { self == .sistema ? nil : design }
+
+    var detail: String {
+        switch self {
+        case .sistema: return "SF Pro, la de iOS"
+        case .redondeada: return "Suave, de trazos redondos"
+        case .clasica: return "Con serifa, más editorial"
+        }
+    }
+}
+
+/// Aplica el tamaño y el tipo de letra elegidos. Se pone en la raíz y en cada
+/// sheet: un sheet crea su propia jerarquía de presentación, así que conviene
+/// no dar por hecho que el entorno viaja hasta él.
 struct AppTextSizeModifier: ViewModifier {
     @AppStorage(AppTextSize.storageKey) private var raw = AppTextSize.sistema.rawValue
+    @AppStorage(AppFontDesign.storageKey) private var designRaw = AppFontDesign.sistema.rawValue
 
     func body(content: Content) -> some View {
         let size = AppTextSize(rawValue: raw)?.dynamicTypeSize
+        let design = (AppFontDesign(rawValue: designRaw) ?? .sistema).override
         Group {
             if let size {
                 content.dynamicTypeSize(size)
@@ -55,6 +94,7 @@ struct AppTextSizeModifier: ViewModifier {
                 content
             }
         }
+        .fontDesign(design)
     }
 }
 

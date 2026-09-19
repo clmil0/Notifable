@@ -47,13 +47,13 @@ struct CategoryDetailView: View {
     }
 
     private func total(_ items: [Expense]) -> Double {
-        Money.sum(items) { Accounting.amountInPEN($0, fallbackRate: rate) }
+        Money.sum(items) { Accounting.netCostInPEN($0, fallbackRate: rate) }
     }
 
     private func byMerchant(_ items: [Expense]) -> [(merchant: String, total: Double)] {
         var totals: [String: Int] = [:]
         for item in items {
-            totals[item.merchant, default: 0] += Money.cents(Accounting.amountInPEN(item, fallbackRate: rate))
+            totals[item.merchant, default: 0] += Money.cents(Accounting.netCostInPEN(item, fallbackRate: rate))
         }
         return totals.map { ($0.key, Money.value($0.value)) }
             .sorted { Money.cents($0.total) > Money.cents($1.total) }

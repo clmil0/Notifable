@@ -72,11 +72,44 @@ struct FriendShareRow: Identifiable, Codable, Hashable {
     }
 }
 
-/// Capa de red para Amigos: amistades, lo que te comparten, lo que compartes,
-/// invitaciones. Todas las escrituras pasan por las funciones RPC del
-/// esquema SQL (`redeem_invite_code`, `upsert_my_share`, `respond_to_share`,
-/// `stop_sharing`) — nunca un INSERT/UPDATE directo, así el servidor decide
-/// quién puede tocar qué, no el cliente.
+/// Una invitación recién creada. El token sólo existe aquí y en el enlace que
+/// se manda: el servidor guarda su hash. Sirve una vez y caduca a las 72 h.
+struct FriendInvite: Equatable {
+    let token: String
+    let expiresAt: Date
+
+    /// `XXXX-XXXX-XXXX-XXXX-XXXX`, para leerlo o dictarlo.
+    var grouped: String { InviteLinks.grouped(token) }
+}
+
+/// Alguien con quien hay una solicitud de amistad abierta, en cualquiera de
+/// las dos direcciones. Sólo nombre y personaje: hasta que se acepta, no es
+/// amigo y su perfil no se puede leer.
+struct FriendRequest: Identifiable, Hashable {
+    let id: String
+    let personID: String
+    let displayName: String
+    let penguin: PenguinLook?
+    let createdAt: Date?
+}
+
+/// Qué pasó al canjear una invitación.
+enum InviteRedeemOutcome: Equatable {
+    /// Solicitud enviada: falta que `name` la acepte.
+    case sent(name: String)
+    case alreadyFriends(name: String)
+    /// No existe, caducó, ya se usó, se revocó o es tuya. El servidor no
+    /// distingue a propósito: así no sirve para tantear invitaciones.
+    case invalid
+    case rateLimited
+    case failed
+}
+
+/// Capa de red para Amigos: amistades, solicitudes, invitaciones, lo que te
+/// comparten y lo que compartes. Todas las escrituras pasan por funciones RPC
+/// del esquema SQL (`redeem_friend_invite`, `respond_friend_request`,
+/// `upsert_my_share`, …) — nunca un INSERT/UPDATE directo, así el servidor
+/// decide quién puede tocar qué, no el cliente.
 ///
 /// `@MainActor`: sin esto, dos llamadas a `refresh()` casi simultáneas (el
 /// `.task` inicial y un pull-to-refresh que se cruza, por ejemplo) podían
@@ -98,6 +131,10 @@ final class FriendsManager {
     var pendingIncoming: [FriendShareRow] = []
     /// Ya aceptado: lo que ves de cada amigo este mes.
     var acceptedIncoming: [FriendShareRow] = []
+    /// Canjearon una invitación mía y esperan que los acepte.
+    var incomingRequests: [FriendRequest] = []
+    /// Canjeé la invitación de alguien y espero que me acepte.
+    var outgoingRequests: [FriendRequest] = []
     /// Lo que tú compartes con cada amigo este mes (una fila por amigo, si ya la tocaste).
     var outgoing: [FriendShareRow] = []
     var isLoading = false
@@ -220,6 +257,7 @@ final class FriendsManager {
         defer { isLoading = false }
         await loadFriendships()
         await loadShares()
+        await loadRequests()
         await startListeningForChanges()
     }
 
@@ -241,7 +279,12 @@ final class FriendsManager {
         _ = realtime.subscribe(table: "friend_shares") { [weak self] _ in
             Task { await self?.loadShares() }
         }
-        // Estado, nombre o pingüino nuevo de un amigo. Llega todo cambio de
+        // Una solicitud nueva, aceptada o rechazada. Al aceptarse también
+        // cambia `friendships`, que ya tiene su propia suscripción.
+        _ = realtime.subscribe(table: "friend_requests") { [weak self] _ in
+            Task { await self?.loadRequests() }
+        }
+        // Estado, nombre o personaje nuevo de un amigo. Llega todo cambio de
         // `profiles` (su RLS deja leer todas las filas), así que se vuelve a
         // pedir la lista sólo si el cambio es de alguien que ya es amigo.
         _ = realtime.subscribe(table: "profiles") { [weak self] change in
@@ -295,7 +338,8 @@ final class FriendsManager {
     /// llama no pisa la caché con una lista vacía.
     private func fetchProfiles(ids: [String]) async -> [Friend]? {
         guard !ids.isEmpty else { return [] }
-        for columns in ["id,display_name,status,penguin", "id,display_name,status", "id,display_name"] {
+        for columns in ["id,display_name,status,penguin,avatar", "id,display_name,status,penguin",
+                        "id,display_name,status", "id,display_name"] {
             if let friends = await fetchProfiles(ids: ids, columns: columns) { return friends }
         }
         return nil
@@ -311,6 +355,10 @@ final class FriendsManager {
             let display_name: String
             let status: String?
             let penguin: PenguinLook?
+            let avatar: PenguinLook?
+
+            /// `avatar` es el personaje completo; `penguin`, el de antes.
+            var look: PenguinLook? { avatar ?? penguin }
         }
 
         do {
@@ -320,9 +368,9 @@ final class FriendsManager {
             for row in rows {
                 profileNames[row.id] = row.display_name
                 profileStatuses[row.id] = row.status ?? ""
-                profilePenguins[row.id] = row.penguin
+                profilePenguins[row.id] = row.look
             }
-            return rows.map { Friend(id: $0.id, displayName: $0.display_name, status: $0.status ?? "", penguin: $0.penguin) }
+            return rows.map { Friend(id: $0.id, displayName: $0.display_name, status: $0.status ?? "", penguin: $0.look) }
         } catch {
             return nil
         }
@@ -386,92 +434,128 @@ final class FriendsManager {
 
     // MARK: - Invitaciones
 
-    /// El código fijo de esta cuenta: uno solo por persona, no expira, y
-    /// cualquier cantidad de amigos puede usarlo para agregarte (ver
-    /// `agrupay_friends_v3_schema.sql`). El backend ya lo crea solo al crear
-    /// el perfil (trigger); el `POST` de aquí es sólo el respaldo defensivo
-    /// para una cuenta de antes de esa migración que todavía no tiene fila.
-    ///
-    /// Como no cambia nunca, se consulta una sola vez por cuenta y queda
-    /// guardado en el teléfono: compartirlo después no toca la red.
-    func myFriendCode() async -> String? {
-        guard let uid = auth.userID else { return nil }
-        if let cached = cachedFriendCode { return cached }
-        let code = await fetchOrCreateFriendCode(uid: uid)
-        if let code { UserDefaults.standard.set(code, forKey: Self.friendCodeKey(uid)) }
-        return code
+    // MARK: - Invitaciones y solicitudes
+
+    enum InviteCreateFailure: Error {
+        /// Sin red, o el servidor no respondió.
+        case offline
+        /// Ya hay 10 abiertas: hay que invalidarlas antes de crear otra.
+        case tooMany
     }
 
-    /// El código guardado de la cuenta con sesión, sin ir a la red. La clave
-    /// lleva el id de la cuenta: con otra sesión no se muestra el de antes.
-    var cachedFriendCode: String? {
-        guard let uid = auth.userID else { return nil }
-        return UserDefaults.standard.string(forKey: Self.friendCodeKey(uid))
-    }
+    /// La última invitación creada y cuándo. Abrir la hoja de invitar varias
+    /// veces seguidas no debe gastar una invitación cada vez (hay un tope de
+    /// 10 abiertas); pasado un rato se crea otra, por si aquella ya se usó.
+    private var lastInvite: (invite: FriendInvite, createdAt: Date)?
 
-    static func friendCodeKey(_ uid: String) -> String { "socialFriendCode.\(uid)" }
-
-    private func fetchOrCreateFriendCode(uid: String) async -> String? {
-        if let code = await fetchMyFriendCode(uid: uid) { return code }
-
-        guard let url = URL(string: "\(baseURL)/rest/v1/friend_codes") else { return nil }
-        guard var request = await auth.authorizedRequest(url: url, method: "POST") else { return nil }
-        request.addValue("return=representation", forHTTPHeaderField: "Prefer")
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["owner_id": uid])
-
-        struct Row: Decodable { let code: String }
-        if let (data, response) = try? await URLSession.shared.data(for: request),
-           let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
-           let rows = try? JSONDecoder().decode([Row].self, from: data) {
-            return rows.first?.code
+    /// La invitación reciente si la hay; si no, una nueva.
+    func inviteForSharing() async -> Result<FriendInvite, InviteCreateFailure> {
+        if let lastInvite, Date().timeIntervalSince(lastInvite.createdAt) < 15 * 60,
+           lastInvite.invite.expiresAt > Date() {
+            return .success(lastInvite.invite)
         }
-        // Si el POST falló porque otra llamada la creó justo antes (carrera
-        // improbable, pero posible), la fila ya existe: se busca de nuevo en
-        // vez de darlo por perdido.
-        return await fetchMyFriendCode(uid: uid)
+        return await createInvite()
     }
 
-    private func fetchMyFriendCode(uid: String) async -> String? {
-        guard let url = URL(string: "\(baseURL)/rest/v1/friend_codes?owner_id=eq.\(uid)&select=code") else { return nil }
-        guard let request = await auth.authorizedRequest(url: url, method: "GET") else { return nil }
-
-        struct Row: Decodable { let code: String }
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
-              let rows = try? JSONDecoder().decode([Row].self, from: data) else { return nil }
-        return rows.first?.code
-    }
-
-    /// Canjea el código de un amigo: crea la amistad si es válido y devuelve
-    /// el perfil de quien lo generó — la función RPC ya lo trae, así que no
-    /// hace falta adivinar cuál es "el nuevo" comparando listas antes/después.
-    @discardableResult
-    func redeem(code: String) async -> Friend? {
-        guard let url = URL(string: "\(baseURL)/rest/v1/rpc/redeem_invite_code") else { return nil }
-        guard var request = await auth.authorizedRequest(url: url, method: "POST") else { return nil }
-        request.httpBody = try? JSONSerialization.data(withJSONObject: ["p_code": code])
-
-        struct OwnerProfile: Decodable {
-            let id: String
-            let display_name: String
-            let status: String?
+    /// Una invitación nueva de un solo uso.
+    func createInvite() async -> Result<FriendInvite, InviteCreateFailure> {
+        struct Response: Decodable { let token: String; let expires_at: String }
+        guard let data = await rpc("create_friend_invite", body: [:]),
+              let response = try? JSONDecoder().decode(Response.self, from: data) else {
+            let tooMany = lastErrorMessage?.localizedCaseInsensitiveContains("demasiadas") == true
+            return .failure(tooMany ? .tooMany : .offline)
         }
+        let invite = FriendInvite(token: response.token,
+                                  expiresAt: ConfigBackupManager.parseDate(response.expires_at)
+                                      ?? Date().addingTimeInterval(72 * 3600))
+        lastInvite = (invite, Date())
+        return .success(invite)
+    }
 
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-                lastErrorMessage = "Código inválido."
-                return nil
-            }
-            let profile = try JSONDecoder().decode(OwnerProfile.self, from: data)
-            profileNames[profile.id] = profile.display_name
-            profileStatuses[profile.id] = profile.status ?? ""
+    /// Invalida todas mis invitaciones abiertas.
+    func revokeInvites() async {
+        _ = await rpc("revoke_my_friend_invites", body: [:])
+        lastInvite = nil
+    }
+
+    /// Canjea la invitación de alguien: crea una solicitud que esa persona
+    /// tiene que aceptar (o la amistad, si ella ya me había pedido a mí).
+    func redeem(token: String) async -> InviteRedeemOutcome {
+        struct Response: Decodable {
+            let status: String
+            let owner: Person?
+        }
+        guard let data = await rpc("redeem_friend_invite", body: ["p_token": token]),
+              let response = try? JSONDecoder().decode(Response.self, from: data) else { return .failed }
+        let name = response.owner?.display_name ?? "Tu amigo"
+        switch response.status {
+        case "sent":
+            await loadRequests()
+            return .sent(name: name)
+        case "already_friends":
             await refresh()
-            return Friend(id: profile.id, displayName: profile.display_name, status: profile.status ?? "")
-        } catch {
-            lastErrorMessage = "No se pudo canjear el código."
+            return .alreadyFriends(name: name)
+        case "rate_limited":
+            return .rateLimited
+        default:
+            return .invalid
+        }
+    }
+
+    func loadRequests() async {
+        struct Row: Decodable { let id: String; let created_at: String; let person: Person? }
+        struct Response: Decodable { let incoming: [Row]; let outgoing: [Row] }
+        guard let data = await rpc("list_friend_requests", body: [:]),
+              let response = try? JSONDecoder().decode(Response.self, from: data) else { return }
+        func map(_ rows: [Row]) -> [FriendRequest] {
+            rows.compactMap { row in
+                guard let person = row.person else { return nil }
+                return FriendRequest(id: row.id, personID: person.id, displayName: person.display_name,
+                                     penguin: person.avatar ?? person.penguin,
+                                     createdAt: ConfigBackupManager.parseDate(row.created_at))
+            }
+        }
+        incomingRequests = map(response.incoming)
+        outgoingRequests = map(response.outgoing)
+    }
+
+    /// Acepto (nace la amistad) o rechazo una solicitud que me llegó.
+    func respond(to request: FriendRequest, accept: Bool) async {
+        _ = await rpc("respond_friend_request", body: ["p_request_id": request.id, "p_accept": accept])
+        incomingRequests.removeAll { $0.id == request.id }
+        if accept { await loadFriendships() }
+    }
+
+    /// Retiro una solicitud que mandé.
+    func cancel(_ request: FriendRequest) async {
+        _ = await rpc("cancel_friend_request", body: ["p_request_id": request.id])
+        outgoingRequests.removeAll { $0.id == request.id }
+    }
+
+    /// Lo que el servidor deja ver de alguien que todavía no es amigo.
+    private struct Person: Decodable {
+        let id: String
+        let display_name: String
+        let avatar: PenguinLook?
+        let penguin: PenguinLook?
+    }
+
+    /// Llama a una función RPC. `nil` si falló; el mensaje del servidor
+    /// (p. ej. «Tienes demasiadas invitaciones abiertas») queda en
+    /// `lastErrorMessage`.
+    private func rpc(_ name: String, body: [String: Any]) async -> Data? {
+        lastErrorMessage = nil
+        guard let url = URL(string: "\(baseURL)/rest/v1/rpc/\(name)"),
+              var request = await auth.authorizedRequest(url: url, method: "POST") else { return nil }
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse else { return nil }
+        guard (200...299).contains(http.statusCode) else {
+            struct ServerError: Decodable { let message: String? }
+            lastErrorMessage = (try? JSONDecoder().decode(ServerError.self, from: data))?.message
             return nil
         }
+        return data
     }
 
     // MARK: - Permisos

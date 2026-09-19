@@ -111,17 +111,39 @@ enum InviteLinks {
     /// - Parameter linkReady: la página del dominio ya responde (ver
     ///   `InviteLinkCheck`). Hasta entonces va sólo el código: un enlace a una
     ///   página que todavía no existe sería peor que ninguno.
-    static func shareText(code: String, linkReady: Bool) -> String {
-        guard linkReady, let url = webURL(code: code) else {
-            return "Agrégame en AgruPay con el código \(code)"
+    static func shareText(token: String, linkReady: Bool) -> String {
+        let grouped = Self.grouped(token)
+        guard linkReady, let url = webURL(code: token) else {
+            return "Agrégame en AgruPay con esta invitación (sirve una vez, 72 h): \(grouped)"
         }
-        return "Agrégame en AgruPay 👉 \(url.absoluteString)\nO escribe mi código: \(code)"
+        return "Agrégame en AgruPay 👉 \(url.absoluteString)\nSirve una vez y caduca en 72 h. Código: \(grouped)"
     }
 
-    /// Códigos de 8 letras o números, en minúsculas como los canjea el backend.
+    /// `XXXX-XXXX-XXXX-XXXX-XXXX`, para leerlo o dictarlo.
+    static func grouped(_ token: String) -> String {
+        stride(from: 0, to: token.count, by: 4).map { start -> String in
+            let from = token.index(token.startIndex, offsetBy: start)
+            let to = token.index(from, offsetBy: min(4, token.distance(from: from, to: token.endIndex)))
+            return String(token[from..<to])
+        }.joined(separator: "-")
+    }
+
+    /// Longitud de un token de invitación (`create_friend_invite`).
+    static let tokenLength = 20
+
+    /// Un token de invitación: 20 caracteres Crockford base32. Acepta guiones,
+    /// espacios y minúsculas, y corrige las letras que se confunden (O→0,
+    /// I/L→1), igual que `normalize_invite_token` en el servidor.
     static func normalizedCode(_ raw: String) -> String? {
-        let code = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard code.count == 8, code.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return nil }
-        return code
+        let mapped = raw.uppercased().compactMap { char -> Character? in
+            switch char {
+            case "O": return "0"
+            case "I", "L": return "1"
+            default: return char.isASCII && (char.isLetter || char.isNumber) ? char : nil
+            }
+        }
+        let alphabet = Set("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
+        guard mapped.count == tokenLength, mapped.allSatisfy(alphabet.contains) else { return nil }
+        return String(mapped)
     }
 }

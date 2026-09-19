@@ -10,6 +10,11 @@ import SwiftData
 /// La sugerencia va **dentro del grupo**, no como banner aparte. Antes vivía
 /// arriba, en una tarjeta propia, y había que acordarse de a qué comercio se
 /// refería mientras se miraba la lista.
+///
+/// Cada comercio se despliega con la flecha de la derecha y muestra sus
+/// movimientos, que se eligen uno a uno: no todo lo de un comercio va siempre
+/// a la misma categoría. La selección es por movimiento; tocar el comercio
+/// elige (o suelta) todos los suyos.
 struct PendingView: View {
     @Binding var scrollToTopTrigger: Bool
     let progress: ScrollProgress
@@ -20,7 +25,9 @@ struct PendingView: View {
     @StateObject private var rates = ExchangeRateService.shared
 
     @State private var scope: Scope = .month
-    @State private var selected: Set<String> = []
+    /// Movimientos elegidos.
+    @State private var selected: Set<UUID> = []
+    @State private var expanded: Set<String> = []
     @State private var visibleCount = pageSize
     @State private var didPickInitialScope = false
     @State private var assigning: AssignTarget?
@@ -54,7 +61,7 @@ struct PendingView: View {
         return grouped.map { merchant, items in
             Group(merchant: merchant,
                   expenses: items.sorted { $0.date > $1.date },
-                  total: Money.sum(items) { Accounting.amountInPEN($0, fallbackRate: rate) })
+                  total: Money.sum(items) { Accounting.netCostInPEN($0, fallbackRate: rate) })
         }
         .sorted {
             $0.mostRecent == $1.mostRecent ? $0.merchant < $1.merchant : $0.mostRecent > $1.mostRecent
@@ -166,8 +173,8 @@ struct PendingView: View {
             BulkClassifyView(onlyThisMonth: scope == .month)
         }
         .sheet(item: $assigning) { target in
-            AssignCategorySheet(context: target.context, history: expenses) { category, alsoPast in
-                apply(category, to: target.merchants, includingPast: alsoPast)
+            AssignCategorySheet(context: target.context, history: expenses) { category, flag in
+                apply(category, to: target.ids, flag: flag)
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
@@ -224,11 +231,13 @@ struct PendingView: View {
 
     @ViewBuilder
     private func selectionBar(groups: [Group]) -> some View {
-        let allSelected = selected.count == groups.count
+        let allIDs = Set(groups.flatMap { $0.expenses.map(\.id) })
+        let allSelected = !allIDs.isEmpty && allIDs.isSubset(of: selected)
 
         HStack {
-            Text(selected.isEmpty ? "Toca un comercio para elegirlo"
-                                  : "\(selected.count) seleccionados")
+            Text(selected.isEmpty ? "Toca un comercio o despliégalo con la flecha"
+                                  : selected.count == 1 ? "1 movimiento elegido"
+                                  : "\(selected.count) movimientos elegidos")
                 .font(.system(size: 12.5))
                 .foregroundStyle(palette.secondaryLabel)
 
@@ -236,7 +245,7 @@ struct PendingView: View {
 
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
-                    selected = allSelected ? [] : Set(groups.map(\.merchant))
+                    selected = allSelected ? [] : allIDs
                 }
             } label: {
                 Text(allSelected ? "Quitar selección" : "Seleccionar todo")
@@ -250,7 +259,7 @@ struct PendingView: View {
 
     private var assignBar: some View {
         Button {
-            assigning = AssignTarget(merchants: Array(selected), groups: groups)
+            assigning = AssignTarget(ids: selected, groups: groups)
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "tag")
@@ -270,61 +279,144 @@ struct PendingView: View {
     // MARK: - Grupo
 
     private func groupCard(_ group: Group) -> some View {
-        let isSelected = selected.contains(group.merchant)
+        let ids = Set(group.expenses.map(\.id))
+        let picked = ids.intersection(selected).count
+        let state: Check = picked == 0 ? .off : picked == ids.count ? .on : .partial
+        let isExpanded = expanded.contains(group.merchant)
         let hint = suggestion(for: group)
 
         return ShellCard(padding: 0) {
             VStack(spacing: 0) {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        if isSelected { selected.remove(group.merchant) }
-                        else { selected.insert(group.merchant) }
-                    }
-                } label: {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .strokeBorder(isSelected ? accent.color : palette.hairline, lineWidth: isSelected ? 0 : 1.5)
-                                .background(Circle().fill(isSelected ? accent.color : Color.clear))
-                                .frame(width: 24, height: 24)
-
-                            if isSelected {
-                                Image(systemName: "checkmark")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundStyle(Color.white)
-                            }
+                HStack(spacing: 0) {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            if state == .on { selected.subtract(ids) } else { selected.formUnion(ids) }
                         }
+                    } label: {
+                        HStack(spacing: 12) {
+                            checkmark(state, size: 24)
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(Accounting.displayName(group.merchant))
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(Accounting.displayName(group.merchant))
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(palette.label)
+                                    .lineLimit(1)
+
+                                Text(countLabel(group, picked: picked))
+                                    .font(.system(size: 12.5))
+                                    .foregroundStyle(palette.secondaryLabel)
+                            }
+
+                            Spacer(minLength: 8)
+
+                            Text(Money.format(group.total))
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(palette.label)
-                                .lineLimit(1)
-
-                            Text(group.expenses.count == 1 ? "1 movimiento"
-                                                           : "\(group.expenses.count) movimientos")
-                                .font(.system(size: 12.5))
-                                .foregroundStyle(palette.secondaryLabel)
                         }
-
-                        Spacer(minLength: 8)
-
-                        Text(Money.format(group.total))
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(palette.label)
+                        .padding(.leading, 14)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
                     }
-                    .padding(14)
-                    .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.22)) {
+                            if isExpanded { expanded.remove(group.merchant) }
+                            else { expanded.insert(group.merchant) }
+                        }
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(accent.onSurface(scheme))
+                            .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                            .frame(width: 30, height: 30)
+                            .background(accent.color.opacity(0.10), in: Circle())
+                            .padding(.leading, 10)
+                            .padding(.trailing, 12)
+                            .frame(maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isExpanded ? "Ocultar movimientos" : "Ver movimientos")
                 }
-                .buttonStyle(.plain)
+                .fixedSize(horizontal: false, vertical: true)
+
+                if isExpanded {
+                    VStack(spacing: 0) {
+                        ForEach(group.expenses) { expense in
+                            Rectangle().fill(palette.hairline).frame(height: 0.5)
+                                .padding(.leading, 50)
+                            movementRow(expense)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
 
                 // La sugerencia sólo aparece en el grupo elegido: en todos a
                 // la vez sería una pantalla de botones verdes compitiendo.
-                if isSelected, let hint, hint.confidence >= 0.45 {
+                if picked > 0, let hint, hint.confidence >= 0.45 {
                     suggestionRow(group: group, hint: hint)
+                        .padding(.top, isExpanded ? 12 : 0)
                 }
             }
         }
+    }
+
+    private func movementRow(_ expense: Expense) -> some View {
+        let isOn = selected.contains(expense.id)
+
+        return Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                if isOn { selected.remove(expense.id) } else { selected.insert(expense.id) }
+            }
+        } label: {
+            HStack(spacing: 12) {
+                checkmark(isOn ? .on : .off, size: 20)
+                    .frame(width: 24)
+
+                Text(expense.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
+                        .capitalized(with: Locale(identifier: "es_PE")))
+                    .font(.system(size: 14))
+                    .foregroundStyle(palette.label)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                Text(Money.format(expense.amount, currency: expense.currency))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(isOn ? accent.color.opacity(0.06) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private enum Check { case off, partial, on }
+
+    private func checkmark(_ state: Check, size: CGFloat) -> some View {
+        let filled = state != .off
+        return ZStack {
+            Circle()
+                .strokeBorder(filled ? accent.color : palette.hairline, lineWidth: filled ? 0 : 1.5)
+                .background(Circle().fill(filled ? accent.color : Color.clear))
+                .frame(width: size, height: size)
+
+            if filled {
+                Image(systemName: state == .on ? "checkmark" : "minus")
+                    .font(.system(size: size * 0.5, weight: .bold))
+                    .foregroundStyle(Color.white)
+            }
+        }
+    }
+
+    private func countLabel(_ group: Group, picked: Int) -> String {
+        let count = group.expenses.count
+        let base = count == 1 ? "1 movimiento" : "\(count) movimientos"
+        guard picked > 0, picked < count else { return base }
+        return "\(picked) de \(count) elegidos"
     }
 
     private func suggestionRow(group: Group, hint: CategorySuggestion) -> some View {
@@ -348,7 +440,7 @@ struct PendingView: View {
             Spacer(minLength: 6)
 
             Button {
-                apply(hint.category, to: [group.merchant], includingPast: true)
+                apply(hint.category, to: pickedIDs(in: group), flag: false)
             } label: {
                 Text("Sí")
                     .font(.system(size: 13, weight: .bold))
@@ -360,7 +452,7 @@ struct PendingView: View {
             .buttonStyle(.plain)
 
             Button {
-                assigning = AssignTarget(merchants: [group.merchant], groups: groups)
+                assigning = AssignTarget(ids: pickedIDs(in: group), groups: groups)
             } label: {
                 Text("Otra")
                     .font(.system(size: 13, weight: .semibold))
@@ -378,16 +470,26 @@ struct PendingView: View {
 
     // MARK: - Aplicar
 
-    /// Desde Pendientes el usuario está ordenando el comercio entero, así que
-    /// lo normal es arrastrar también su historial — al revés que desde una
-    /// fila suelta, donde tocar el pasado sería una sorpresa.
-    private func apply(_ category: String, to merchants: [String], includingPast: Bool) {
-        for merchant in merchants {
-            MerchantRules.set(category, for: merchant)
+    private func pickedIDs(in group: Group) -> Set<UUID> {
+        Set(group.expenses.map(\.id)).intersection(selected)
+    }
 
-            let targets = includingPast
-                ? expenses.filter { $0.merchant == merchant && $0.category == Accounting.unclassified }
-                : unclassified.filter { $0.merchant == merchant }
+    /// Un comercio elegido entero deja su regla, y `flag` («Asignar también
+    /// los anteriores», apagado por defecto) arrastra además su historial
+    /// fuera del alcance visible. Si sólo se eligieron algunos de sus
+    /// movimientos, se clasifican esos y nada más; ahí `flag` es «No volver a
+    /// preguntar» y decide si queda la regla.
+    private func apply(_ category: String, to ids: Set<UUID>, flag: Bool) {
+        for group in groups {
+            let picked = group.expenses.filter { ids.contains($0.id) }
+            guard !picked.isEmpty else { continue }
+            let whole = picked.count == group.expenses.count
+
+            if whole || flag { MerchantRules.set(category, for: group.merchant) }
+
+            let targets = whole && flag
+                ? expenses.filter { $0.merchant == group.merchant && $0.category == Accounting.unclassified }
+                : picked
 
             for expense in targets {
                 expense.category = category
@@ -397,7 +499,7 @@ struct PendingView: View {
         try? modelContext.save()
 
         withAnimation(.easeInOut(duration: 0.25)) {
-            for merchant in merchants { selected.remove(merchant) }
+            selected.subtract(ids)
         }
     }
 
@@ -434,23 +536,38 @@ struct PendingView: View {
         var mostRecent: Date { expenses.first?.date ?? .distantPast }
     }
 
-    /// Lo que la hoja de asignar necesita saber: uno o varios comercios.
+    /// Lo que la hoja de asignar necesita saber: los movimientos elegidos,
+    /// de uno o varios comercios.
     struct AssignTarget: Identifiable {
-        let merchants: [String]
+        let ids: Set<UUID>
         let groups: [Group]
-        var id: String { merchants.joined(separator: "|") }
+        let id = UUID()
 
         var context: AssignCategoryContext {
-            let selected = groups.filter { merchants.contains($0.merchant) }
-            let movements = selected.reduce(0) { $0 + $1.expenses.count }
-            let total = Money.sum(selected) { $0.total }
+            let touched = groups.compactMap { group -> (Group, [Expense])? in
+                let picked = group.expenses.filter { ids.contains($0.id) }
+                return picked.isEmpty ? nil : (group, picked)
+            }
+            let movements = touched.reduce(0) { $0 + $1.1.count }
+            let total = Money.sum(touched.flatMap(\.1)) { Accounting.netCostInPEN($0, fallbackRate: ExchangeRateService.shared.usdToPenRate) }
 
-            if merchants.count == 1, let only = selected.first {
-                return .merchant(only.merchant, movements: movements, total: total)
+            if touched.count == 1, case let (group, picked)? = touched.first {
+                if picked.count == group.expenses.count {
+                    return .merchant(group.merchant, movements: movements, total: total)
+                }
+                // Parte de un comercio: sin historial que arrastrar; el
+                // interruptor ofrece la regla para lo que llegue.
+                return AssignCategoryContext(
+                    merchant: group.merchant,
+                    title: Accounting.displayName(group.merchant),
+                    subtitle: "\(movements) de \(group.expenses.count) movimientos · " + Money.format(total),
+                    amount: nil,
+                    ruleScope: .forward
+                )
             }
             return AssignCategoryContext(
                 merchant: nil,
-                title: "\(merchants.count) comercios",
+                title: touched.count == 1 ? "1 comercio" : "\(touched.count) comercios",
                 subtitle: "\(movements) movimientos · " + Money.format(total),
                 amount: total,
                 ruleScope: .past

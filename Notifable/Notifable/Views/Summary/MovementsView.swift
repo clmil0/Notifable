@@ -140,6 +140,12 @@ struct MovementsView: View {
         }
         .onChange(of: searchText) { _, _ in visibleCount = Self.pageSize }
         .onChange(of: kind) { _, _ in visibleCount = Self.pageSize }
+        // Ir a un movimiento desde una hoja: se cierra lo que haya encima
+        // y Hoy lo resalta.
+        .onReceive(NotificationCenter.default.publisher(for: ActivityFocus.notification)) { _ in
+            selectedExpense = nil
+            selectedIncome = nil
+        }
         .sheet(item: $selectedExpense) { ExpenseDetailsView(expense: $0) }
         .sheet(isPresented: $showsPendingConfirmation) { PendingConfirmationView() }
         .sheet(item: $selectedIncome) { IncomeDetailsView(income: $0) }
@@ -322,8 +328,7 @@ struct MovementsView: View {
                     case .expense(let expense):
                         MovementRow(expense: expense,
                                     onTap: { selectedExpense = expense },
-                                    onAssignCategory: { expenseToCategorize = expense },
-                                    onEdit: { selectedExpense = expense })
+                                    onAssignCategory: { expenseToCategorize = expense })
                     case .income(let income):
                         IncomeRow(income: income, onTap: { selectedIncome = income })
                     }
@@ -344,7 +349,7 @@ struct MovementsView: View {
         }
         let total = Money.sum(bucket.items.compactMap { item -> Double? in
             guard case .expense(let e) = item else { return nil }
-            return Accounting.amountInPEN(e, fallbackRate: rate)
+            return Accounting.netCostInPEN(e, fallbackRate: rate)
         })
         return "–" + Money.format(total)
     }

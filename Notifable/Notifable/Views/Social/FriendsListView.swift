@@ -7,6 +7,11 @@ import SwiftData
 /// tú, sólo él. Antes había una sección por estado, así que un amigo cambiaba
 /// de sitio en la pantalla al tocarle el interruptor y costaba encontrarlo otra
 /// vez. Invitar y canjear viven arriba, juntos, no repartidos por la pantalla.
+///
+/// Las solicitudes (`2c`: quien usó mi invitación y espera que lo acepte, y a
+/// quién espero yo) van antes de la lista, en filas compactas con las acciones
+/// a la derecha: son la única forma de que alguien pase a ser amigo. Sin cuenta
+/// de Google (`2g`) no se dibujan las acciones de invitar.
 struct FriendsListView: View {
     @Binding var scrollToTopTrigger: Bool
     let progress: ScrollProgress
@@ -20,10 +25,10 @@ struct FriendsListView: View {
 
     @State private var showProfileSheet = false
     @State private var showInviteSheet = false
+    @State private var inviteSheetMode: AddFriendSheet.Mode = .invite
+    @State private var showGmailSettings = false
     @State private var invitedCode: String?
     @State private var selectedFriend: Friend?
-    @State private var myCode: String?
-    @State private var copied = false
 
     init(scrollToTopTrigger: Binding<Bool>, progress: ScrollProgress) {
         self._scrollToTopTrigger = scrollToTopTrigger
@@ -51,20 +56,24 @@ struct FriendsListView: View {
         TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 14) {
                 ShellTitle(title: "Amigos",
-                           subtitle: "Se agregan con un código, no por nombre.")
+                           subtitle: "Con una invitación de un solo uso, no por nombre.")
 
-                actions
+                if auth.needsGoogleAccount {
+                    needsGoogle
+                } else {
+                    actions
 
-                if let myCode {
-                    codeCard(myCode)
+                    requestsSection
+
+                    if friends.isEmpty {
+                        ShellEmptyState(icon: "person.2",
+                                        title: "Todavía no tienes amigos aquí",
+                                        message: "Crea una invitación o usa la de alguien para empezar.")
+                    }
                 }
 
-                if friends.isEmpty {
-                    ShellEmptyState(icon: "person.2",
-                                    title: "Todavía no tienes amigos aquí",
-                                    message: "Comparte tu código o canjea el de alguien para empezar.")
-                } else {
-                    VStack(spacing: 8) {
+                if !friends.isEmpty && !auth.needsGoogleAccount {
+                    VStack(spacing: 0) {
                         ShellSectionHeader(title: friends.count == 1 ? "1 amigo"
                                                                     : "\(friends.count) amigos")
                         MovementCard {
@@ -86,16 +95,19 @@ struct FriendsListView: View {
             progress.update(offset)
         }
         .socialSession(showProfileSheet: $showProfileSheet)
-        .task { myCode = await friendsManager.myFriendCode() }
         .onChange(of: auth.isReady) { _, ready in
             guard ready else { return }
-            Task { myCode = await friendsManager.myFriendCode() }
             presentPendingInvite()
         }
         .onChange(of: inviteRouter.pendingCode) { _, _ in presentPendingInvite() }
         .sheet(isPresented: $showProfileSheet) { MyProfileSheet() }
         .sheet(isPresented: $showInviteSheet, onDismiss: { invitedCode = nil }) {
-            AddFriendSheet(invitedCode: invitedCode, onJoined: { _ in })
+            AddFriendSheet(invitedCode: invitedCode, mode: inviteSheetMode)
+        }
+        .sheet(isPresented: $showGmailSettings) {
+            NavigationStack { GmailBanksView() }
+                .appAppearance()
+                .appTextSize()
         }
         .sheet(item: $selectedFriend) { friend in
             FriendProfileView(friend: friend, totals: totals,
@@ -108,16 +120,18 @@ struct FriendsListView: View {
     private var actions: some View {
         HStack(spacing: 10) {
             Button {
-                shareMyCode()
+                inviteSheetMode = .invite
+                showInviteSheet = true
             } label: {
-                actionLabel(icon: "square.and.arrow.up", title: "Compartir mi código", filled: true)
+                actionLabel(icon: "person.badge.plus", title: "Invitar", filled: true)
             }
             .buttonStyle(.plain)
 
             Button {
+                inviteSheetMode = .redeem
                 showInviteSheet = true
             } label: {
-                actionLabel(icon: "ticket", title: "Canjear", filled: false)
+                actionLabel(icon: "ticket", title: "Usar invitación", filled: false)
             }
             .buttonStyle(.plain)
         }
@@ -138,49 +152,167 @@ struct FriendsListView: View {
         .overlay(Capsule().stroke(filled ? Color.clear : palette.hairline, lineWidth: 0.5))
     }
 
-    // MARK: - Mi código
+    // MARK: - Sin Google (2g)
 
-    private func codeCard(_ code: String) -> some View {
-        VStack(spacing: 8) {
-            ShellSectionHeader(title: "Tu código")
+    private var needsGoogle: some View {
+        VStack(spacing: 0) {
+            Image(systemName: "person.crop.circle.badge.xmark")
+                .font(.system(size: 36, weight: .light))
+                .foregroundStyle(palette.tertiaryLabel)
 
-            ShellCard {
-                HStack(spacing: 12) {
-                    Text(code)
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
-                        .tracking(2)
-                        .foregroundStyle(palette.label)
+            Text("Amigos necesita tu cuenta de Google")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(palette.label)
+                .multilineTextAlignment(.center)
+                .padding(.top, 12)
 
-                    Spacer()
+            Text("Conecta tu correo de Google para que nadie pueda hacerse pasar por ti. Es la misma cuenta que lee tus correos del banco.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(palette.secondaryLabel)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 290)
+                .padding(.top, 8)
 
-                    Button {
-                        UIPasteboard.general.string = code
-                        withAnimation { copied = true }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
-                            withAnimation { copied = false }
-                        }
-                    } label: {
-                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(copied ? palette.positive : palette.secondaryLabel)
-                            .frame(width: 36, height: 36)
-                            .background(palette.neutralSurface, in: Circle())
+            Button {
+                GmailAuthService.shared.signIn()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "envelope")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Conectar Gmail")
+                        .font(.system(size: 15.5, weight: .semibold))
+                }
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 22)
+                .frame(height: 50)
+                .background(accent.color, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 22)
+
+            Button("Ver Ajustes → Gmail y bancos") { showGmailSettings = true }
+                .font(.system(size: 13.5, weight: .semibold))
+                .foregroundStyle(palette.secondaryLabel)
+                .padding(.vertical, 14)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 24)
+        .padding(.top, 40)
+    }
+
+    // MARK: - Solicitudes (2c)
+
+    @ViewBuilder
+    private var requestsSection: some View {
+        let incoming = friendsManager.incomingRequests
+        let outgoing = friendsManager.outgoingRequests
+        if !incoming.isEmpty || !outgoing.isEmpty {
+            VStack(spacing: 0) {
+                ShellSectionHeader(title: "Solicitudes",
+                                   trailing: incoming.isEmpty ? nil
+                                       : incoming.count == 1 ? "1 recibida" : "\(incoming.count) recibidas")
+                MovementCard {
+                    ForEach(Array(incoming.enumerated()), id: \.element.id) { index, request in
+                        incomingRow(request)
+                        if index < incoming.count - 1 || !outgoing.isEmpty { MovementSeparator() }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Copiar mi código")
-
-                    Button(action: shareMyCode) {
-                        Image(systemName: "message")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(palette.secondaryLabel)
-                            .frame(width: 36, height: 36)
-                            .background(palette.neutralSurface, in: Circle())
+                    ForEach(Array(outgoing.enumerated()), id: \.element.id) { index, request in
+                        outgoingRow(request)
+                        if index < outgoing.count - 1 { MovementSeparator() }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Compartir por WhatsApp")
                 }
             }
         }
+    }
+
+    private func incomingRow(_ request: FriendRequest) -> some View {
+        let look = request.penguin ?? PenguinLook()
+        return HStack(spacing: 12) {
+            PenguinAvatar(look: look, size: 44, background: palette.neutralSurface)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(request.displayName)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(palette.label)
+                    .lineLimit(1)
+                Text(look.animal?.name ?? "Pingüino")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(palette.secondaryLabel)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button("Rechazar") {
+                Task { await friendsManager.respond(to: request, accept: false) }
+            }
+            .font(.system(size: 13.5, weight: .semibold))
+            .foregroundStyle(palette.secondaryLabel)
+            .fixedSize()
+
+            Button {
+                Task { await friendsManager.respond(to: request, accept: true) }
+            } label: {
+                Text("Aceptar")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(Color.white)
+                    .padding(.horizontal, 14)
+                    .frame(height: 32)
+                    .background(accent.color, in: Capsule())
+            }
+            .fixedSize()
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private func outgoingRow(_ request: FriendRequest) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock")
+                .font(.system(size: 18))
+                .foregroundStyle(palette.tertiaryLabel)
+                .frame(width: 44, height: 44)
+                .background(palette.track, in: Circle())
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Esperando a \(request.displayName)")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(palette.secondaryLabel)
+                    .lineLimit(1)
+                Text(Self.since(request.createdAt))
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(palette.secondaryLabel)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button {
+                Task { await friendsManager.cancel(request) }
+            } label: {
+                Text("Retirar")
+                    .font(.system(size: 13.5, weight: .semibold))
+                    .foregroundStyle(palette.secondaryLabel)
+                    .padding(.horizontal, 12)
+                    .frame(height: 32)
+                    .background(palette.neutralSurface, in: Capsule())
+                    .overlay(Capsule().stroke(palette.hairline, lineWidth: 0.5))
+            }
+            .fixedSize()
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    /// «Desde hoy», «Desde ayer», «Desde hace 3 días».
+    private static func since(_ date: Date?) -> String {
+        guard let date else { return "Enviada" }
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Desde hoy" }
+        if calendar.isDateInYesterday(date) { return "Desde ayer" }
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date),
+                                           to: calendar.startOfDay(for: Date())).day ?? 0
+        return "Desde hace \(days) días"
     }
 
     // MARK: - Fila
@@ -241,20 +373,12 @@ struct FriendsListView: View {
 
     // MARK: - Invitación
 
-    private func shareMyCode() {
-        guard let code = myCode else { return }
-        let link = "https://agrupay.app/i/" + code
-        let text = "Agrégame en AgruPay con mi código \(code): \(link)"
-        guard let url = URL(string: "https://wa.me/?text=" + (text.addingPercentEncoding(
-            withAllowedCharacters: .urlQueryAllowed) ?? "")) else { return }
-        UIApplication.shared.open(url)
-    }
-
     /// Sin sesión no se puede canjear: el código espera en el router hasta que
     /// `auth.isReady`.
     private func presentPendingInvite() {
         guard auth.isReady, inviteRouter.pendingCode != nil, let code = inviteRouter.take() else { return }
         invitedCode = code
+        inviteSheetMode = .redeem
         showInviteSheet = true
     }
 }

@@ -1,24 +1,67 @@
 import SwiftUI
 
-/// El pingüino de "Tu perfil" (diseño `Amigos · Mi gasto y tarjeta.dc.html`, 2a).
+/// El personaje de "Tu perfil" (diseño `Amigos · Mi gasto y tarjeta.dc.html`, 2a):
+/// un pingüino o uno de los animales del kit, con hasta un objeto por zona.
 ///
-/// Se guarda como índices y no como colores sueltos: así cabe en un JSON de
-/// seis números en el respaldo, y si una paleta se afina más adelante todos
-/// los pingüinos que la usan se afinan con ella.
-struct PenguinLook: Codable, Hashable {
+/// Se guarda como índices y no como colores sueltos: así cabe en un JSON
+/// corto en el respaldo, y si una paleta se afina más adelante todos los
+/// personajes que la usan se afinan con ella. El nombre viene de cuando sólo
+/// había pingüinos; cambiarlo movería el JSON de respaldos, caché y servidor.
+struct PenguinLook: Hashable {
+    /// `nil` = pingüino; si no, el id de un `AvatarAnimal`.
+    var species: String? = nil
+
+    // Pingüino
     var breed: Int = 0
     /// 0 = joven (cabeza y ojos más grandes), 1 = adulto.
     var age: Int = 1
     var coat: Int = 0
     var beak: Int = 0
     var accent: Int = 0
-    var accessory: Int = 0
+
+    // Animal: índices en `AvatarPalettes`; 0 = el color del diseño.
+    var fur: Int = 0
+    var nose: Int = 0
+    var mark: Int = 0
+
+    /// Ids de `AvatarItem`, como mucho uno por zona.
+    var items: [String] = []
+
+    var animal: AvatarAnimal? { AvatarCatalog.animal(species) }
+    var isPenguin: Bool { animal == nil }
+    /// "Emperador", "Zorro"…: lo que se lee en accesibilidad y en el editor.
+    var speciesName: String { animal?.name ?? "Pingüino \(breedStyle.name)" }
 
     var breedStyle: PenguinBreed { PenguinBreed.all[breed % PenguinBreed.all.count] }
     var coatHex: String { PenguinPalettes.coats[coat % PenguinPalettes.coats.count].hex }
     var beakHex: String { PenguinPalettes.beaks[beak % PenguinPalettes.beaks.count].hex }
     var accentHex: String { PenguinPalettes.accents[accent % PenguinPalettes.accents.count].hex }
-    var accessoryStyle: PenguinAccessory { PenguinAccessory(rawValue: accessory % PenguinAccessory.allCases.count) ?? .none }
+
+    var furHex: String { Self.pick(AvatarPalettes.fur, fur, original: animal?.fur) }
+    var noseHex: String { Self.pick(AvatarPalettes.nose, nose, original: animal?.nose) }
+    var markHex: String { Self.pick(AvatarPalettes.mark, mark, original: animal?.mark) }
+
+    /// Las variables CSS del SVG del animal.
+    var animalColors: [String: RGBColor] {
+        ["pelo": RGBColor(hex: furHex), "pico": RGBColor(hex: noseHex), "acento": RGBColor(hex: markHex)]
+    }
+
+    private static func pick(_ swatches: [AvatarPalettes.Swatch], _ index: Int, original: String?) -> String {
+        let hex = swatches[((index % swatches.count) + swatches.count) % swatches.count].hex
+        return hex.isEmpty ? (original ?? "#9a9cae") : hex
+    }
+
+    var equipped: [AvatarItem] { items.compactMap(AvatarCatalog.item) }
+
+    func item(in zone: AvatarZone) -> AvatarItem? {
+        equipped.first { $0.zone == zone }
+    }
+
+    /// Pone `item` en su zona (quitando lo que hubiera), o la vacía con `nil`.
+    mutating func wear(_ item: AvatarItem?, in zone: AvatarZone) {
+        items.removeAll { AvatarCatalog.item($0)?.zone == zone }
+        if let item, item.zone == zone { items.append(item.id) }
+    }
 
     /// Cambiar de raza trae sus colores de siempre; después se retocan a mano.
     mutating func setBreed(_ index: Int) {
@@ -30,15 +73,97 @@ struct PenguinLook: Codable, Hashable {
         accent = base.accent
     }
 
+    /// Cambiar de especie trae sus colores originales; los objetos se quedan.
+    mutating func setSpecies(_ id: String?) {
+        species = AvatarCatalog.animal(id)?.id
+        fur = 0
+        nose = 0
+        mark = 0
+    }
+
     static func random() -> PenguinLook {
         var look = PenguinLook()
         look.setBreed(Int.random(in: 0..<PenguinBreed.all.count))
         look.age = Int.random(in: 0...1)
-        look.accessory = Int.random(in: 0..<PenguinAccessory.allCases.count)
+        // El pingüino cuenta como una especie más.
+        let species = [nil] + AvatarCatalog.animals.map { Optional($0.id) }
+        look.setSpecies(species.randomElement() ?? nil)
+        for zone in AvatarZone.allCases where Double.random(in: 0..<1) < 0.4 {
+            look.wear(AvatarCatalog.items(in: zone).randomElement(), in: zone)
+        }
         return look
     }
 
     static let ageNames = ["Joven", "Adulto"]
+
+    /// Lo que entiende una versión anterior de la app, que sólo sabe de
+    /// pingüinos: se manda en la columna `penguin` de `profiles`.
+    var legacyPenguin: PenguinLook {
+        var look = self
+        look.species = nil
+        look.fur = 0
+        look.nose = 0
+        look.mark = 0
+        return look
+    }
+}
+
+// MARK: - JSON
+
+extension PenguinLook: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case species, breed, age, coat, beak, accent, fur, nose, mark, items
+        /// El accesorio único de antes (0 nada, 1 gorro, 2 bufanda, 3 lentes).
+        /// Se sigue escribiendo para las versiones anteriores.
+        case accessory
+    }
+
+    /// Todo opcional: un JSON viejo (sin especie ni objetos) o uno de una
+    /// versión más nueva (con campos que aún no existen) se lee igual.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        species = try c.decodeIfPresent(String.self, forKey: .species)
+        breed = try c.decodeIfPresent(Int.self, forKey: .breed) ?? 0
+        age = try c.decodeIfPresent(Int.self, forKey: .age) ?? 1
+        coat = try c.decodeIfPresent(Int.self, forKey: .coat) ?? 0
+        beak = try c.decodeIfPresent(Int.self, forKey: .beak) ?? 0
+        accent = try c.decodeIfPresent(Int.self, forKey: .accent) ?? 0
+        fur = try c.decodeIfPresent(Int.self, forKey: .fur) ?? 0
+        nose = try c.decodeIfPresent(Int.self, forKey: .nose) ?? 0
+        mark = try c.decodeIfPresent(Int.self, forKey: .mark) ?? 0
+        if let items = try c.decodeIfPresent([String].self, forKey: .items) {
+            self.items = items
+        } else {
+            let legacy = try c.decodeIfPresent(Int.self, forKey: .accessory) ?? 0
+            items = Self.legacyItems[legacy].map { [$0] } ?? []
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encodeIfPresent(species, forKey: .species)
+        try c.encode(breed, forKey: .breed)
+        try c.encode(age, forKey: .age)
+        try c.encode(coat, forKey: .coat)
+        try c.encode(beak, forKey: .beak)
+        try c.encode(accent, forKey: .accent)
+        try c.encode(fur, forKey: .fur)
+        try c.encode(nose, forKey: .nose)
+        try c.encode(mark, forKey: .mark)
+        try c.encode(items, forKey: .items)
+        try c.encode(legacyAccessory, forKey: .accessory)
+    }
+
+    /// Los tres accesorios de antes, en sus equivalentes del kit.
+    private static let legacyItems: [Int: String] = [1: "chullo", 2: "bufanda", 3: "lentes"]
+
+    /// El accesorio de antes que más se parece a lo que lleva puesto.
+    private var legacyAccessory: Int {
+        if item(in: .cabeza) != nil { return 1 }
+        if item(in: .cuello) != nil { return 2 }
+        if item(in: .cara) != nil { return 3 }
+        return 0
+    }
 }
 
 struct PenguinBreed {
@@ -68,19 +193,6 @@ struct PenguinBreed {
     ]
 }
 
-enum PenguinAccessory: Int, CaseIterable {
-    case none, hat, scarf, glasses
-
-    var name: String {
-        switch self {
-        case .none: return "Ninguno"
-        case .hat: return "Gorro"
-        case .scarf: return "Bufanda"
-        case .glasses: return "Lentes"
-        }
-    }
-}
-
 enum PenguinPalettes {
     struct Swatch { let name: String; let hex: String }
 
@@ -104,7 +216,7 @@ enum PenguinPalettes {
 
 /// Color hexadecimal con mezcla en RGB — lo mismo que hacía `color-mix` en el
 /// SVG original para los brillos del manto y la sombra del pico.
-struct RGBColor {
+struct RGBColor: Equatable {
     let r: Double, g: Double, b: Double
 
     init(r: Double, g: Double, b: Double) { self.r = r; self.g = g; self.b = b }

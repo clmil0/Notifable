@@ -78,7 +78,28 @@ class GmailSyncService: ObservableObject {
     /// - Parameter quiet: comprobación periódica. No enciende `isSyncing` (que
     ///   en Gmail y bancos cambia la fila de "Última lectura" por la barra de
     ///   progreso) salvo que de verdad haya correos nuevos que procesar.
+    /// Hay una lectura en curso. Sólo se toca en el hilo principal.
+    private var isRunning = false
+    /// Rango pedido mientras otra lectura corría: se lanza al terminar ésa.
+    private var queuedRange: (start: Date?, end: Date?)?
+
+    /// Cierra la lectura en curso y, si alguien pidió un rango mientras
+    /// tanto, lo lanza ahora.
+    private func finishRun() {
+        DispatchQueue.main.async {
+            self.isRunning = false
+            if let queued = self.queuedRange {
+                self.queuedRange = nil
+                self.syncEmails(force: true, startDate: queued.start, endDate: queued.end)
+            }
+        }
+    }
+
     func syncEmails(force: Bool = false, quiet: Bool = false, startDate: Date? = nil, endDate: Date? = nil) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.syncEmails(force: force, quiet: quiet, startDate: startDate, endDate: endDate) }
+            return
+        }
         // Throttling: un poco menos del intervalo del temporizador, para que su
         // propio desfase no le haga saltarse una vuelta.
         if !force, let lastSync = lastSyncDate, Date().timeIntervalSince(lastSync) < Self.foregroundPollInterval - 10 {
@@ -97,6 +118,18 @@ class GmailSyncService: ObservableObject {
             return
         }
         
+        // Una lectura a la vez. Dos solapadas —tras reinstalar, la del
+        // onboarding y la de volver a primer plano o una de rango— importaban
+        // cada una su copia de los mismos correos. Un rango pedido a medias no
+        // se pierde: se lanza al acabar la actual. Una comprobación normal se
+        // descarta, porque la lectura en curso ya la cubre.
+        if isRunning {
+            if startDate != nil || endDate != nil { queuedRange = (startDate, endDate) }
+            Diagnostics.shared.log("Sync Gmail: ya hay una lectura en curso, \(queuedRange != nil ? "se encola el rango" : "se omite")")
+            return
+        }
+        isRunning = true
+
         Diagnostics.shared.log("Sync Gmail: inicio (force: \(force), rango: \(startDate != nil || endDate != nil))")
         if !quiet {
             DispatchQueue.main.async {
@@ -113,6 +146,7 @@ class GmailSyncService: ObservableObject {
                 self.isSyncing = false
                 self.lastSyncError = "No access token"
             }
+            finishRun()
             return
         }
         
@@ -140,6 +174,7 @@ class GmailSyncService: ObservableObject {
                                     self?.isSyncing = false
                                     self?.lastSyncError = err.localizedDescription
                                 }
+                                self?.finishRun()
                             }
                         }
                     } else {
@@ -147,6 +182,7 @@ class GmailSyncService: ObservableObject {
                             self?.isSyncing = false
                             self?.lastSyncError = "Token refresh failed"
                         }
+                        self?.finishRun()
                     }
                 }
             }
@@ -178,7 +214,12 @@ class GmailSyncService: ObservableObject {
             query = "\(query) AND before:\(endEpoch)"
         }
         
-        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return }
+        // Siempre con `completion`: un `return` a secas dejaría la lectura
+        // "en curso" para siempre y `isRunning` bloquearía todas las demás.
+        guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            completion(.success([]))
+            return
+        }
 
         // Gmail pagina: sin seguir `nextPageToken`, un rango largo se cortaba en
         // 500 correos y el resto se perdía en silencio. Cinco meses de dos
@@ -283,11 +324,57 @@ class GmailSyncService: ObservableObject {
             .union(incomes.compactMap { $0.emailID })
     }
 
+    /// Varios movimientos con el **mismo** `emailID`: copias que dejaron dos
+    /// lecturas solapadas antes de que `syncEmails` las serializara (se vio
+    /// al reinstalar: el mismo yapeo repetido varias veces). Un correo es un
+    /// movimiento, así que se queda uno por correo.
+    ///
+    /// Se conserva el que tenga más decisiones del usuario encima (abonos,
+    /// deuda, categoría) y, de las demás copias, sólo se borran las que no
+    /// tienen abonos: borrar una con abonos soltaría esos cobros.
+    @discardableResult
+    static func removeSameEmailDuplicates(in context: ModelContext) -> Int {
+        let expenses = (try? context.fetch(FetchDescriptor<Expense>(predicate: #Predicate { $0.emailID != nil }))) ?? []
+        let groups = Dictionary(grouping: expenses, by: { $0.emailID ?? "" }).filter { $0.value.count > 1 }
+
+        func weight(_ e: Expense) -> Int {
+            ((e.payments ?? []).isEmpty ? 0 : 4)
+                + (e.isDebt ? 2 : 0)
+                + (e.category == Accounting.unclassified ? 0 : 1)
+        }
+
+        var removed = 0
+        for (_, copies) in groups {
+            let keep = copies.max { weight($0) < weight($1) }
+            for copy in copies where copy.id != keep?.id && (copy.payments ?? []).isEmpty {
+                context.delete(copy)
+                removed += 1
+            }
+        }
+
+        let incomes = (try? context.fetch(FetchDescriptor<Income>(predicate: #Predicate { $0.emailID != nil }))) ?? []
+        for (_, copies) in Dictionary(grouping: incomes, by: { $0.emailID ?? "" }) where copies.count > 1 {
+            // Uno atado a una deuda gana: es una decisión del usuario.
+            let keep = copies.first { $0.debtReference != nil } ?? copies[0]
+            for copy in copies where copy.id != keep.id && copy.debtReference == nil {
+                context.delete(copy)
+                removed += 1
+            }
+        }
+
+        if removed > 0 {
+            try? context.save()
+            Diagnostics.shared.log("Copias del mismo correo borradas: \(removed)")
+        }
+        return removed
+    }
+
     /// Borra los duplicados que dejó el error de arriba: un gasto cuyo correo
     /// ya está unido a otro gasto. Sólo si nadie decidió nada sobre él — ni
     /// deuda, ni cobros, ni ediciones —; si no, se deja y se anota.
     @discardableResult
     static func removeLinkedDuplicates(in context: ModelContext) -> Int {
+        removeSameEmailDuplicates(in: context)
         let expenses = (try? context.fetch(FetchDescriptor<Expense>())) ?? []
         let linkedIDs = Set(expenses.compactMap(\.relatedEmailID))
         guard !linkedIDs.isEmpty else { return 0 }
@@ -382,7 +469,7 @@ class GmailSyncService: ObservableObject {
                 
                 semaphore.wait()
                 group.enter()
-                self?.fetchMessageDetails(id: id, token: token) { body in
+                self?.fetchMessageDetails(id: id, token: token) { body, receivedAt in
                     defer {
                         semaphore.signal()
                         group.leave()
@@ -393,7 +480,7 @@ class GmailSyncService: ObservableObject {
                     if let body = body {
                         let alreadyImported = queue.sync { knownIDs.contains(id) }
 
-                        if !alreadyImported, let parsed = self?.parseEmailBody(body) {
+                        if !alreadyImported, let parsed = self?.parseEmailBody(body, receivedAt: receivedAt) {
                             foundBankName = parsed.bankName
                             DispatchQueue.main.sync {
                                 if let context = self?.modelContext {
@@ -448,6 +535,7 @@ class GmailSyncService: ObservableObject {
                 }
                 print("Sync complete. Found \(newExpensesFound) new expenses of \(newMessages.count) checked.")
                 Diagnostics.shared.log("Sync Gmail: fin, \(newExpensesFound) nuevos")
+                self?.finishRun()
             }
         }
     }
@@ -476,7 +564,7 @@ class GmailSyncService: ObservableObject {
             for id in ids {
                 semaphore.wait()
                 group.enter()
-                self?.fetchMessageDetails(id: id, token: token) { body in
+                self?.fetchMessageDetails(id: id, token: token) { body, receivedAt in
                     defer {
                         semaphore.signal()
                         group.leave()
@@ -486,7 +574,7 @@ class GmailSyncService: ObservableObject {
                     if let body = body {
                         let alreadyImported = queue.sync { knownIDs.contains(id) }
 
-                        if !alreadyImported, let parsed = self?.parseEmailBody(body) {
+                        if !alreadyImported, let parsed = self?.parseEmailBody(body, receivedAt: receivedAt) {
                             foundBankName = parsed.bankName
                             DispatchQueue.main.sync {
                                 if let context = self?.modelContext {
@@ -700,8 +788,14 @@ class GmailSyncService: ObservableObject {
         }.resume()
     }
     
-    private func fetchMessageDetails(id: String, token: String, completion: @escaping (String?) -> Void) {
-        guard let url = URL(string: "\(baseURL)/messages/\(id)?format=full") else { return }
+    /// Devuelve el texto del correo y cuándo lo recibió Gmail (`internalDate`,
+    /// en milisegundos). Esa fecha es el respaldo cuando el parser no logra
+    /// leer la del movimiento: ver `parseEmailBody`.
+    private func fetchMessageDetails(id: String, token: String, completion: @escaping (String?, Date?) -> Void) {
+        guard let url = URL(string: "\(baseURL)/messages/\(id)?format=full") else {
+            completion(nil, nil)
+            return
+        }
         
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -709,7 +803,7 @@ class GmailSyncService: ObservableObject {
         
         URLSession.shared.dataTask(with: request) { data, response, error in
             guard let data = data, error == nil else {
-                completion(nil)
+                completion(nil, nil)
                 return
             }
             
@@ -722,12 +816,15 @@ class GmailSyncService: ObservableObject {
                         try? bodyText.write(to: URL(fileURLWithPath: "/Users/josephmt/Downloads/bbva_body.txt"), atomically: true, encoding: .utf8)
                     }
                     
-                    completion(bodyText)
+                    let receivedAt = (json["internalDate"] as? String)
+                        .flatMap(Double.init)
+                        .map { Date(timeIntervalSince1970: $0 / 1000) }
+                    completion(bodyText, receivedAt)
                 } else {
-                    completion(nil)
+                    completion(nil, nil)
                 }
             } catch {
-                completion(nil)
+                completion(nil, nil)
             }
         }.resume()
     }
@@ -781,11 +878,31 @@ class GmailSyncService: ObservableObject {
         return json["snippet"] as? String ?? ""
     }
     
-    private func parseEmailBody(_ text: String) -> (expense: Expense?, income: Income?, bankName: String)? {
+    /// Tolerancia para decidir que la fecha que dio el parser es imposible.
+    /// Holgada a propósito: el parser interpreta la hora del correo en la zona
+    /// del teléfono, que puede estar varias horas por delante de la de Perú.
+    static let impossibleDateSlack: TimeInterval = 12 * 3600
+
+    /// Un movimiento no puede ser posterior al correo que lo avisa. Si lo es,
+    /// el parser no encontró la fecha y cayó en su respaldo `Date()`: al
+    /// reinstalar y releer meses de correo, todos esos gastos acababan con la
+    /// hora de la reinstalación, amontonados en el mes actual. La fecha en que
+    /// Gmail recibió el correo es una aproximación mucho mejor.
+    static func correctedDate(_ parsed: Date, receivedAt: Date?) -> Date {
+        guard let receivedAt, parsed.timeIntervalSince(receivedAt) > impossibleDateSlack else { return parsed }
+        return receivedAt
+    }
+
+    private func parseEmailBody(_ text: String, receivedAt: Date?) -> (expense: Expense?, income: Income?, bankName: String)? {
         let cleanText = text.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
 
         for parser in parsers {
             if let expense = parser.parse(cleanText: cleanText) {
+                let fixed = Self.correctedDate(expense.date, receivedAt: receivedAt)
+                if fixed != expense.date {
+                    Diagnostics.shared.log("Sync Gmail: \(parser.bankName) sin fecha legible, se usa la del correo")
+                    expense.date = fixed
+                }
                 return (applyAutoCategorization(to: expense), nil, parser.bankName)
             }
         }
@@ -794,6 +911,7 @@ class GmailSyncService: ObservableObject {
         // parseIncome cuando ningún parser lo reconoció como gasto.
         for parser in parsers {
             if let income = parser.parseIncome(cleanText: cleanText) {
+                income.date = Self.correctedDate(income.date, receivedAt: receivedAt)
                 return (nil, income, parser.bankName)
             }
         }
@@ -880,8 +998,25 @@ class GmailSyncService: ObservableObject {
         return String(data: outputData, encoding: encoding) ?? String(data: outputData, encoding: .utf8) ?? processed
     }
     
+    /// ¿Ya existe un movimiento de este correo? Se pregunta a la base justo
+    /// antes de insertar, en el hilo principal, que es donde se inserta.
+    ///
+    /// `knownIDs` sólo es una foto tomada al empezar cada lectura: dos lecturas
+    /// que se solapan (la del onboarding y una de rango, por ejemplo) no ven lo
+    /// que inserta la otra, y cada una creaba su copia del mismo correo. Antes
+    /// esta comprobación sólo existía en el camino de Apple.
+    static func isAlreadyImported(emailID: String, context: ModelContext) -> Bool {
+        let expenses = FetchDescriptor<Expense>(predicate: #Predicate {
+            $0.emailID == emailID || $0.relatedEmailID == emailID
+        })
+        let incomes = FetchDescriptor<Income>(predicate: #Predicate { $0.emailID == emailID })
+        return ((try? context.fetchCount(expenses)) ?? 0) > 0
+            || ((try? context.fetchCount(incomes)) ?? 0) > 0
+    }
+
     private func handleExpenseInsertion(expenseData: (expense: Expense, bankName: String), emailID: String, context: ModelContext) -> Bool {
         let newExpense = expenseData.expense
+        if Self.isAlreadyImported(emailID: emailID, context: context) { return false }
         
         let isAppleReceipt = expenseData.bankName == "Apple"
         let isAppleBankBill = !isAppleReceipt && newExpense.merchant.lowercased().contains("apple")
@@ -949,6 +1084,7 @@ class GmailSyncService: ObservableObject {
     /// los gastos, no hay vínculo con Apple ni deduplicación especial que
     /// resolver — el `emailID` ya evita procesarlo dos veces.
     private func handleIncomeInsertion(income: Income, emailID: String, context: ModelContext) -> Bool {
+        if Self.isAlreadyImported(emailID: emailID, context: context) { return false }
         income.emailID = emailID
         context.insert(income)
         try? context.save()

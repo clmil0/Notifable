@@ -247,7 +247,7 @@ struct SettingsView: View {
     }
 
     private var gmailValue: String {
-        guard gmailAuth.isAuthenticated else { return "Sin conectar" }
+        guard gmailAuth.isAuthenticated else { return gmailAuth.accessRevoked ? "Se desconectó" : "Sin conectar" }
         return BankSource.summaryLabel
     }
 

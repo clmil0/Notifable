@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UserNotifications
 
 /// Ventana de UIKit aparte, sólo para blindar la app en el instante exacto de
 /// perder el primer plano.
@@ -80,6 +81,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         // Lo más temprano posible: un cuelgue en el arranque también debe quedar.
         Diagnostics.shared.start()
+        // Antes de que termine el arranque, como pide `UNUserNotificationCenter`,
+        // para que los avisos también se vean con la app abierta.
+        UNUserNotificationCenter.current().delegate = NotificationManager.shared
         return true
     }
 

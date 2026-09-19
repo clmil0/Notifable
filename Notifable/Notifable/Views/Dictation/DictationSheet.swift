@@ -7,6 +7,10 @@ import SwiftUI
 /// mientras se habla; cada movimiento entendido genera su tarjeta, que se
 /// registra sola a los 2 s salvo que se cancele o se edite. Si falta un dato,
 /// lo pregunta («¿De cuánto?») y la siguiente frase lo completa.
+///
+/// «Listo» cierra el movimiento que se está diciendo sin esperar al silencio;
+/// sólo cierra la hoja cuando ya no queda nada por entender. El botón de
+/// silenciar pausa la escucha sin terminar el dictado.
 struct DictationSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
@@ -42,7 +46,9 @@ struct DictationSheet: View {
             }
             .scrollIndicators(.hidden)
 
-            DictationFooter(speech: session.speech, onDone: { dismiss() })
+            DictationFooter(speech: session.speech, session: session, onDone: {
+                if session.done() { dismiss() }
+            })
         }
         .padding(.horizontal, 16)
         .padding(.top, 20)
@@ -99,7 +105,7 @@ private struct DictationHeader: View {
     private var title: String {
         switch speech.phase {
         case .idle, .starting: return "Preparando…"
-        case .listening:       return "Escuchando…"
+        case .listening:       return speech.isMuted ? "Silenciado" : "Escuchando…"
         case .denied:          return "Sin acceso al micrófono"
         case .unavailable:     return "Dictado no disponible"
         }
@@ -112,6 +118,7 @@ private struct DictationHeader: View {
         case .unavailable(let message):
             return message
         default:
+            if speech.isMuted { return "Activa el micrófono para seguir dictando" }
             if session.question != nil { return "Falta un dato: te lo pregunto" }
             let saved = session.savedCount
             if saved > 0 {
@@ -125,6 +132,7 @@ private struct DictationHeader: View {
 
 private struct DictationFooter: View {
     @ObservedObject var speech: SpeechDictation
+    @ObservedObject var session: DictationSession
     let onDone: () -> Void
 
     @Environment(\.colorScheme) private var scheme
@@ -151,17 +159,40 @@ private struct DictationFooter: View {
                 .buttonStyle(.plain)
             }
 
+            if speech.phase == .listening {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { speech.setMuted(!speech.isMuted) }
+                } label: {
+                    Image(systemName: speech.isMuted ? "mic.slash.fill" : "mic.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(speech.isMuted ? Color.white : palette.label)
+                        .contentTransition(.symbolEffect(.replace))
+                        .frame(width: 46, height: 46)
+                        .background(speech.isMuted ? AnyShapeStyle(palette.negative)
+                                                   : AnyShapeStyle(palette.surface), in: Circle())
+                        .overlay(Circle().stroke(palette.hairline, lineWidth: speech.isMuted ? 0 : 0.5))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(speech.isMuted ? "Activar micrófono" : "Silenciar micrófono")
+            }
+
             Button {
                 onDone()
             } label: {
-                Text("Listo")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(Color.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(accent.color, in: Capsule())
+                HStack(spacing: 8) {
+                    if session.isThinking {
+                        ProgressView().tint(.white).controlSize(.small)
+                    }
+                    Text(session.isThinking ? "Entendiendo…" : "Listo")
+                        .font(.system(size: 15, weight: .bold))
+                }
+                .foregroundStyle(Color.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 46)
+                .background(accent.color.opacity(session.isThinking ? 0.6 : 1), in: Capsule())
             }
             .buttonStyle(.plain)
+            .disabled(session.isThinking)
         }
     }
 }
@@ -174,7 +205,7 @@ private struct DictationListeningRow: View {
     @ObservedObject var speech: SpeechDictation
     let style: DictationStyle
 
-    private var isActive: Bool { speech.phase == .listening }
+    private var isActive: Bool { speech.phase == .listening && !speech.isMuted }
 
     var body: some View {
         HStack(spacing: 16) {
@@ -222,7 +253,7 @@ private struct DictationTranscript: View {
                 (Text(text.isEmpty ? "" : text + " ")
                     .foregroundColor(live ? palette.label : palette.tertiaryLabel)
                  + Text("|")
-                    .foregroundColor(speech.phase == .listening && caretOn ? accent.color : .clear))
+                    .foregroundColor(speech.phase == .listening && !speech.isMuted && caretOn ? accent.color : .clear))
                     .font(.system(size: 22, weight: .semibold))
                     .tracking(-0.4)
                     .lineLimit(4)

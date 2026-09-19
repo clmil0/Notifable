@@ -7,6 +7,10 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
     static let shared = GmailAuthService()
     
     @Published var isAuthenticated: Bool = false
+    /// Google dejó de aceptar el permiso (se revocó desde la cuenta, cambió la
+    /// contraseña o caducó): hay que volver a vincular. Antes la app seguía
+    /// diciendo «Conectado» y simplemente dejaba de leer.
+    @Published private(set) var accessRevoked = UserDefaults.standard.bool(forKey: Keys.accessRevoked)
     
     private let clientID = "565627106864-cd3nnm389bdf9cfdqo015d7tbm052bdr.apps.googleusercontent.com"
     private let redirectURI = "com.googleusercontent.apps.565627106864-cd3nnm389bdf9cfdqo015d7tbm052bdr:/oauth2callback"
@@ -18,8 +22,25 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
     private let scope = "openid%20email%20https://www.googleapis.com/auth/gmail.readonly"
     
     private var authSession: ASWebAuthenticationSession?
-    
+
+    enum Keys {
+        /// En `SecureStore.gmail`.
+        static let accessToken = "accessToken"
+        static let refreshToken = "refreshToken"
+        /// En `UserDefaults`: sólo si el login trae identidad, no el token.
+        static let hasIdentity = "GmailHasIdentity"
+        static let accountEmail = "GmailAccountEmail"
+        static let accessRevoked = "GmailAccessRevoked"
+    }
+
+    /// El `id_token` vive una hora y sólo sirve para canjearlo en Supabase:
+    /// se guarda en memoria, nunca en disco. Si hace falta otro, se pide con
+    /// el `refresh_token`.
+    private var idToken: String?
+    private let idTokenLock = NSLock()
+
     override init() {
+        CredentialMigration.runIfNeeded()
         super.init()
         checkAuthStatus()
     }
@@ -44,49 +65,89 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
     /// secuencia, que es justo lo que pasaba con la tarjeta de Ajustes.
     static let pendingLinkFlowKey = "pendingGmailLinkFlow"
 
+    /// PKCE (RFC 7636) y `state`: el esquema `com.googleusercontent.apps…`
+    /// lo puede registrar cualquier app, así que otra podría recibir el
+    /// `code`. Sin el `code_verifier`, que no sale de esta sesión, ese código
+    /// no se puede canjear; y el `state` descarta una respuesta que no pidió
+    /// este login.
     func signIn() {
         UserDefaults.standard.set(true, forKey: Self.pendingLinkFlowKey)
-        guard let url = URL(string: "\(authURL)?client_id=\(clientID)&redirect_uri=\(redirectURI)&response_type=code&scope=\(scope)&prompt=consent&access_type=offline") else { return }
-        
+        let verifier = Self.randomURLSafe(bytes: 32)
+        let state = Self.randomURLSafe(bytes: 16)
+        let challenge = Self.base64URL(Data(SHA256.hash(data: Data(verifier.utf8))))
+        guard let url = URL(string: "\(authURL)?client_id=\(clientID)&redirect_uri=\(redirectURI)&response_type=code&scope=\(scope)&prompt=consent&access_type=offline&code_challenge=\(challenge)&code_challenge_method=S256&state=\(state)") else { return }
+
         let scheme = "com.googleusercontent.apps.565627106864-cd3nnm389bdf9cfdqo015d7tbm052bdr"
-        
+
         authSession = ASWebAuthenticationSession(url: url, callbackURLScheme: scheme) { callbackURL, error in
             guard error == nil, let callbackURL = callbackURL else {
                 print("Auth Error: \(String(describing: error))")
                 return
             }
-            
-            guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
-                  let code = components.queryItems?.first(where: { $0.name == "code" })?.value else {
-                print("No code found in callback URL")
+
+            guard let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems,
+                  items.first(where: { $0.name == "state" })?.value == state,
+                  let code = items.first(where: { $0.name == "code" })?.value else {
+                print("Gmail: respuesta de Google sin código o con otro state; se descarta.")
                 return
             }
-            
-            self.exchangeCodeForToken(code: code)
+
+            self.exchangeCodeForToken(code: code, verifier: verifier)
         }
         
         authSession?.presentationContextProvider = self
         authSession?.start()
     }
     
+    /// Desvincular también revoca el permiso en Google: una copia del token
+    /// que hubiera quedado en otro lado deja de servir.
     func signOut() {
-        UserDefaults.standard.removeObject(forKey: "GmailAccessToken")
-        UserDefaults.standard.removeObject(forKey: "GmailRefreshToken")
-        UserDefaults.standard.removeObject(forKey: Self.idTokenKey)
-        UserDefaults.standard.removeObject(forKey: Self.accountEmailKey)
+        if let token = getRefreshToken() ?? getAccessToken() { revoke(token) }
+        SecureStore.gmail.removeAll()
+        setIDToken(nil)
+        UserDefaults.standard.removeObject(forKey: Keys.hasIdentity)
+        UserDefaults.standard.removeObject(forKey: Keys.accountEmail)
+        setAccessRevoked(false)
         DispatchQueue.main.async {
             self.isAuthenticated = false
         }
     }
-    
-    private func exchangeCodeForToken(code: String) {
+
+    /// `invalid_grant` al renovar: el `refresh_token` ya no vale y no volverá
+    /// a valer. Se borran los tokens (el correo se queda, para decir cuál
+    /// cuenta hay que volver a vincular) y la app lo muestra.
+    private func markAccessRevoked() {
+        SecureStore.gmail.removeAll()
+        setIDToken(nil)
+        UserDefaults.standard.removeObject(forKey: Keys.hasIdentity)
+        setAccessRevoked(true)
+        DispatchQueue.main.async {
+            self.isAuthenticated = false
+        }
+    }
+
+    private func setAccessRevoked(_ value: Bool) {
+        UserDefaults.standard.set(value, forKey: Keys.accessRevoked)
+        DispatchQueue.main.async { self.accessRevoked = value }
+    }
+
+    private func revoke(_ token: String) {
+        guard let url = URL(string: "https://oauth2.googleapis.com/revoke") else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = "token=\(Self.formEncoded(token))".data(using: .utf8)
+        URLSession.shared.dataTask(with: request).resume()
+    }
+
+    private func exchangeCodeForToken(code: String, verifier: String) {
         guard let url = URL(string: tokenURL) else { return }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         
-        let bodyString = "code=\(code)&client_id=\(clientID)&redirect_uri=\(redirectURI)&grant_type=authorization_code"
+        let bodyString = "code=\(Self.formEncoded(code))&client_id=\(clientID)&redirect_uri=\(Self.formEncoded(redirectURI))&grant_type=authorization_code&code_verifier=\(verifier)"
         request.httpBody = bodyString.data(using: .utf8)
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -100,6 +161,7 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
                         self.saveRefreshToken(refreshToken)
                     }
                     self.saveIdentity(from: json)
+                    if json["refresh_token"] != nil { self.setAccessRevoked(false) }
                     DispatchQueue.main.async {
                         self.checkAuthStatus()
                     }
@@ -120,7 +182,7 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         
-        let bodyString = "client_id=\(clientID)&refresh_token=\(refreshToken)&grant_type=refresh_token"
+        let bodyString = "client_id=\(clientID)&refresh_token=\(Self.formEncoded(refreshToken))&grant_type=refresh_token"
         request.httpBody = bodyString.data(using: .utf8)
         
         URLSession.shared.dataTask(with: request) { data, response, error in
@@ -129,12 +191,13 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
                 return
             }
             do {
-                if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
-                   let newAccessToken = json["access_token"] as? String {
+                let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+                if let json, let newAccessToken = json["access_token"] as? String {
                     self.saveAccessToken(newAccessToken)
                     self.saveIdentity(from: json)
                     completion(newAccessToken)
                 } else {
+                    if json?["error"] as? String == "invalid_grant" { self.markAccessRevoked() }
                     completion(nil)
                 }
             } catch {
@@ -145,37 +208,46 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
     
     // MARK: - Identidad (para la sincronización con cuenta)
 
-    static let idTokenKey = "GmailIDToken"
-    static let accountEmailKey = "GmailAccountEmail"
-
-    /// Correo de la cuenta de Google conectada, leído del `id_token`.
-    var accountEmail: String? { UserDefaults.standard.string(forKey: Self.accountEmailKey) }
+    /// Correo de la cuenta de Google conectada, leído del `id_token`. Se queda
+    /// en el teléfono para mostrarlo; no se sube a ningún lado.
+    var accountEmail: String? { UserDefaults.standard.string(forKey: Keys.accountEmail) }
 
     /// `false` para quien conectó Gmail antes de que se pidiera `openid email`:
     /// su `refresh_token` no da `id_token`, así que tiene que volver a conectar
     /// el correo (o quedarse con el código de respaldo).
-    var hasIdentityToken: Bool {
-        (UserDefaults.standard.string(forKey: Self.idTokenKey)?.isEmpty == false)
-    }
+    var hasIdentityToken: Bool { UserDefaults.standard.bool(forKey: Keys.hasIdentity) }
 
     /// `id_token` con vida por delante. Supabase lo valida contra `exp`, así que
-    /// uno guardado hace horas no sirve: si le queda poco se refresca primero.
+    /// uno de hace horas no sirve: si le queda poco se pide otro.
     func freshIdentityToken() async -> String? {
-        let stored = UserDefaults.standard.string(forKey: Self.idTokenKey)
-        if let stored, Self.expiry(of: stored)?.timeIntervalSinceNow ?? 0 > 120 { return stored }
-        guard getRefreshToken() != nil else { return stored }
+        let current = currentIDToken()
+        if let current, Self.expiry(of: current)?.timeIntervalSinceNow ?? 0 > 120 { return current }
+        guard getRefreshToken() != nil else { return nil }
         return await withCheckedContinuation { continuation in
             self.refreshAccessToken { _ in
-                continuation.resume(returning: UserDefaults.standard.string(forKey: Self.idTokenKey))
+                continuation.resume(returning: self.currentIDToken())
             }
         }
     }
 
+    private func currentIDToken() -> String? {
+        idTokenLock.lock()
+        defer { idTokenLock.unlock() }
+        return idToken
+    }
+
+    private func setIDToken(_ token: String?) {
+        idTokenLock.lock()
+        idToken = token
+        idTokenLock.unlock()
+    }
+
     private func saveIdentity(from json: [String: Any]) {
-        guard let idToken = json["id_token"] as? String else { return }
-        UserDefaults.standard.set(idToken, forKey: Self.idTokenKey)
-        if let email = Self.claim("email", of: idToken) as? String {
-            UserDefaults.standard.set(email, forKey: Self.accountEmailKey)
+        guard let token = json["id_token"] as? String else { return }
+        setIDToken(token)
+        UserDefaults.standard.set(true, forKey: Keys.hasIdentity)
+        if let email = Self.claim("email", of: token) as? String {
+            UserDefaults.standard.set(email, forKey: Keys.accountEmail)
         }
     }
 
@@ -198,21 +270,53 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
         return json[name]
     }
 
-    // For simplicity, using UserDefaults, but Keychain is recommended for production
+    // MARK: - Tokens (Llavero)
+
+    /// ¿Hay Gmail conectado en este teléfono? Sin tocar la red. Lo usa el
+    /// arranque para saber si quien abre la app ya la venía usando.
+    static var hasStoredSession: Bool {
+        CredentialMigration.runIfNeeded()
+        return SecureStore.gmail.read(Keys.refreshToken) != nil
+            || SecureStore.gmail.read(Keys.accessToken) != nil
+    }
+
     private func saveAccessToken(_ token: String) {
-        UserDefaults.standard.set(token, forKey: "GmailAccessToken")
+        SecureStore.gmail.write(token, for: Keys.accessToken)
     }
-    
+
     func getAccessToken() -> String? {
-        return UserDefaults.standard.string(forKey: "GmailAccessToken")
+        SecureStore.gmail.read(Keys.accessToken)
     }
-    
+
     private func saveRefreshToken(_ token: String) {
-        UserDefaults.standard.set(token, forKey: "GmailRefreshToken")
+        SecureStore.gmail.write(token, for: Keys.refreshToken)
     }
-    
+
     private func getRefreshToken() -> String? {
-        return UserDefaults.standard.string(forKey: "GmailRefreshToken")
+        SecureStore.gmail.read(Keys.refreshToken)
+    }
+
+    // MARK: - Utilidades
+
+    private static func randomURLSafe(bytes count: Int) -> String {
+        var bytes = [UInt8](repeating: 0, count: count)
+        _ = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
+        return base64URL(Data(bytes))
+    }
+
+    private static func base64URL(_ data: Data) -> String {
+        data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    /// Un token o un código puede traer `/`, `+` o `=`: sin codificar, el
+    /// cuerpo `x-www-form-urlencoded` los leería mal.
+    private static func formEncoded(_ value: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
     }
 }
 

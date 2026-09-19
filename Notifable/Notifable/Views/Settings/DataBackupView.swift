@@ -47,6 +47,7 @@ struct DataBackupView: View {
                     Text(gmailSync.diagnosticResult)
                         .padding()
                         .font(.system(.body, design: .monospaced))
+                        .fontDesign(.monospaced)
                         .textSelection(.enabled)
                 }
                 .navigationTitle("Diagnóstico")

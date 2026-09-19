@@ -78,9 +78,7 @@ struct CategoriesOverviewView: View {
     /// pantalla y la tarjeta queda para la lista, que es lo que se toca.
     private func chartCard(totals: PeriodTotals, slices: [CategoryDonut.Slice]) -> some View {
         HStack(spacing: 18) {
-            CategoryDonut(slices: slices,
-                          centerTitle: Period.spanishMonthName(for: Date()),
-                          centerValue: Money.format(totals.spent))
+            CategoryDonut(slices: slices)
 
             DonutLegend(slices: slices, total: totals.spent)
                 .frame(maxWidth: .infinity)
@@ -93,6 +91,9 @@ struct CategoriesOverviewView: View {
 
     private func categoryList(totals: PeriodTotals) -> some View {
         MovementCard {
+            monthTotalRow(spent: totals.spent)
+            MovementSeparator()
+
             ForEach(Array(totals.byCategory.enumerated()), id: \.element.id) { index, category in
                 Button {
                     selectedCategory = CategoryRef(name: category.category)
@@ -104,6 +105,24 @@ struct CategoriesOverviewView: View {
                 if index < totals.byCategory.count - 1 { MovementSeparator() }
             }
         }
+    }
+
+    /// Encabeza la lista con el total del mes. Antes vivía dentro del donut,
+    /// pero con el anillo más grueso ya no cabía legible.
+    private func monthTotalRow(spent: Double) -> some View {
+        HStack {
+            Text(Period.spanishMonthName(for: Date()))
+                .font(.system(size: 16.5, weight: .bold))
+                .foregroundStyle(palette.label)
+
+            Spacer(minLength: 8)
+
+            Text(Money.format(spent))
+                .font(.system(size: 16.5, weight: .bold))
+                .foregroundStyle(palette.label)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 
     private func categoryRow(_ category: PeriodTotals.CategoryTotal, of total: Double) -> some View {

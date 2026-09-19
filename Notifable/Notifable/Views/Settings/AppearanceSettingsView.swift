@@ -11,6 +11,7 @@ struct AppearanceSettingsView: View {
     @AppStorage(AppThemeColor.storageKey) private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
     @AppStorage(AppTextSize.storageKey) private var appTextSize = AppTextSize.sistema.rawValue
+    @AppStorage(AppFontDesign.storageKey) private var appFontDesign = AppFontDesign.sistema.rawValue
     @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
     @AppStorage(AppThemeColor.themedCategoryColorsKey) private var themedCategoryColors = false
     @AppStorage(DictationStyle.storageKey) private var dictationStyle = DictationStyle.bars.rawValue
@@ -33,6 +34,7 @@ struct AppearanceSettingsView: View {
                 VStack(spacing: 22) {
                     colorThemeRow
                     themePicker
+                    fontDesignPicker
                     textSizePicker
                     intenseTintSection
                     categoryColorsSection
@@ -198,6 +200,50 @@ struct AppearanceSettingsView: View {
 
     private var appearanceBinding: Binding<AppAppearance> {
         Binding(get: { appearance }, set: { appearanceRaw = $0.rawValue })
+    }
+
+    // MARK: - Tipo de letra
+
+    /// Cada opción se muestra escrita en su propio diseño: se elige viendo la
+    /// letra, no leyendo su nombre.
+    private var fontDesignPicker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            sectionTitle("TIPO DE LETRA")
+
+            HStack(spacing: 10) {
+                ForEach(AppFontDesign.allCases) { option in
+                    let selected = appFontDesign == option.rawValue
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) { appFontDesign = option.rawValue }
+                    } label: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Aa")
+                                .font(.system(size: 28, weight: .semibold, design: option.design))
+                                .foregroundStyle(palette.label)
+                            Text(option.rawValue)
+                                .font(.system(size: 13.5, weight: .semibold, design: option.design))
+                                .foregroundStyle(palette.label)
+                            Text(option.detail)
+                                .font(.system(size: 11.5, design: option.design))
+                                .foregroundStyle(palette.secondaryLabel)
+                                .lineLimit(2, reservesSpace: true)
+                        }
+                        .fontDesign(option.design)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(12)
+                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .stroke(selected ? accent.color : palette.hairline, lineWidth: selected ? 2 : 0.5)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(option.rawValue): \(option.detail)")
+                    .accessibilityAddTraits(selected ? .isSelected : [])
+                }
+            }
+            .padding(.horizontal, 16)
+        }
     }
 
     // MARK: - Tamaño de texto

@@ -42,6 +42,9 @@ struct GmailLinkFlow: View {
                 checking
             case .restore(let header):
                 OnboardingRestoreView(header: header) { restored in
+                    // "Empezar de cero" no puede subir este teléfono vacío
+                    // encima de la copia: queda en pausa apuntando a ella.
+                    if !restored { ConfigBackupManager.shared.keepRemotePaused(header) }
                     Task { await advanceAfterAccount(restored: restored) }
                 }
                 .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -100,7 +103,7 @@ struct GmailLinkFlow: View {
         // nueva y a partir de ahora lo que configure se guarda solo. Con la
         // sincronización ya encendida —volver a vincular Gmail desde Ajustes—
         // no hay nada que activar.
-        if !restored, !manager.isEnabled {
+        if !restored, !manager.isEnabled, !manager.isPausedAfterWipe {
             await manager.enableWithAccount()
         }
         manager.dismissBackupOffer()

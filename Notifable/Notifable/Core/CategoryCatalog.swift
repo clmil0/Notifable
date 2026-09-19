@@ -190,6 +190,7 @@ enum CategoryEditor {
         for (merchant, target) in MerchantRules.all(defaults) where target == category {
             MerchantRules.set(trimmed, for: merchant, defaults: defaults)
         }
+        ExpenseEditStore.replaceCategory(category, with: trimmed, defaults: defaults)
         catalog.rename(category, to: trimmed)
         budgets.rename(category, to: trimmed)
     }
@@ -210,6 +211,7 @@ enum CategoryEditor {
         for (merchant, category) in MerchantRules.all(defaults) where category == source {
             MerchantRules.set(target, for: merchant, defaults: defaults)
         }
+        ExpenseEditStore.replaceCategory(source, with: target, defaults: defaults)
         budgets.merge(source, into: target)
         catalog.remove(source)
     }
@@ -230,6 +232,7 @@ enum CategoryEditor {
         for (merchant, target) in MerchantRules.all(defaults) where target == category {
             MerchantRules.remove(merchant, defaults: defaults)
         }
+        ExpenseEditStore.replaceCategory(category, with: Accounting.unclassified, defaults: defaults)
         budgets.remove(category)
         catalog.remove(category)
     }

@@ -109,7 +109,8 @@ struct GmailBanksView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     // La cuenta concreta y no "Gmail vinculado": quien tiene
                     // varias quiere saber cuál está leyendo la app.
-                    Text(gmailAuth.isAuthenticated ? (gmailAuth.accountEmail ?? "Gmail vinculado") : "Gmail sin vincular")
+                    Text(gmailAuth.isAuthenticated || gmailAuth.accessRevoked
+                         ? (gmailAuth.accountEmail ?? "Gmail vinculado") : "Gmail sin vincular")
                         .font(.headline)
                         .foregroundStyle(palette.label)
                         .lineLimit(1)
@@ -117,9 +118,12 @@ struct GmailBanksView: View {
                         .minimumScaleFactor(0.8)
                     Text(gmailAuth.isAuthenticated
                          ? "● Conectado · sólo lectura"
-                         : "AgruPay lee los avisos de tu banco para registrar gastos solo.")
+                         : gmailAuth.accessRevoked
+                            ? "Google cortó el acceso. Vuelve a vincular para seguir leyendo tus avisos."
+                            : "AgruPay lee los avisos de tu banco para registrar gastos solo.")
                         .font(.footnote)
-                        .foregroundStyle(gmailAuth.isAuthenticated ? palette.positive : palette.secondaryLabel)
+                        .foregroundStyle(gmailAuth.isAuthenticated ? palette.positive
+                                         : gmailAuth.accessRevoked ? palette.negative : palette.secondaryLabel)
                         .fixedSize(horizontal: false, vertical: true)
                 }
 

@@ -189,6 +189,8 @@ struct ShellBottomBar: View {
     var isAddMenuOpen: Bool = false
     /// Con el dictado abierto, el mic se tiñe del tema.
     var isDictating: Bool = false
+    /// Un número sobre el ícono de la pestaña (solicitudes de amistad en Social).
+    var badge: (AppTab) -> Int? = { _ in nil }
     let onReselect: (AppTab) -> Void
     let onAdd: () -> Void
     let onDictate: () -> Void
@@ -227,6 +229,17 @@ struct ShellBottomBar: View {
                             .background {
                                 if selection == tab {
                                     Capsule().fill(accent.color)
+                                }
+                            }
+                            .overlay(alignment: .topTrailing) {
+                                if let count = badge(tab), count > 0 {
+                                    Text(count > 99 ? "99+" : "\(count)")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(Color.white)
+                                        .padding(.horizontal, 4)
+                                        .frame(minWidth: 16, minHeight: 16)
+                                        .background(palette.negative, in: Capsule())
+                                        .offset(x: 3, y: -1)
                                 }
                             }
 

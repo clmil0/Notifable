@@ -94,7 +94,10 @@ struct ShellHeaderBar: View {
                     visibility.badge(for: subtab)
                 }
             case .social:
-                SubtabPill(tabs: visibility.social, selection: $socialSub)
+                SubtabPill(tabs: visibility.social, selection: $socialSub) { subtab in
+                    let requests = FriendsManager.shared.incomingRequests.count
+                    return subtab == .friends && requests > 0 ? requests : nil
+                }
             }
         }
         .background(

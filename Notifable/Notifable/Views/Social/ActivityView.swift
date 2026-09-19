@@ -3,6 +3,10 @@ import SwiftData
 
 /// Social › Actividad (`2g`), la sub-vista por defecto de la pestaña.
 ///
+/// Arriba, tu tarjeta (`2h`): tu cabecera, tu gasto del mes y cuántos amigos
+/// lo ven, antes de lo que te comparten — así se ve de un vistazo qué estás
+/// enseñando tú, no sólo lo que ves de los demás.
+///
 /// Solicitudes arriba y feed debajo. Antes esto era el primer tercio de un
 /// scroll único de 2,400 líneas que además llevaba la lista de amigos, el
 /// canje de códigos y el editor del pingüino; lo que te comparten se perdía
@@ -16,6 +20,7 @@ struct ActivityView: View {
     @StateObject private var rates = ExchangeRateService.shared
     @State private var friendsManager = FriendsManager.shared
     @State private var auth = SupabaseAuthManager.shared
+    @State private var social = SocialProfileStore.shared
 
     @State private var showProfileSheet = false
     @State private var selectedFriend: Friend?
@@ -50,11 +55,9 @@ struct ActivityView: View {
 
         TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 12) {
-                ShellTitle(title: "Actividad",
-                           subtitle: feed.isEmpty ? nil
-                               : "\(feed.count) te comparten su gasto del mes")
+                myCard
 
-                if !auth.isReady {
+                if !auth.isReady && !auth.needsGoogleAccount {
                     ShellCard {
                         HStack(spacing: 10) {
                             ProgressView()
@@ -66,14 +69,21 @@ struct ActivityView: View {
                 } else if pending.isEmpty && feed.isEmpty {
                     ShellEmptyState(icon: "bolt",
                                     title: "Todavía nadie te comparte",
-                                    message: "Agrega amigos con su código y pídeles que te compartan su gasto del mes.")
+                                    message: "Agrega amigos con una invitación y pídeles que te compartan su gasto del mes.")
                 } else {
-                    ForEach(pending, id: \.id) { row in
-                        requestCard(row)
-                    }
+                    VStack(spacing: 0) {
+                        ShellSectionHeader(title: "De tus amigos",
+                                           trailing: feed.isEmpty ? nil
+                                               : feed.count == 1 ? "1 te comparte" : "\(feed.count) te comparten")
+                        VStack(spacing: 10) {
+                            ForEach(pending, id: \.id) { row in
+                                requestCard(row)
+                            }
 
-                    ForEach(feed, id: \.id) { row in
-                        feedCard(row)
+                            ForEach(feed, id: \.id) { row in
+                                feedCard(row)
+                            }
+                        }
                     }
                 }
             }
@@ -92,6 +102,87 @@ struct ActivityView: View {
             FriendProfileView(friend: friend, totals: totals,
                               incoming: friendsManager.acceptedIncoming.first { $0.sharerID == friend.id })
         }
+    }
+
+    // MARK: - Tu tarjeta (2h)
+
+    /// Cuántos amigos ven algo de tu gasto este mes.
+    private var viewers: Int {
+        friendsManager.outgoing.filter { $0.shareTotal || !$0.shareCategories.isEmpty }.count
+    }
+
+    private var myCard: some View {
+        Button {
+            showProfileSheet = true
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                SocialBannerView(index: social.bannerIndex)
+                    .frame(height: 104)
+
+                HStack(alignment: .bottom, spacing: 12) {
+                    PenguinAvatar(look: social.penguin, size: 92, background: palette.background)
+                        .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(social.displayName.isEmpty ? "Tu nombre" : social.displayName)
+                            .font(.system(size: 20, weight: .bold))
+                            .foregroundStyle(social.displayName.isEmpty ? palette.tertiaryLabel : palette.label)
+                            .lineLimit(1)
+                        if !social.status.isEmpty {
+                            Text("«" + social.status + "»")
+                                .font(.system(size: 12.5))
+                                .foregroundStyle(palette.secondaryLabel)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.bottom, 6)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 14)
+                .padding(.top, -38)
+
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Tu gasto de " + Period.spanishMonthName(for: Date()).lowercased())
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(palette.secondaryLabel)
+                        Text(Money.format(totals.spent))
+                            .font(.system(size: 28, weight: .bold))
+                            .tracking(-0.5)
+                            .foregroundStyle(palette.label)
+                            .minimumScaleFactor(0.7)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    viewersChip
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
+            }
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).stroke(palette.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Editar tu perfil")
+    }
+
+    private var viewersChip: some View {
+        let count = viewers
+        let tint = count > 0 ? accent.onSurface(scheme) : palette.secondaryLabel
+        return HStack(spacing: 5) {
+            Image(systemName: count > 0 ? "eye" : "eye.slash")
+                .font(.system(size: 11, weight: .semibold))
+            Text(count == 0 ? "sólo lo ves tú" : count == 1 ? "lo ve 1 amigo" : "lo ven \(count) amigos")
+                .font(.system(size: 11.5, weight: .semibold))
+        }
+        .foregroundStyle(tint)
+        .padding(.horizontal, 10)
+        .frame(height: 26)
+        .background(count > 0 ? accent.color.opacity(0.12) : palette.track, in: Capsule())
     }
 
     // MARK: - Solicitudes

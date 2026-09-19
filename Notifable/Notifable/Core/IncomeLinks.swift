@@ -23,6 +23,11 @@ struct IncomeLink: Codable, Equatable {
     var markKey: String
     /// Si con este cobro quedó saldado.
     var isFinal: Bool
+    /// `emailID` del cobro cuando vino del correo (un Yapeo recibido). Su
+    /// `UUID` no sirve para esos: se rearman releyendo Gmail con uno nuevo, y
+    /// el vínculo tiene que volver a encontrarlos igual. `nil` en los anotados
+    /// a mano y en vínculos guardados antes de existir este campo.
+    var incomeEmailID: String? = nil
 }
 
 enum IncomeLinkStore {
@@ -48,7 +53,8 @@ enum IncomeLinkStore {
                        defaults: UserDefaults = .standard) {
         save(IncomeLink(incomeID: income.id,
                         markKey: TransactionKey.key(for: expense),
-                        isFinal: isFinal),
+                        isFinal: isFinal,
+                        incomeEmailID: income.emailID),
              defaults: defaults)
     }
 
@@ -60,7 +66,11 @@ enum IncomeLinkStore {
 
     static func merge(_ incoming: [IncomeLink], defaults: UserDefaults = .standard) {
         var current = all(defaults)
+        // Un cobro del correo tiene otro `UUID` en cada teléfono: si ya hay un
+        // vínculo local para ese mismo correo, el que llega sobra.
+        let localEmails = Set(current.values.compactMap(\.incomeEmailID))
         for link in incoming where current[link.incomeID] == nil {
+            if let email = link.incomeEmailID, localEmails.contains(email) { continue }
             current[link.incomeID] = link
         }
         persist(current, defaults: defaults)
@@ -100,9 +110,11 @@ enum IncomeLinkStore {
         guard !incomes.isEmpty, !expenses.isEmpty else { return 0 }
 
         let expensesByKey = TransactionKey.expensesByLookupKey(expenses)
+        let linksByEmail = Dictionary(links.values.compactMap { link in link.incomeEmailID.map { ($0, link) } },
+                                      uniquingKeysWith: { first, _ in first })
         var relinked = 0
         for income in incomes {
-            guard let link = links[income.id] else { continue }
+            guard let link = links[income.id] ?? income.emailID.flatMap({ linksByEmail[$0] }) else { continue }
             guard let expense = expensesByKey[link.markKey] else { continue }
             if income.debtReference?.id != expense.id {
                 income.debtReference = expense

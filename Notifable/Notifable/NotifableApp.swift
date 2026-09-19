@@ -30,8 +30,7 @@ struct NotifableApp: App {
         // hay correo conectado o correos ya procesados, se da por visto.
         let defaults = UserDefaults.standard
         if defaults.object(forKey: "hasSeenOnboarding") == nil {
-            let yaUsaba = defaults.string(forKey: "GmailAccessToken") != nil
-                || defaults.string(forKey: "GmailRefreshToken") != nil
+            let yaUsaba = GmailAuthService.hasStoredSession
                 || !(defaults.stringArray(forKey: "processedEmailIDs") ?? []).isEmpty
             defaults.set(yaUsaba, forKey: "hasSeenOnboarding")
         }
@@ -62,6 +61,8 @@ struct NotifableApp: App {
                     // Duplicados de Apple que dejaron las lecturas por rango
                     // anteriores al arreglo de `existingEmailIDs`.
                     GmailSyncService.removeLinkedDuplicates(in: sharedModelContainer.mainContext)
+                    NotificationManager.shared.start(container: sharedModelContainer)
+                    if hasSeenOnboarding { NotificationManager.shared.requestPermission() }
                     Diagnostics.shared.log("Respaldo y amigos configurados")
                 }
                 // Presentación en cadena: primero el onboarding y sólo después,
@@ -71,6 +72,23 @@ struct NotifableApp: App {
                 .fullScreenCover(isPresented: .init(get: { !hasSeenOnboarding },
                                                     set: { hasSeenOnboarding = !$0 })) {
                     OnboardingView()
+                }
+                // Recién terminado el onboarding: no antes, para no tapar el
+                // carrusel con el diálogo del sistema.
+                .onChange(of: hasSeenOnboarding) { _, seen in
+                    if seen { NotificationManager.shared.requestPermission() }
+                }
+                // En pausa sobre una copia con datos y el usuario cambió algo:
+                // la sincronización automática la borraría, así que pregunta.
+                .sheet(item: $backupManager.overwritePrompt) { header in
+                    OverwriteBackupSheet(header: header,
+                                         accent: AppThemeColor(rawValue: appAccentColor) ?? .blue) {
+                        Task { await backupManager.restoreInsteadOfOverwrite() }
+                    } onOverwrite: {
+                        Task { await backupManager.confirmOverwrite() }
+                    } onLater: {
+                        backupManager.postponeOverwrite()
+                    }
                 }
                 // Celular nuevo: la cuenta que acaba de conectar ya tenía un
                 // respaldo. Se pregunta una sola vez.

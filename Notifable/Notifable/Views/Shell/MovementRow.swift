@@ -82,12 +82,10 @@ struct MovementRow: View {
     let expense: Expense
     var onTap: () -> Void = {}
     var onAssignCategory: () -> Void = {}
-    /// Abre el editor del movimiento desde el menú contextual. Sin él, la
-    /// opción no se dibuja.
-    var onEdit: (() -> Void)?
 
     @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
+    @State private var confirmsDelete = false
     private var palette: Palette { Palette(scheme) }
     private var accent: AppThemeColor { .current }
 
@@ -101,7 +99,8 @@ struct MovementRow: View {
     private var debtNote: String? {
         let paid = Accounting.paid(of: expense)
         let outstanding = Accounting.outstanding(of: expense)
-        guard expense.isDebt || Money.cents(paid) > 0 else { return nil }
+        guard expense.isDebt || expense.debtSettled || Money.cents(paid) > 0 else { return nil }
+        if expense.debtSettled && !expense.isDebt { return "Deuda saldada" }
         if Money.isZero(outstanding) { return "Cobrado" }
         return "Por cobrar · falta " + Money.format(outstanding, currency: expense.currency)
     }
@@ -144,7 +143,7 @@ struct MovementRow: View {
                 if let debtNote {
                     Text(debtNote)
                         .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundStyle(palette.warning)
+                        .foregroundStyle(expense.debtSettled && !expense.isDebt ? palette.positive : palette.warning)
                         .lineLimit(1)
                 }
             }
@@ -181,13 +180,25 @@ struct MovementRow: View {
                 Label("Categorizar", systemImage: "tag")
             }
 
-            if let onEdit {
-                Button {
-                    onEdit()
-                } label: {
-                    Label("Editar", systemImage: "pencil")
+            // Se confirma aparte: el menú se abre con una pulsación larga y
+            // un toque de más no debería bastar para perder un movimiento.
+            Button(role: .destructive) {
+                confirmsDelete = true
+            } label: {
+                Label("Eliminar", systemImage: "trash")
+            }
+        }
+        .confirmationDialog("¿Eliminar movimiento?", isPresented: $confirmsDelete, titleVisibility: .visible) {
+            Button("Eliminar", role: .destructive) {
+                let expense = expense
+                let context = modelContext
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    expense.deleteRecordingRecovery(in: context)
                 }
             }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Se borrará de tus cuentas. Esto no se puede deshacer.")
         }
     }
 

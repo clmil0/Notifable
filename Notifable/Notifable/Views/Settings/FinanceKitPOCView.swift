@@ -49,7 +49,7 @@ struct FinanceKitPOCView: View {
 
             if let error {
                 Section("Error") {
-                    Text(error).font(.footnote.monospaced())
+                    Text(error).font(.footnote.monospaced()).fontDesign(.monospaced)
                 }
             }
 

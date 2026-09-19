@@ -18,6 +18,7 @@ struct ProfileView: View {
     @State private var friendsManager = FriendsManager.shared
 
     @State private var showProfileSheet = false
+    @State private var editing: MyProfileSheet.Section?
 
     init(scrollToTopTrigger: Binding<Bool>, progress: ScrollProgress) {
         self._scrollToTopTrigger = scrollToTopTrigger
@@ -76,6 +77,7 @@ struct ProfileView: View {
         }
         .socialSession(showProfileSheet: $showProfileSheet)
         .sheet(isPresented: $showProfileSheet) { MyProfileSheet() }
+        .sheet(item: $editing) { MyProfileSheet(section: $0) }
     }
 
     // MARK: - Identidad
@@ -83,7 +85,7 @@ struct ProfileView: View {
     private var identityCard: some View {
         VStack(spacing: 10) {
             Button {
-                showProfileSheet = true
+                editing = .avatar
             } label: {
                 ZStack(alignment: .bottomTrailing) {
                     PenguinAvatar(look: social.penguin, size: 96, background: palette.surface)
@@ -114,19 +116,23 @@ struct ProfileView: View {
 
     private var editorRows: some View {
         MovementCard {
-            editorRow(icon: "paintpalette", title: "Avatar", value: "Pingüino")
+            editorRow(icon: "paintpalette", title: "Avatar", value: social.penguin.animal?.name ?? "Pingüino",
+                      section: .avatar)
             MovementSeparator()
             editorRow(icon: "textformat", title: "Apodo",
-                      value: social.displayName.isEmpty ? "Sin definir" : social.displayName)
+                      value: social.displayName.isEmpty ? "Sin definir" : social.displayName,
+                      section: .name)
             MovementSeparator()
             editorRow(icon: "quote.bubble", title: "Estado",
-                      value: social.status.isEmpty ? "Sin definir" : social.status)
+                      value: social.status.isEmpty ? "Sin definir" : social.status,
+                      section: .status)
         }
     }
 
-    private func editorRow(icon: String, title: String, value: String) -> some View {
+    private func editorRow(icon: String, title: String, value: String,
+                           section: MyProfileSheet.Section) -> some View {
         Button {
-            showProfileSheet = true
+            editing = section
         } label: {
             HStack(spacing: 12) {
                 MovementIcon(icon: icon, color: accent.color, size: 38)

@@ -46,6 +46,9 @@ final class ConfigBackupManager {
         static let fingerprint = "configBackupFingerprint"
         static let pausedMode = "configBackupPausedMode"
         static let pausedCode = "configBackupPausedCode"
+        /// Huella de lo que había en el teléfono al pausar. Si la de ahora es
+        /// distinta, hay algo que la sincronización automática querría subir.
+        static let pausedFingerprint = "configBackupPausedFingerprint"
         static let offerDismissed = "configBackupOfferDismissed"
     }
 
@@ -56,10 +59,23 @@ final class ConfigBackupManager {
     private(set) var lastSyncedAt: Date?
     private(set) var isSyncing = false
     private(set) var hasPendingChanges = false
+    /// Llegó un cambio mientras se subía: al terminar hay que volver a mirar.
+    /// Antes `markDirty` lo descartaba y ese cambio esperaba al siguiente
+    /// guardado o a volver a abrir la app.
+    private var changedDuringSync = false
 
     /// Respaldo encontrado para la cuenta recién conectada, en un teléfono que
     /// todavía no sincroniza. Lo enseña `BackupFoundView`.
     var foundBackup: BackupHeader?
+
+    /// Con la sincronización en pausa sobre una copia que existe, el usuario
+    /// cambió algo que habría que subir. Subirlo borraría esa copia, así que
+    /// en vez de hacerlo se pregunta con `OverwriteBackupSheet`.
+    var overwritePrompt: BackupHeader?
+    /// Una vez por sesión: preguntar en cada cambio sería acoso, y "Ahora no"
+    /// tiene que poder significar "ahora no".
+    private var askedOverwriteThisSession = false
+    private var pausedCheck: Task<Void, Never>?
 
     /// `GmailLinkFlow` está en pantalla y va a hacer la misma pregunta con su
     /// propio paso de "Encontramos tu configuración". Sin esto, volver de
@@ -74,7 +90,7 @@ final class ConfigBackupManager {
     var wasBackupOfferAnswered: Bool { UserDefaults.standard.bool(forKey: Keys.offerDismissed) }
 
     /// Se pausó sola tras un "Empezar de cero": ver `pauseAfterLocalWipe()`.
-    var isPausedAfterWipe: Bool { UserDefaults.standard.string(forKey: Keys.pausedCode) != nil }
+    var isPausedAfterWipe: Bool { Self.code(for: Keys.pausedCode) != nil }
     var lastErrorMessage: String?
 
     var isEnabled: Bool { mode != .off }
@@ -92,7 +108,7 @@ final class ConfigBackupManager {
     private init() {
         let d = UserDefaults.standard
         mode = Mode(rawValue: d.string(forKey: Keys.mode) ?? "") ?? .off
-        backupCode = d.string(forKey: Keys.backupCode)
+        backupCode = Self.code(for: Keys.backupCode)
         lastSyncedAt = d.object(forKey: Keys.lastSyncedAt) as? Date
         // Un código guardado sin modo viene de la versión anterior del respaldo.
         if mode == .off, backupCode != nil { mode = .code; persistMode() }
@@ -147,9 +163,37 @@ final class ConfigBackupManager {
 
     /// "Ahora no": no se vuelve a preguntar sola. La pantalla de Sincronización
     /// sigue ahí para quien cambie de opinión.
+    ///
+    /// Si había una copia, la sincronización queda **en pausa** apuntando a
+    /// ella (ver `keepRemotePaused`), no apagada del todo: así Ajustes ofrece
+    /// traerla o reemplazarla con un toque.
     func dismissBackupOffer() {
+        if let header = foundBackup { keepRemotePaused(header) }
         foundBackup = nil
         UserDefaults.standard.set(true, forKey: Keys.offerDismissed)
+    }
+
+    /// El usuario no quiso restaurar una copia que existe. Encender la
+    /// sincronización en ese momento subiría este teléfono vacío y —como
+    /// `write_config_backup` reemplaza todo— borraría la copia de la nube,
+    /// justo lo que la pantalla promete que no pasa ("Tu copia se queda
+    /// guardada en tu cuenta"). Se deja en la misma pausa que usa "Empezar de
+    /// cero", que ya sabe reanudar trayendo la copia o reemplazándola.
+    func keepRemotePaused(_ header: BackupHeader) {
+        guard !isEnabled, header.hasData else { return }
+        let d = UserDefaults.standard
+        d.set(Mode.account.rawValue, forKey: Keys.pausedMode)
+        Self.setCode(header.backupCode, for: Keys.pausedCode)
+        d.removeObject(forKey: Keys.pausedFingerprint)
+    }
+
+    /// Huella para decidir si el usuario cambió algo durante la pausa. Deja
+    /// fuera las ediciones que sólo guardan el tipo de cambio: las añade la
+    /// lectura del correo por su cuenta, no el usuario.
+    private func pausedComparisonFingerprint() -> String? {
+        guard var snapshot = buildSnapshot() else { return nil }
+        snapshot.expenseEdits = snapshot.expenseEdits.filter(\.isUserEdit)
+        return Self.fingerprint(of: snapshot)
     }
 
     /// "Restaurar" desde la pantalla de celular nuevo.
@@ -209,9 +253,85 @@ final class ConfigBackupManager {
     /// deja su inicializador ambiguo. Los otros tres observadores llaman a un
     /// método igual que éste; conviene que este también lo haga.
     private func syncOnForeground() {
+        if isPausedAfterWipe { schedulePausedCheck(); return }
         Task {
             _ = await self.syncIfNeeded()
         }
+    }
+
+    // MARK: - En pausa sobre una copia existente
+
+    /// El mismo rebote que `markDirty`: una ráfaga de guardados es una sola
+    /// comprobación.
+    private func schedulePausedCheck() {
+        guard !askedOverwriteThisSession, overwritePrompt == nil else { return }
+        pausedCheck?.cancel()
+        pausedCheck = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.askToOverwriteIfNeeded()
+        }
+    }
+
+    /// Lo que haría la sincronización automática si no estuviera en pausa. Si
+    /// no cambió nada desde la pausa no hay nada que subir ni que preguntar.
+    /// Si la copia de la nube está vacía no hay nada que perder y se reanuda
+    /// sin preguntar. Si tiene datos, se pregunta.
+    private func askToOverwriteIfNeeded() async {
+        guard isPausedAfterWipe, !askedOverwriteThisSession, overwritePrompt == nil,
+              foundBackup == nil, !isPresentingLinkFlow,
+              UserDefaults.standard.bool(forKey: "hasSeenOnboarding"),
+              let current = pausedComparisonFingerprint() else { return }
+
+        // La referencia se toma en la primera comprobación ya en reposo, no
+        // en el momento de pausar: entre medias pasan cosas que el usuario no
+        // hizo —el borrado de "Empezar de cero", la lectura del correo y el
+        // "desde cuándo" del onboarding— y compararlas con eso preguntaría
+        // sin motivo nada más terminar.
+        let d = UserDefaults.standard
+        guard let paused = d.string(forKey: Keys.pausedFingerprint) else {
+            d.set(current, forKey: Keys.pausedFingerprint)
+            return
+        }
+        guard current != paused else { return }
+
+        // Sin red no se sabe qué hay en la nube: se vuelve a intentar en la
+        // siguiente señal, sin gastar la pregunta de la sesión.
+        guard let header = await pausedBackupHeader() else { return }
+        guard header.hasData else {
+            await resumeAfterWipe(restoreFirst: false)
+            return
+        }
+        askedOverwriteThisSession = true
+        overwritePrompt = header
+    }
+
+    /// La cabecera de la copia a la que apunta la pausa, para enseñar qué se
+    /// perdería. También la usa el botón de Ajustes.
+    func pausedBackupHeader() async -> BackupHeader? {
+        let d = UserDefaults.standard
+        guard let code = Self.code(for: Keys.pausedCode) else { return nil }
+        let pausedMode = Mode(rawValue: d.string(forKey: Keys.pausedMode) ?? "") ?? .code
+        return await peek(code: pausedMode == .code ? code : nil)
+    }
+
+    /// "Ahora no" en la advertencia: sigue en pausa, sin subir nada.
+    func postponeOverwrite() {
+        overwritePrompt = nil
+    }
+
+    /// "Traer la copia" desde la advertencia.
+    @discardableResult
+    func restoreInsteadOfOverwrite() async -> String? {
+        overwritePrompt = nil
+        return await resumeAfterWipe(restoreFirst: true)
+    }
+
+    /// "Borrar la copia y reemplazarla", ya confirmado dos veces.
+    @discardableResult
+    func confirmOverwrite() async -> String? {
+        overwritePrompt = nil
+        return await resumeAfterWipe(restoreFirst: false)
     }
 
     /// Algo cambió. No sube nada todavía: espera 3 s por si vienen más cambios
@@ -219,7 +339,11 @@ final class ConfigBackupManager {
     /// antes de mandar nada, así que un cambio que no afecta al respaldo —o el
     /// propio `lastSyncedAt` que escribimos nosotros— no gasta una escritura.
     func markDirty() {
-        guard isEnabled, !isSyncing else { return }
+        guard isEnabled else {
+            if isPausedAfterWipe { schedulePausedCheck() }
+            return
+        }
+        if isSyncing { changedDuringSync = true; return }
         hasPendingChanges = true
         debounce?.cancel()
         debounce = Task { [weak self] in
@@ -268,7 +392,8 @@ final class ConfigBackupManager {
         if let backupCode, mode == .code { body["p_adopt_code"] = backupCode }
         body["p_device_label"] = UIDevice.current.name
         body["p_app_version"] = Self.appVersion ?? NSNull()
-        if let email = BackupAccount.shared.email { body["p_account_email"] = email }
+        // El correo no se sube: el respaldo ya cuelga del id de la cuenta, y
+        // el correo se muestra desde el que está guardado en el teléfono.
 
         guard let data = await call("ensure_my_backup", body: body, prefix: "No se pudo activar la sincronización") else {
             return lastErrorMessage
@@ -276,6 +401,18 @@ final class ConfigBackupManager {
         guard let code = Self.decodeScalarString(data) else {
             lastErrorMessage = "Respuesta inesperada al activar la sincronización."
             return lastErrorMessage
+        }
+
+        // La cuenta ya tenía una copia con datos (de otro celular, o de este
+        // antes de reinstalar) y no se está adoptando un código propio:
+        // encender aquí subiría este celular encima y la borraría sin
+        // preguntar. Queda en pausa sobre ella, y Ajustes ofrece traerla o
+        // reemplazarla con la advertencia de `OverwriteBackupSheet`.
+        if body["p_adopt_code"] == nil,
+           let header = await peek(code: nil), header.hasData, header.backupCode == code {
+            keepRemotePaused(header)
+            lastErrorMessage = nil
+            return "Tu cuenta ya tiene una copia de seguridad. Elige si traerla a este celular o reemplazarla."
         }
 
         backupCode = code
@@ -326,7 +463,8 @@ final class ConfigBackupManager {
         debounce?.cancel()
         let d = UserDefaults.standard
         d.set(mode.rawValue, forKey: Keys.pausedMode)
-        d.set(backupCode, forKey: Keys.pausedCode)
+        Self.setCode(backupCode, for: Keys.pausedCode)
+        d.removeObject(forKey: Keys.pausedFingerprint)
         mode = .off
         backupCode = nil
         hasPendingChanges = false
@@ -340,7 +478,7 @@ final class ConfigBackupManager {
     @discardableResult
     func resumeAfterWipe(restoreFirst: Bool) async -> String? {
         let d = UserDefaults.standard
-        guard let code = d.string(forKey: Keys.pausedCode) else { return "No hay nada pausado." }
+        guard let code = Self.code(for: Keys.pausedCode) else { return "No hay nada pausado." }
         let pausedMode = Mode(rawValue: d.string(forKey: Keys.pausedMode) ?? "") ?? .code
 
         if restoreFirst {
@@ -351,8 +489,9 @@ final class ConfigBackupManager {
             persistMode()
             _ = await sync(force: true)
         }
-        d.removeObject(forKey: Keys.pausedCode)
+        Self.setCode(nil, for: Keys.pausedCode)
         d.removeObject(forKey: Keys.pausedMode)
+        d.removeObject(forKey: Keys.pausedFingerprint)
         return lastErrorMessage
     }
 
@@ -383,7 +522,11 @@ final class ConfigBackupManager {
         }
 
         isSyncing = true
-        defer { isSyncing = false }
+        changedDuringSync = false
+        defer {
+            isSyncing = false
+            if changedDuringSync { changedDuringSync = false; markDirty() }
+        }
 
         var body = snapshot.rpcBody
         body.merge(codeBody()) { current, _ in current }
@@ -537,9 +680,28 @@ final class ConfigBackupManager {
     }
 
     private func persistMode() {
+        UserDefaults.standard.set(mode.rawValue, forKey: Keys.mode)
+        Self.setCode(backupCode, for: Keys.backupCode)
+    }
+
+    // MARK: - Código en el Llavero
+
+    /// El código de respaldo es una llave: quien lo tenga lee y pisa la copia.
+    private static var codeStore: SecureStore { .backupCode }
+
+    /// Del Llavero; si una versión anterior lo dejó en `UserDefaults`, se muda.
+    private static func code(for key: String) -> String? {
         let d = UserDefaults.standard
-        d.set(mode.rawValue, forKey: Keys.mode)
-        d.set(backupCode, forKey: Keys.backupCode)
+        if let legacy = d.string(forKey: key) {
+            codeStore.write(legacy, for: key)
+            d.removeObject(forKey: key)
+        }
+        return codeStore.read(key)
+    }
+
+    private static func setCode(_ value: String?, for key: String) {
+        UserDefaults.standard.removeObject(forKey: key)
+        codeStore.write(value, for: key)
     }
 
     private static var appVersion: String? {
@@ -566,7 +728,7 @@ final class ConfigBackupManager {
             limits: snapshot.categoryBudgets.count,
             shortcuts: snapshot.quickExpenses.count,
             recurring: snapshot.recurringExpenses.count,
-            expenseEdits: snapshot.expenseEdits.count,
+            expenseEdits: snapshot.expenseEdits.filter(\.isUserEdit).count,
             manualExpenses: snapshot.manualTransactions.filter { $0.kind == "expense" }.count,
             manualIncomes: snapshot.manualTransactions.filter { $0.kind == "income" }.count)
     }
@@ -591,6 +753,7 @@ final class ConfigBackupManager {
                     title: e.merchant, subtitle: nil, category: e.category,
                     occurredAt: e.date, notes: e.notes,
                     isSubscription: e.isSubscription, isDebt: e.isDebt,
+                    debtSettled: e.debtSettled ? true : nil,
                     cardLastDigits: e.cardLastDigits, fxRate: e.fxRateAtCapture,
                     debtMarkKey: nil, isFinalDebtPayment: false, createdAt: e.date))
             }
@@ -626,7 +789,7 @@ final class ConfigBackupManager {
             bankSources: Self.currentBankSources(),
             notificationSettings: Self.currentNotificationSettings(),
             appearance: Self.currentAppearance(),
-            preferences: AppPreferences.snapshot(),
+            preferences: AppPreferences.snapshot().merging(Self.decisionExtras()) { _, extra in extra },
             quickExpenses: quick.map(Self.backup(from:)).sorted { $0.sortIndex < $1.sortIndex },
             recurringExpenses: recurring.map(Self.backup(from:)).sorted { $0.id.uuidString < $1.id.uuidString },
             expenseEdits: ExpenseEditStore.list(),
@@ -694,6 +857,7 @@ final class ConfigBackupManager {
         // claves y algunas más, y es el que manda cuando ambos las traen.
         if let preferences = payload.preferences {
             AppPreferences.apply(preferences)
+            applyDecisionExtras(preferences)
         }
 
         // Amigos: el apodo, el color y lo que le comparto a cada uno acaban de
@@ -789,6 +953,7 @@ final class ConfigBackupManager {
                             emailID: nil, isDebt: t.isDebt,
                             cardLastDigits: t.cardLastDigits, fxRateAtCapture: t.fxRate)
             e.id = t.id
+            e.debtSettled = t.debtSettled ?? false
             modelContext.insert(e)
             byKey[TransactionKey.key(for: e)] = e
         }
@@ -832,8 +997,51 @@ final class ConfigBackupManager {
     /// gastos acaban de rearmarse. `nonisolated` porque se invoca desde el
     /// cierre de su cola, fuera del actor principal; no toca estado de la clase.
     nonisolated static func reapplyPendingDecisions(modelContext: ModelContext) {
+        ExpenseEditStore.captureFxRates(in: modelContext)
         ExpenseEditStore.apply(in: modelContext)
         IncomeLinkStore.apply(in: modelContext)
+    }
+
+    // MARK: - Decisiones que viajan en el blob de preferencias
+
+    /// Dos decisiones del usuario que no son ajustes pero tampoco están en
+    /// ningún correo, y que antes se perdían al reinstalar:
+    /// - `incomeDebtLinks`: qué cobro del correo (un Yapeo recibido) saldó qué
+    ///   deuda. Los anotados a mano ya llevan su `debtMarkKey`; éstos no.
+    /// - `pendingRecoveryIDs`: los gastos del correo que el usuario borró. Sin
+    ///   esto, releer Gmail en el teléfono nuevo los resucitaba todos.
+    ///
+    /// Viajan como texto JSON dentro de `preferences` para no tocar el esquema,
+    /// y al restaurar se **funden** con lo local en vez de sustituirlo.
+    private enum ExtraKeys {
+        static let incomeLinks = "backup.incomeDebtLinks"
+        static let deletedEmails = "backup.deletedEmailIDs"
+    }
+
+    private static func decisionExtras() -> [String: AnyCodableValue] {
+        var result: [String: AnyCodableValue] = [:]
+        let links = IncomeLinkStore.all().values.sorted { $0.incomeID.uuidString < $1.incomeID.uuidString }
+        if !links.isEmpty, let data = try? JSONEncoder().encode(links), let text = String(data: data, encoding: .utf8) {
+            result[ExtraKeys.incomeLinks] = .string(text)
+        }
+        let deleted = (UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []).sorted()
+        if !deleted.isEmpty, let data = try? JSONEncoder().encode(deleted), let text = String(data: data, encoding: .utf8) {
+            result[ExtraKeys.deletedEmails] = .string(text)
+        }
+        return result
+    }
+
+    private static func applyDecisionExtras(_ preferences: [String: AnyCodableValue]) {
+        if case .string(let text)? = preferences[ExtraKeys.incomeLinks],
+           let links = try? JSONDecoder().decode([IncomeLink].self, from: Data(text.utf8)) {
+            IncomeLinkStore.merge(links)
+        }
+        if case .string(let text)? = preferences[ExtraKeys.deletedEmails],
+           let incoming = try? JSONDecoder().decode([String].self, from: Data(text.utf8)) {
+            let defaults = UserDefaults.standard
+            let local = defaults.stringArray(forKey: "pendingRecoveryIDs") ?? []
+            defaults.set(Array(Set(local).union(incoming)).sorted(), forKey: "pendingRecoveryIDs")
+        }
     }
 
     // MARK: - Estado actual del dispositivo
@@ -1012,6 +1220,8 @@ struct ManualTransactionBackup: Codable {
     var notes: String?
     var isSubscription: Bool
     var isDebt: Bool
+    /// Opcional: los respaldos anteriores no lo traen.
+    var debtSettled: Bool? = nil
     var cardLastDigits: String?
     @RateCoded var fxRate: Double?
     var debtMarkKey: String?
@@ -1138,6 +1348,13 @@ struct BackupHeader: Codable, Identifiable, Equatable {
     var limitCount: Int?
     var shortcutCount: Int?
     var manualCount: Int?
+    // Desde v5 (`agrupay_sync_v5_fx_rates_and_cleanup.sql`). Opcionales: con
+    // el servidor anterior no llegan y la advertencia cae a los de arriba.
+    var createdAt: Date?
+    var quickCount: Int?
+    var recurringCount: Int?
+    var manualTxCount: Int?
+    var editCount: Int?
 
     var id: String { backupCode }
 }
