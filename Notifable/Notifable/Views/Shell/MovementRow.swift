@@ -247,7 +247,10 @@ struct IncomeRow: View {
     let income: Income
     var onTap: () -> Void = {}
 
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.colorScheme) private var scheme
+    @State private var showsDestino = false
+    @State private var confirmsDelete = false
     private var palette: Palette { Palette(scheme) }
     private var accent: AppThemeColor { .current }
 
@@ -279,6 +282,42 @@ struct IncomeRow: View {
         .padding(.vertical, 12)
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
+        .contextMenu {
+            Button {
+                showsDestino = true
+            } label: {
+                Label("Asignar a deuda", systemImage: "scope")
+            }
+
+            Button(role: .destructive) {
+                confirmsDelete = true
+            } label: {
+                Label("Eliminar", systemImage: "trash")
+            }
+        }
+        // Desde la hoja se puede ir a la deuda (`ActivityFocus`): se cierra
+        // para que Hoy la muestre.
+        .onReceive(NotificationCenter.default.publisher(for: ActivityFocus.notification)) { _ in
+            showsDestino = false
+        }
+        // La misma hoja que «¿A dónde va?» en el detalle del ingreso.
+        .sheet(isPresented: $showsDestino) {
+            IncomeDestinoSheet(income: income)
+        }
+        .confirmationDialog("¿Eliminar este ingreso?", isPresented: $confirmsDelete, titleVisibility: .visible) {
+            Button("Eliminar", role: .destructive) {
+                let income = income
+                let context = modelContext
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    income.deleteRestoringDebt(in: context)
+                }
+            }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text(income.debtReference != nil
+                 ? "Se borrará de tus cuentas y lo que devuelve volverá a figurar como pendiente. Esto no se puede deshacer."
+                 : "Se borrará de tus cuentas. Esto no se puede deshacer.")
+        }
     }
 }
 

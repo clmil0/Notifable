@@ -371,6 +371,7 @@ enum VoiceMovementParser {
     /// frase entera («taxi» delata Transporte aunque el título sea otro).
     static func defaultCategory(title: String, whole: String) -> String? {
         if !title.isEmpty {
+            if let named = categoryNamed(title) { return named }
             if let rule = MerchantRules.category(for: title), rule != Accounting.unclassified { return rule }
             if let hint = SuggestionEngine.suggest(for: title, rules: MerchantRules.all()),
                hint.category != Accounting.unclassified {
@@ -380,13 +381,33 @@ enum VoiceMovementParser {
         return MerchantCatalog.shared.category(for: whole)
     }
 
-    /// Regla exacta del usuario o palabra entera del catálogo.
+    /// Regla exacta del usuario, el nombre de una categoría dicho tal cual
+    /// («en comida», «de transporte») o palabra entera del catálogo.
     static func defaultKeywordCategory(_ word: String) -> String? {
         if let rule = MerchantRules.all()[word] ?? MerchantRules.all()[word.capitalizedFirst],
            rule != Accounting.unclassified {
             return rule
         }
+        if let named = categoryNamed(word) { return named }
         return MerchantCatalog.shared.exactCategory(for: word)
+    }
+
+    /// La categoría cuyo nombre es `word`, sin mirar tildes ni mayúsculas.
+    /// Sin esto, «500 soles en comida» se quedaba sin clasificar: «comida» es
+    /// una categoría, pero no un comercio del catálogo.
+    static func categoryNamed(_ word: String) -> String? {
+        let fold: (String) -> String = {
+            $0.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "es_PE"))
+                .lowercased()
+        }
+        let target = fold(word)
+        guard target.count >= 3 else { return nil }
+        let singular = target.hasSuffix("s") ? String(target.dropLast()) : target
+        return (CategoryStyle.defaults + CategoryCatalog.shared.names)
+            .first { name in
+                let folded = fold(name)
+                return folded != fold(Accounting.unclassified) && (folded == target || folded == singular)
+            }
     }
 
     // MARK: - Vocabulario

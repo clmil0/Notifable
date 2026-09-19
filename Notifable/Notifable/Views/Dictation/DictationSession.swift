@@ -5,7 +5,7 @@ import SwiftUI
 /// Una tarjeta del dictado: lo entendido y en qué punto está.
 struct DictationCard: Identifiable, Equatable {
     enum Status: Equatable {
-        /// Contando los 2 s antes de registrarse; se puede cancelar o editar.
+        /// Contando los segundos antes de registrarse; se puede cancelar o editar.
         case pending
         /// Pausado: nada se registra hasta que se guarde.
         case editing
@@ -49,7 +49,8 @@ final class DictationSession: ObservableObject {
 
     let speech = SpeechDictation()
 
-    static let countdown: Duration = .seconds(2)
+    static let countdownSeconds = 5
+    static let countdown: Duration = .seconds(countdownSeconds)
 
     private var context: ModelContext?
     private var incomplete: VoiceMovement?
@@ -58,6 +59,13 @@ final class DictationSession: ObservableObject {
     /// pregunta «¿De cuánto?»).
     private var patience: Task<Void, Never>?
     static let contextPatience: Duration = .milliseconds(3_500)
+    static let whatPatience: Duration = .milliseconds(2_000)
+
+    /// Un solo movimiento, con monto y sin nada que diga en qué.
+    private static func lacksWhat(_ text: String) -> Bool {
+        let parsed = VoiceMovementParser.parse(text)
+        return parsed.count == 1 && parsed[0].amount != nil && parsed[0].title == nil
+    }
     private(set) var categories: [String] = CategoryStyle.defaults
 
     var savedCount: Int { cards.filter { $0.status == .saved }.count }
@@ -107,11 +115,18 @@ final class DictationSession: ObservableObject {
 
         // Sin monto todavía y sin pregunta abierta: es contexto, no un gasto.
         // Se guarda y se espera a que la persona llegue al número.
-        if question == nil, VoiceMovementParser.allAmounts(in: combined).isEmpty {
+        //
+        // Con monto pero sin el qué («he gastado 500 soles» … «en comida»)
+        // también se espera un momento: la pausa suele ser a media frase, y
+        // preguntar «¿En qué?» ahí partía el gasto en dos y lo dejaba sin
+        // categoría.
+        let noAmount = VoiceMovementParser.allAmounts(in: combined).isEmpty
+        if question == nil, noAmount || Self.lacksWhat(combined) {
             story = combined
             lastPhrase = combined
+            let wait = noAmount ? Self.contextPatience : Self.whatPatience
             patience = Task { [weak self] in
-                try? await Task.sleep(for: Self.contextPatience)
+                try? await Task.sleep(for: wait)
                 guard !Task.isCancelled, let self, !self.story.isEmpty else { return }
                 let told = self.story
                 self.story = ""

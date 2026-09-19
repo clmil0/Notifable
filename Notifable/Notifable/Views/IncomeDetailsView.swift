@@ -306,22 +306,8 @@ struct IncomeDetailsView: View {
     // MARK: - Eliminar
 
     private func delete() {
-        IncomeLinkStore.remove(incomeID: income.id)
-        if let debt = income.debtReference, income.isFinalDebtPayment == true {
-            restoreDebtIfNeeded(debt)
-        }
-        modelContext.delete(income)
-        try? modelContext.save()
+        income.deleteRestoringDebt(in: modelContext)
         dismiss()
-    }
-
-    private func restoreDebtIfNeeded(_ debt: Expense) {
-        guard !debt.isDebt else { return }
-        debt.isDebt = true
-        ExpenseEditStore.record(debt, isDebt: true)
-        let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.isDebt == true })
-        let hasDebts = ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
-        NotificationManager.shared.updateDebtNotification(hasDebts: hasDebts)
     }
 }
 

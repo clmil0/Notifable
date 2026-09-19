@@ -74,6 +74,12 @@ enum AvatarCatalog {
     /// Cada SVG se lee una sola vez, la primera vez que se dibuja.
     static func scene(_ key: String) -> SVGScene? { scenes[key] ?? nil }
 
+    /// Lee todos los SVG fuera del hilo principal, para que el primer avatar
+    /// que se dibuje no tenga que esperar a que se lean.
+    static func prewarm() {
+        Task.detached(priority: .utility) { _ = scenes.count }
+    }
+
     private static let scenes: [String: SVGScene?] =
         AvatarArtwork.svg.mapValues { SVGScene(svg: $0) }
 }

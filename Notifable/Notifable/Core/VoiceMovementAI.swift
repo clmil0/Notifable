@@ -26,6 +26,10 @@ enum VoiceMovementAI {
     static func parse(_ text: String, categories: [String], now: Date = Date()) async -> [VoiceMovement] {
         let rules = VoiceMovementParser.parse(text, now: now)
 
+        // Frase corta y directa que las reglas ya entendieron entera, con
+        // categoría: el modelo tarda un par de segundos y no añadiría nada.
+        if isPlainAndComplete(text, rules: rules) { return rules }
+
         #if canImport(FoundationModels)
         if #available(iOS 26.0, *), isAvailable,
            let generated = try? await generate(text, categories: categories) {
@@ -33,6 +37,18 @@ enum VoiceMovementAI {
         }
         #endif
         return rules
+    }
+
+    /// Un solo movimiento completo y clasificado, dicho en pocas palabras y
+    /// sin correcciones ni otros montos que puedan confundir a las reglas.
+    private static func isPlainAndComplete(_ text: String, rules: [VoiceMovement]) -> Bool {
+        guard rules.count == 1, let only = rules.first, only.isComplete else { return false }
+        if only.kind == .gasto, only.category == Accounting.unclassified { return false }
+        let tokens = VoiceMovementParser.tokenize(text)
+        let corrections: Set<String> = ["pero", "final", "mejor", "perdon", "corrijo", "digo", "realidad"]
+        return tokens.count <= 10
+            && VoiceMovementParser.allAmounts(in: text).count == 1
+            && !tokens.contains(where: corrections.contains)
     }
 
     #if canImport(FoundationModels)
@@ -83,6 +99,13 @@ enum VoiceMovementAI {
                 // Una regla del usuario pesa más que la opinión del modelo.
                 let rule = result.title.flatMap { MerchantRules.category(for: $0) }
                 result.category = rule ?? match
+            }
+            // El modelo dejó la categoría vacía o inventó una que no existe:
+            // se intenta con su título («Comida» es ya una categoría).
+            if result.kind == .gasto, result.category == Accounting.unclassified, let title = result.title {
+                let whole = VoiceMovementParser.tokenize(text).joined(separator: " ")
+                result.category = VoiceMovementParser.defaultCategory(title: title, whole: whole)
+                    ?? Accounting.unclassified
             }
             return result
         }

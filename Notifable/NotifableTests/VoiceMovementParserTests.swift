@@ -138,4 +138,24 @@ struct VoiceMovementParserTests {
         let expected = Calendar.current.date(byAdding: .day, value: -1, to: now)!
         #expect(Calendar.current.isDate(result[0].date, inSameDayAs: expected))
     }
+
+    /// «comida» no es un comercio sino el nombre de una categoría: con las
+    /// reglas reales (sin catálogo inyectado) tiene que clasificarse igual.
+    @Test func nombreDeCategoriaDichoTalCual() {
+        for phrase in ["He gastado 500 soles en comida",
+                       "Quiero añadir un gasto de 500 soles en comida"] {
+            let result = VoiceMovementParser.parse(phrase)
+            #expect(result.count == 1)
+            #expect(result[0].amount == 500)
+            #expect(result[0].title == "Comida")
+            #expect(result[0].category == "Comida")
+        }
+    }
+
+    @Test func montoSinQueQuedaSinTitulo() {
+        let result = parse("He gastado 500 soles")
+        #expect(result.count == 1)
+        #expect(result[0].amount == 500)
+        #expect(result[0].title == nil)
+    }
 }

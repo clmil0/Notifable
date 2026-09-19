@@ -51,6 +51,7 @@ struct NotifableApp: App {
                 .appTextSize()
                 .appAppearance()
                 .task {
+                    AvatarCatalog.prewarm()
                     Diagnostics.shared.log("Configurando respaldo y amigos")
                     // A partir de aquí la sincronización se dispara sola con
                     // cada guardado; ninguna vista tiene que avisarle de nada.

@@ -44,3 +44,20 @@ final class Income {
             : (fxRateAtCapture ?? ExchangeRateService.storedRate)
     }
 }
+
+extension Income {
+    /// Borra el ingreso y su vínculo guardado. Si era el abono que cerraba una
+    /// deuda, la deuda vuelve a quedar por cobrar.
+    func deleteRestoringDebt(in modelContext: ModelContext) {
+        IncomeLinkStore.remove(incomeID: id)
+        if let debt = debtReference, isFinalDebtPayment == true, !debt.isDebt {
+            debt.isDebt = true
+            ExpenseEditStore.record(debt, isDebt: true)
+            let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.isDebt == true })
+            let hasDebts = ((try? modelContext.fetchCount(descriptor)) ?? 0) > 0
+            NotificationManager.shared.updateDebtNotification(hasDebts: hasDebts)
+        }
+        modelContext.delete(self)
+        try? modelContext.save()
+    }
+}

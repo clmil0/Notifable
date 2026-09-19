@@ -64,17 +64,16 @@ struct AddFriendSheet: View {
         .presentationDetents(detents)
         .presentationDragIndicator(.visible)
         .presentationCornerRadius(28)
+        // Opaca, como la del dictado: a media altura el sistema la dibujaría
+        // translúcida.
+        .presentationBackground(palette.surfaceElevated)
         .appAppearance()
         .appTextSize()
     }
 
-    /// Semimodales: usar una invitación es un campo y un botón.
+    /// Hasta la mitad de la pantalla; lo que no quepa se desplaza dentro.
     private var detents: Set<PresentationDetent> {
-        if invitedCode != nil { return [.large] }
-        switch mode {
-        case .invite: return [.fraction(0.72), .large]
-        case .redeem: return [.medium, .large]
-        }
+        invitedCode != nil ? [.large] : [.medium]
     }
 
     // MARK: - Formulario (2a)
@@ -167,7 +166,10 @@ struct AddFriendSheet: View {
                 }
                 Spacer(minLength: 8)
                 if let invite {
-                    chip(icon: "clock", text: "caduca en \(Self.hoursLeft(invite.expiresAt)) h")
+                    // Cada 30 s: con minutos, un reloj quieto se ve roto.
+                    TimelineView(.periodic(from: .now, by: 30)) { _ in
+                        chip(icon: "clock", text: "caduca en " + Self.timeLeft(invite.expiresAt))
+                    }
                 }
             }
 
@@ -499,8 +501,13 @@ struct AddFriendSheet: View {
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
-    private static func hoursLeft(_ date: Date) -> Int {
-        max(1, Int((date.timeIntervalSinceNow / 3600).rounded(.down)))
+    /// «71 h 59 min»; en la última hora, sólo los minutos.
+    private static func timeLeft(_ date: Date) -> String {
+        let minutes = max(1, Int((date.timeIntervalSinceNow / 60).rounded(.down)))
+        let hours = minutes / 60
+        let rest = minutes % 60
+        if hours == 0 { return "\(rest) min" }
+        return rest == 0 ? "\(hours) h" : "\(hours) h \(rest) min"
     }
 
     // MARK: - Acciones
@@ -833,7 +840,9 @@ struct MyProfileSheet: View {
 
     private func tileStrip<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(alignment: .top, spacing: 10) { content() }
+            // Perezosa: cada miniatura es un dibujo vectorial completo, y
+            // abrir el editor dibujaba las ~30 de golpe aunque no se vieran.
+            LazyHStack(alignment: .top, spacing: 10) { content() }
                 .padding(.horizontal, 3)
                 .padding(.vertical, 3)
         }

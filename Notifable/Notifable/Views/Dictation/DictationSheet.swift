@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// Sube desde el mic de la píldora de acciones. La transcripción aparece
 /// mientras se habla; cada movimiento entendido genera su tarjeta, que se
-/// registra sola a los 2 s salvo que se cancele o se edite. Si falta un dato,
+/// registra sola a los 5 s salvo que se cancele o se edite. Si falta un dato,
 /// lo pregunta («¿De cuánto?») y la siguiente frase lo completa.
 ///
 /// «Listo» cierra el movimiento que se está diciendo sin esperar al silencio;
@@ -372,7 +372,7 @@ private struct DictationCardView: View {
             }
             .frame(width: 28, height: 28)
 
-            Text("Se registra en 2 s")
+            Text("Se registra en \(DictationSession.countdownSeconds) s")
                 .font(.system(size: 12.5))
                 .foregroundStyle(palette.secondaryLabel)
 
@@ -413,7 +413,7 @@ private struct DictationCardView: View {
 
     private func runRing() {
         ring = 1
-        withAnimation(.linear(duration: 2)) { ring = 0 }
+        withAnimation(.linear(duration: Double(DictationSession.countdownSeconds))) { ring = 0 }
     }
 
     // MARK: Editando
