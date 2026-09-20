@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#9b5de5;--objeto2:#ff8fab">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-diadema-flor">
+    <path class="trazo" stroke-width="18" d="M244 292 C272 240 470 236 502 288"/>
+    <path class="objeto-trazo" stroke-width="10" d="M244 292 C272 240 470 236 502 288"/>
+    <path fill="#52b788" stroke="#1e1a6b" stroke-width="4" stroke-linejoin="round" d="M470 262 C488 262 500 272 504 284 C488 286 474 278 470 262 Z"/>
+    <circle class="trazo" fill="#1e1a6b" stroke-width="8" cx="456.0" cy="235.0" r="13"/><circle class="trazo" fill="#1e1a6b" stroke-width="8" cx="468.4" cy="244.0" r="13"/><circle class="trazo" fill="#1e1a6b" stroke-width="8" cx="463.6" cy="258.5" r="13"/><circle class="trazo" fill="#1e1a6b" stroke-width="8" cx="448.4" cy="258.5" r="13"/><circle class="trazo" fill="#1e1a6b" stroke-width="8" cx="443.6" cy="244.0" r="13"/><circle class="objeto-2" cx="456.0" cy="235.0" r="13"/><circle class="objeto-2" cx="468.4" cy="244.0" r="13"/><circle class="objeto-2" cx="463.6" cy="258.5" r="13"/><circle class="objeto-2" cx="448.4" cy="258.5" r="13"/><circle class="objeto-2" cx="443.6" cy="244.0" r="13"/><circle fill="#ffd23f" stroke="#1e1a6b" stroke-width="4" cx="456" cy="248" r="9"/></g>
+</svg>

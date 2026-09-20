@@ -84,7 +84,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         // Antes de que termine el arranque, como pide `UNUserNotificationCenter`,
         // para que los avisos también se vean con la app abierta.
         UNUserNotificationCenter.current().delegate = NotificationManager.shared
+        // Con el permiso ya dado, el token se pide en cada arranque: iOS puede
+        // cambiarlo (restaurar el teléfono, reinstalar) sin avisar.
+        PaymentReminders.registerForPushIfAllowed()
         return true
+    }
+
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Task { await PaymentReminders.shared.store(deviceToken: deviceToken) }
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        Diagnostics.shared.log("Push: no se pudo registrar (\(error.localizedDescription))")
     }
 
     // Los cierres por watchdog que ha tenido la app son de "scene-update": iOS

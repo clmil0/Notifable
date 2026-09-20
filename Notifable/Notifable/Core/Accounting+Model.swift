@@ -24,6 +24,7 @@ extension Expense {
             date: date,
             category: category,
             merchant: merchant,
+            tags: tags,
             isDebt: isDebt,
             fxRateAtCapture: fxRateAtCapture,
             paymentsInOwnCurrency: paymentsInOwnCurrency,

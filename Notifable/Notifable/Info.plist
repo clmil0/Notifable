@@ -19,6 +19,14 @@
 			<string>Agrupei</string>
 		</dict>
 	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>clmilo.Notifable.gmailRefresh</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+	</array>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

@@ -1,17 +1,20 @@
 import SwiftUI
 import SwiftData
 
-/// Social › Actividad (`2g`), la sub-vista por defecto de la pestaña.
+/// Social (`2g`): Actividad y Amigos en una sola pantalla.
 ///
-/// Arriba, tu tarjeta (`2h`): tu cabecera, tu gasto del mes y cuántos amigos
-/// lo ven, antes de lo que te comparten — así se ve de un vistazo qué estás
-/// enseñando tú, no sólo lo que ves de los demás.
+/// Estaban en dos píldoras, y se pagaba caro: los amigos vivían en una y lo
+/// que te comparten en otra, así que aceptar una solicitud y ver su gasto
+/// eran dos viajes. Ahora es un solo scroll, en el orden en que se usa —lo
+/// tuyo, lo que hay que atender, lo que te comparten, y al final la lista
+/// entera.
 ///
-/// Solicitudes arriba y feed debajo. Antes esto era el primer tercio de un
-/// scroll único de 2,400 líneas que además llevaba la lista de amigos, el
-/// canje de códigos y el editor del pingüino; lo que te comparten se perdía
-/// entre la configuración de lo que tú compartes.
-struct ActivityView: View {
+/// Las piezas de Amigos viven en `FriendsSections`, cada una con su estado:
+/// aquí sólo se decide el orden.
+/// - Note: `SocialHubView` y no `SocialView` porque `Views/SocialView.swift`
+///   —la pantalla social anterior al rediseño, que ya no usa nadie— sigue en
+///   el proyecto con ese nombre.
+struct SocialHubView: View {
     @Binding var scrollToTopTrigger: Bool
     let progress: ScrollProgress
 
@@ -57,6 +60,8 @@ struct ActivityView: View {
             VStack(spacing: 12) {
                 myCard
 
+                FriendsActionsSection()
+
                 if !auth.isReady && !auth.needsGoogleAccount {
                     ShellCard {
                         HStack(spacing: 10) {
@@ -67,9 +72,13 @@ struct ActivityView: View {
                         }
                     }
                 } else if pending.isEmpty && feed.isEmpty {
-                    ShellEmptyState(icon: "bolt",
-                                    title: "Todavía nadie te comparte",
-                                    message: "Agrega amigos con una invitación y pídeles que te compartan su gasto del mes.")
+                    // Sin amigos, el vacío lo pone la lista de abajo: dos
+                    // carteles seguidos diciendo lo mismo sobran.
+                    if !friendsManager.friends.isEmpty {
+                        ShellEmptyState(icon: "bolt",
+                                        title: "Todavía nadie te comparte",
+                                        message: "Pídeles a tus amigos que te compartan su gasto del mes.")
+                    }
                 } else {
                     VStack(spacing: 0) {
                         ShellSectionHeader(title: "De tus amigos",
@@ -86,6 +95,8 @@ struct ActivityView: View {
                         }
                     }
                 }
+
+                FriendsRosterSection()
             }
             .padding(.horizontal, 16)
             .padding(.top, ShellMetrics.contentTopInset)

@@ -64,6 +64,7 @@ struct TodayView: View {
     @State private var expenseToCategorize: Expense?
     @State private var scrollTarget: UUID?
     @State private var highlighted: UUID?
+    @State private var searchText = ""
 
     private var palette: Palette { Palette(scheme) }
     private var accent: AppThemeColor { .current }
@@ -106,8 +107,14 @@ struct TodayView: View {
             buckets[calendar.startOfDay(for: income.date), default: []].append(.income(income))
         }
 
-        return buckets.keys.sorted(by: >).map { day in
-            let items = (buckets[day] ?? []).sorted { $0.date > $1.date }
+        return buckets.keys.sorted(by: >).compactMap { day -> DayGroup? in
+            // El buscador filtra **dentro** del mes que se está mirando: es un
+            // filtro de esta lista, no una pantalla nueva. Un día que se queda
+            // sin movimientos desaparece entero, con su cabecera.
+            let items = (buckets[day] ?? [])
+                .filter { $0.matches(searchText) }
+                .sorted { $0.date > $1.date }
+            guard !items.isEmpty else { return nil }
             let spent = Money.sum(items.compactMap { item -> Double? in
                 guard case .expense(let e) = item else { return nil }
                 return Accounting.netCostInPEN(e, fallbackRate: rate)
@@ -135,13 +142,16 @@ struct TodayView: View {
                     .frame(height: 0.5)
                     .padding(.bottom, 14)
 
+                searchField
+                    .padding(.bottom, 18)
+
                 if groups.isEmpty {
-                    emptyMonth
+                    searchText.isEmpty ? AnyView(emptyMonth) : AnyView(noSearchResults)
                 } else {
                     // El mes sigue con su monto; sólo el bloque del día queda
                     // vacío (`1c`). Sin esto, la lista arrancaba en «Ayer» y
                     // parecía que hoy no existía.
-                    if isCurrentMonth,
+                    if isCurrentMonth, searchText.isEmpty,
                        !groups.contains(where: { Calendar.current.isDateInToday($0.day) }) {
                         emptyToday
                             .padding(.bottom, 18)
@@ -152,7 +162,7 @@ struct TodayView: View {
                             .padding(.bottom, 18)
                     }
 
-                    monthFooter
+                    if searchText.isEmpty { monthFooter }
                 }
             }
             .padding(.horizontal, 16)
@@ -222,13 +232,14 @@ struct TodayView: View {
                 guard balance != nil else { return }
                 withAnimation(.easeInOut(duration: 0.24)) { showsBalanceInstead.toggle() }
             } label: {
-                // 52, no 68: con decimales y separador de miles el monto
+                // 47, no 68: con decimales y separador de miles el monto
                 // llega a doce caracteres, y a 68 pt ocupaba el ancho entero
                 // de la pantalla y empujaba la lista fuera del primer vistazo.
                 // Sigue siendo la pieza más grande de la pantalla, que es lo
-                // que tiene que ser, sin comerse el resto.
+                // que tiene que ser, sin comerse el resto; el chip del mes
+                // creció un poco a cambio.
                 Text(heroText(amount, showsBalance: showsBalance))
-                    .font(.system(size: 52, weight: .bold, design: .default))
+                    .font(.system(size: 47, weight: .bold, design: .default))
                     .tracking(-2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.45)
@@ -311,19 +322,19 @@ struct TodayView: View {
             .accessibilityLabel("Mes anterior")
 
             Text(monthTitle)
-                .font(.system(size: 13.5, weight: .semibold))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(palette.label)
 
             if hasComparison, !Money.isZero(delta) {
                 Rectangle()
                     .fill(palette.hairline)
-                    .frame(width: 1, height: 12)
+                    .frame(width: 1, height: 13)
 
                 HStack(spacing: 3) {
                     Image(systemName: isUp ? "arrow.up" : "arrow.down")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 12, weight: .bold))
                     Text(Money.format(abs(delta)))
-                        .font(.system(size: 13.5, weight: .semibold))
+                        .font(.system(size: 15, weight: .semibold))
                 }
                 .foregroundStyle(isUp ? palette.negative : palette.positive)
             }
@@ -399,6 +410,43 @@ struct TodayView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 4)
             .padding(.bottom, 8)
+    }
+
+    /// Mismo sitio que la lista, mismo ancho: el buscador es una fila más de
+    /// Hoy, no una barra de sistema que se pega arriba.
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(palette.secondaryLabel)
+
+            TextField(MovementSearch.placeholder, text: $searchText)
+                .font(.system(size: 15.5))
+                .foregroundStyle(palette.label)
+                .submitLabel(.search)
+                .autocorrectionDisabled()
+
+            if !searchText.isEmpty {
+                Button { searchText = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15))
+                        .foregroundStyle(palette.tertiaryLabel)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 42)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .stroke(palette.hairline, lineWidth: 0.5))
+    }
+
+    private var noSearchResults: some View {
+        ShellEmptyState(icon: "magnifyingglass",
+                        title: "Sin resultados para «" + searchText + "»",
+                        message: "Prueba con el nombre del comercio, la categoría o una etiqueta.")
+            .padding(.top, 8)
     }
 
     private var emptyToday: some View {

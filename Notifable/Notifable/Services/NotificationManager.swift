@@ -19,6 +19,9 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             } else {
                 Diagnostics.shared.log("Notificaciones: permiso \(granted ? "concedido" : "denegado")")
             }
+            // Los recordatorios de un amigo llegan por APNs: sin token
+            // registrado no hay a dónde mandarlos.
+            if granted { PaymentReminders.registerForPushIfAllowed() }
         }
     }
 
@@ -29,6 +32,19 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .list, .sound])
+    }
+
+    /// Tocar un aviso lo lleva a donde corresponde: los recordatorios de un
+    /// amigo, a Amigos. El enlace viaja en el propio aviso (`deepLink`), así
+    /// que el servidor puede mandar a otra parte sin tocar la app.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        let info = response.notification.request.content.userInfo
+        if let link = info["deepLink"] as? String, let url = URL(string: link) {
+            DispatchQueue.main.async { UIApplication.shared.open(url) }
+        }
+        completionHandler()
     }
 
     // MARK: - Vigilancia
@@ -299,6 +315,35 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         }
 
         defaults.set(state, forKey: NotificationManager.categoryLimitStateKey)
+    }
+
+    // MARK: - Movimiento registrado
+
+    /// Encendido por defecto: es el aviso que enseña que la app sigue leyendo
+    /// el correo aunque no la abras.
+    static let importedEnabledKey = "notifyImportedMovements"
+
+    /// Un aviso por cada gasto o ingreso que la app registra del correo.
+    ///
+    /// Uno por movimiento y sin resumir, igual que el del banco: lo que se
+    /// quiere comprobar de un vistazo es «esto que acabo de pagar, ¿quedó
+    /// anotado?». Llega en silencio (`passive`) porque el banco ya sonó.
+    func notifyImported(title: String, amount: Double, currency: String, isIncome: Bool,
+                        defaults: UserDefaults = .standard) {
+        guard defaults.object(forKey: NotificationManager.importedEnabledKey) as? Bool ?? true else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = isIncome ? "Ingreso registrado" : "Gasto registrado"
+        content.body = (isIncome ? "+" : "–") + Money.format(amount, currency: currency)
+            + " · " + Accounting.displayName(title)
+        content.sound = .default
+        content.interruptionLevel = .passive
+
+        let request = UNNotificationRequest(identifier: "imported-" + UUID().uuidString,
+                                            content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error { Diagnostics.shared.log("Notificaciones: error en aviso de movimiento: \(error.localizedDescription)") }
+        }
     }
 
     /// Recordatorio de gastos recurrentes vencidos.

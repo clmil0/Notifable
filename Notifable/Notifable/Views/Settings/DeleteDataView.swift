@@ -415,6 +415,7 @@ struct DeleteDataView: View {
         UserDefaults.standard.removeObject(forKey: MerchantRules.key)
         CategoryCatalog.shared.removeAll()
         CategoryBudgetStore.shared.removeAll()
+        TagCatalog.shared.removeAll()
 
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: BudgetStore.monthlyBudgetKey)

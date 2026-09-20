@@ -80,14 +80,34 @@ class GmailSyncService: ObservableObject {
     ///   progreso) salvo que de verdad haya correos nuevos que procesar.
     /// Hay una lectura en curso. Sólo se toca en el hilo principal.
     private var isRunning = false
+    /// Quien espera a que la lectura termine: la tarea de segundo plano, que
+    /// no puede darse por terminada antes de tiempo.
+    private var runCompletions: [() -> Void] = []
     /// Rango pedido mientras otra lectura corría: se lanza al terminar ésa.
     private var queuedRange: (start: Date?, end: Date?)?
 
     /// Cierra la lectura en curso y, si alguien pidió un rango mientras
     /// tanto, lo lanza ahora.
+    /// Espera a que termine la lectura: una vuelta de la tarea en segundo
+    /// plano, que no tiene primer plano al que volver.
+    @MainActor
+    func syncNow() async {
+        await withCheckedContinuation { continuation in
+            var resumed = false
+            syncEmails(force: true, quiet: true) {
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume()
+            }
+        }
+    }
+
     private func finishRun() {
         DispatchQueue.main.async {
             self.isRunning = false
+            let waiting = self.runCompletions
+            self.runCompletions = []
+            for completion in waiting { completion() }
             if let queued = self.queuedRange {
                 self.queuedRange = nil
                 self.syncEmails(force: true, startDate: queued.start, endDate: queued.end)
@@ -95,15 +115,20 @@ class GmailSyncService: ObservableObject {
         }
     }
 
-    func syncEmails(force: Bool = false, quiet: Bool = false, startDate: Date? = nil, endDate: Date? = nil) {
+    func syncEmails(force: Bool = false, quiet: Bool = false, startDate: Date? = nil, endDate: Date? = nil,
+                    completion: (() -> Void)? = nil) {
         guard Thread.isMainThread else {
-            DispatchQueue.main.async { self.syncEmails(force: force, quiet: quiet, startDate: startDate, endDate: endDate) }
+            DispatchQueue.main.async {
+                self.syncEmails(force: force, quiet: quiet, startDate: startDate, endDate: endDate,
+                                completion: completion)
+            }
             return
         }
         // Throttling: un poco menos del intervalo del temporizador, para que su
         // propio desfase no le haga saltarse una vuelta.
         if !force, let lastSync = lastSyncDate, Date().timeIntervalSince(lastSync) < Self.foregroundPollInterval - 10 {
             print("Sync throttled. Last sync was \(Int(Date().timeIntervalSince(lastSync)/60)) minutes ago.")
+            completion?()
             return
         }
 
@@ -115,6 +140,7 @@ class GmailSyncService: ObservableObject {
         // de "¿Cuánto correo miramos?" o en Gmail y bancos.
         if startDate == nil, endDate == nil, lastSyncDate == nil {
             print("Sync skipped: sin lectura previa y sin rango elegido por el usuario.")
+            completion?()
             return
         }
         
@@ -126,9 +152,11 @@ class GmailSyncService: ObservableObject {
         if isRunning {
             if startDate != nil || endDate != nil { queuedRange = (startDate, endDate) }
             Diagnostics.shared.log("Sync Gmail: ya hay una lectura en curso, \(queuedRange != nil ? "se encola el rango" : "se omite")")
+            if let completion { runCompletions.append(completion) }
             return
         }
         isRunning = true
+        if let completion { runCompletions.append(completion) }
 
         Diagnostics.shared.log("Sync Gmail: inicio (force: \(force), rango: \(startDate != nil || endDate != nil))")
         if !quiet {
@@ -486,9 +514,28 @@ class GmailSyncService: ObservableObject {
                                 if let context = self?.modelContext {
                                     var inserted = false
                                     if let expense = parsed.expense {
+                                        // Los datos, antes de insertarlo: al
+                                        // insertar puede fundirse con otro
+                                        // gasto ya existente (Apple).
+                                        let title = expense.merchant
+                                        let amount = expense.amount
+                                        let currency = expense.currency
                                         inserted = self?.handleExpenseInsertion(expenseData: (expense, parsed.bankName), emailID: id, context: context) == true
+                                        // Sólo lo que acaba de llegar: leer seis
+                                        // meses de pasado no son cien avisos.
+                                        if inserted, !isRangeSync {
+                                            NotificationManager.shared.notifyImported(
+                                                title: title, amount: amount, currency: currency, isIncome: false)
+                                        }
                                     } else if let income = parsed.income {
+                                        let title = income.title ?? income.source
+                                        let amount = income.amount
+                                        let currency = income.currency
                                         inserted = self?.handleIncomeInsertion(income: income, emailID: id, context: context) == true
+                                        if inserted, !isRangeSync {
+                                            NotificationManager.shared.notifyImported(
+                                                title: title, amount: amount, currency: currency, isIncome: true)
+                                        }
                                     }
                                     if inserted {
                                         newExpensesFound += 1

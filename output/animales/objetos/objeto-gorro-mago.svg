@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#5a4fcf;--objeto2:#ffd23f">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-gorro-mago">
+    <path class="objeto linea" stroke-width="6" d="M316 246 C330 214 350 192 374 180 C394 172 424 176 448 188 C424 192 410 204 406 216 C414 228 422 238 430 246 Z"/>
+    <polygon class="objeto-2"  points="372.0,207.0 375.4,215.3 384.4,216.0 377.6,221.8 379.6,230.5 372.0,225.8 364.4,230.5 366.4,221.8 359.6,216.0 368.6,215.3"/><polygon class="objeto-2"  points="402.0,231.0 403.9,235.5 408.7,235.8 405.0,239.0 406.1,243.7 402.0,241.2 397.9,243.7 399.0,239.0 395.3,235.8 400.1,235.5"/><polygon class="objeto-2"  points="346.0,232.0 347.6,235.8 351.7,236.1 348.6,238.8 349.5,242.9 346.0,240.7 342.5,242.9 343.4,238.8 340.3,236.1 344.4,235.8"/>
+    <circle class="objeto-2" cx="447" cy="189" r="6"/>
+    <ellipse class="objeto linea" stroke-width="6" cx="372" cy="248" rx="94" ry="15"/>
+    <path class="objeto-2" d="M290 246 C330 240 414 240 454 246 C414 244 330 244 290 246 Z"/></g>
+</svg>

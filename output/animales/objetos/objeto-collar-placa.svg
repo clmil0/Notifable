@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#e63946;--objeto2:#ffc93c">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-collar-placa">
+    <path class="objeto linea" stroke-width="5" d="M216 436 C290 462 450 462 522 436 L523 456 C450 482 290 482 215 456 Z"/>
+    <circle class="trazo" stroke-width="4" cx="379" cy="474" r="6"/>
+    <circle class="objeto-2 linea" stroke-width="5" cx="379" cy="496" r="18"/>
+    <g class="objeto-2-oscuro"><ellipse cx="379" cy="501" rx="7" ry="6"/><circle cx="370" cy="490" r="3.2"/><circle cx="379" cy="487" r="3.2"/><circle cx="388" cy="490" r="3.2"/></g></g>
+</svg>

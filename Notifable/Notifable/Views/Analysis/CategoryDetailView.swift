@@ -237,12 +237,31 @@ struct CategoryDetailView: View {
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(accent.onSurface(scheme))
                 }
+
+                // Lo único que `Presupuestos` tenía y la fila de la lista no
+                // puede dar: la barra dice dónde estás, la proyección dice
+                // dónde vas a acabar. «S/ 888 de 900» no avisa de nada; «a este
+                // ritmo terminas en S/ 1,268», sí.
+                if !limit.isOver, let projection = projection(of: limit) {
+                    ShellNote(icon: "chart.line.uptrend.xyaxis",
+                              text: "A este ritmo terminas el ciclo en " + Money.format(projection),
+                              tint: Money.cents(projection) > Money.cents(limit.limit)
+                                  ? palette.warning : palette.secondaryLabel)
+                }
             } else if !showsYear {
                 Button("Poner límite") { editingLimit = true }
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(accent.onSurface(scheme))
             }
         }
+    }
+
+    /// Cierre estimado del ciclo si se mantiene el ritmo. `nil` al principio,
+    /// donde dividir por una fracción casi cero da cifras absurdas.
+    private func projection(of status: CategoryLimitStatus) -> Double? {
+        let elapsed = status.elapsedFraction
+        guard elapsed > 0.08, Money.cents(status.spent) > 0 else { return nil }
+        return Money.multiply(status.spent, by: 1 / elapsed)
     }
 
     private func statTiles(items: [Expense], spent: Double, previous: Double) -> some View {

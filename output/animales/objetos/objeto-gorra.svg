@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#2a9d8f;--objeto2:#f4f1de">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-gorra">
+    <path class="objeto linea" stroke-width="6" d="M236 292 C244 246 300 222 372 222 C446 222 502 246 510 292 C450 282 296 282 236 292 Z"/>
+    <path d="M372 224 C360 240 350 262 346 286 M372 224 C384 240 394 262 398 286" stroke="#1e1a6b" stroke-opacity=".25" stroke-width="4" fill="none"/>
+    <circle class="objeto-2 linea" stroke-width="4" cx="372" cy="262" r="13"/>
+    <path class="objeto-2 linea" stroke-width="6" d="M244 290 C300 276 448 276 502 290 C510 300 504 310 492 312 C440 298 306 298 254 312 C242 310 236 300 244 290 Z"/>
+    <circle class="objeto linea" stroke-width="4" cx="372" cy="222" r="7"/></g>
+</svg>

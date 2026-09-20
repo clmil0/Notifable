@@ -16,11 +16,21 @@ struct NotificationSettingsView: View {
     @AppStorage(NotificationSettings.debtMinuteKey) private var debtMinute = 0
     @AppStorage("debtNotificationFrequency") private var debtFrequency = "Diario"
     @AppStorage(NotificationManager.categoryLimitEnabledKey) private var limitAlertsEnabled = true
+    @AppStorage(NotificationManager.importedEnabledKey) private var importedAlertsEnabled = true
 
     private var tint: Color { AppThemeColor(rawValue: appAccentColor)?.color ?? .purple }
 
     var body: some View {
         Form {
+            Section {
+                Toggle("Cada pago registrado", isOn: $importedAlertsEnabled)
+                    .tint(tint)
+            } header: {
+                Text("Del correo")
+            } footer: {
+                Text("Un aviso por cada gasto o ingreso que la app registra de tu correo. Con la app cerrada, el iPhone decide cada cuánto mirar el correo según tu batería y tu uso, así que el aviso puede tardar unos minutos.")
+            }
+
             Section {
                 Toggle("Presupuesto", isOn: $notificationsEnabled)
                     .tint(tint)

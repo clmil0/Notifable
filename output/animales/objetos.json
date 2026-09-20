@@ -1,0 +1,422 @@
+{
+  "viewBox": "140 170 470 460",
+  "orden_capas": "z<0 detrás del animal; animal = 0; luego cuerpo(1), cuello(2), cara(3), cabeza(4)",
+  "una_por_categoria": true,
+  "animales": [
+    {
+      "id": "perro",
+      "nombre": "Perro",
+      "archivo": "animales/perro.svg",
+      "colores": {
+        "--pelo": "#d9a066",
+        "--pico": "#2b2238",
+        "--acento": "#8a5a3b"
+      }
+    },
+    {
+      "id": "gato",
+      "nombre": "Gato",
+      "archivo": "animales/gato.svg",
+      "colores": {
+        "--pelo": "#f4a259",
+        "--pico": "#f28fa0",
+        "--acento": "#c8652a"
+      }
+    },
+    {
+      "id": "leon",
+      "nombre": "León",
+      "archivo": "animales/leon.svg",
+      "colores": {
+        "--pelo": "#f2c14e",
+        "--pico": "#7a4a3a",
+        "--acento": "#c8641e"
+      }
+    },
+    {
+      "id": "tigre",
+      "nombre": "Tigre",
+      "archivo": "animales/tigre.svg",
+      "colores": {
+        "--pelo": "#f5892a",
+        "--pico": "#e86f7f",
+        "--acento": "#2b2233"
+      }
+    },
+    {
+      "id": "zorro",
+      "nombre": "Zorro",
+      "archivo": "animales/zorro.svg",
+      "colores": {
+        "--pelo": "#ef6f2e",
+        "--pico": "#2b2238",
+        "--acento": "#3a2c3c"
+      }
+    },
+    {
+      "id": "oso",
+      "nombre": "Oso",
+      "archivo": "animales/oso.svg",
+      "colores": {
+        "--pelo": "#8d5b3e",
+        "--pico": "#2b2238",
+        "--acento": "#e3b98f"
+      }
+    },
+    {
+      "id": "panda",
+      "nombre": "Panda",
+      "archivo": "animales/panda.svg",
+      "colores": {
+        "--pelo": "#f7f7fb",
+        "--pico": "#2b2d42",
+        "--acento": "#2b2d42"
+      }
+    },
+    {
+      "id": "conejo",
+      "nombre": "Conejo",
+      "archivo": "animales/conejo.svg",
+      "colores": {
+        "--pelo": "#e8e3f2",
+        "--pico": "#f28fa0",
+        "--acento": "#f6a6c1"
+      }
+    },
+    {
+      "id": "mapache",
+      "nombre": "Mapache",
+      "archivo": "animales/mapache.svg",
+      "colores": {
+        "--pelo": "#9a9cae",
+        "--pico": "#2b2238",
+        "--acento": "#34364a"
+      }
+    },
+    {
+      "id": "koala",
+      "nombre": "Koala",
+      "archivo": "animales/koala.svg",
+      "colores": {
+        "--pelo": "#a3a8b8",
+        "--pico": "#3b3848",
+        "--acento": "#f4f4f8"
+      }
+    },
+    {
+      "id": "alpaca",
+      "nombre": "Alpaca",
+      "archivo": "animales/alpaca.svg",
+      "colores": {
+        "--pelo": "#f5ead8",
+        "--pico": "#8a6a5a",
+        "--acento": "#e0457b"
+      }
+    },
+    {
+      "id": "cerdito",
+      "nombre": "Cerdito",
+      "archivo": "animales/cerdito.svg",
+      "colores": {
+        "--pelo": "#f9b8c9",
+        "--pico": "#f58fab",
+        "--acento": "#e56f93"
+      }
+    }
+  ],
+  "objetos": [
+    {
+      "id": "corona",
+      "nombre": "Corona",
+      "categoria": "cabeza",
+      "colores": {
+        "--objeto": "#ffc93c",
+        "--objeto2": "#e63946"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-corona.svg",
+          "posicion": "delante",
+          "z": 4
+        }
+      ]
+    },
+    {
+      "id": "gorro-fiesta",
+      "nombre": "Gorro de fiesta",
+      "categoria": "cabeza",
+      "colores": {
+        "--objeto": "#4cc9f0",
+        "--objeto2": "#ff5d8f"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-gorro-fiesta.svg",
+          "posicion": "delante",
+          "z": 4
+        }
+      ]
+    },
+    {
+      "id": "sombrero-copa",
+      "nombre": "Sombrero de copa",
+      "categoria": "cabeza",
+      "colores": {
+        "--objeto": "#2b2d42",
+        "--objeto2": "#e63946"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-sombrero-copa.svg",
+          "posicion": "delante",
+          "z": 4
+        }
+      ]
+    },
+    {
+      "id": "gorro-mago",
+      "nombre": "Gorro de mago",
+      "categoria": "cabeza",
+      "colores": {
+        "--objeto": "#5a4fcf",
+        "--objeto2": "#ffd23f"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-gorro-mago.svg",
+          "posicion": "delante",
+          "z": 4
+        }
+      ]
+    },
+    {
+      "id": "chullo",
+      "nombre": "Chullo andino",
+      "categoria": "cabeza",
+      "colores": {
+        "--objeto": "#d62839",
+        "--objeto2": "#ffd23f"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-chullo.svg",
+          "posicion": "delante",
+          "z": 4
+        }
+      ]
+    },
+    {
+      "id": "gorra",
+      "nombre": "Gorra",
+      "categoria": "cabeza",
+      "colores": {
+        "--objeto": "#2a9d8f",
+        "--objeto2": "#f4f1de"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-gorra.svg",
+          "posicion": "delante",
+          "z": 4
+        }
+      ]
+    },
+    {
+      "id": "gorro-chef",
+      "nombre": "Gorro de chef",
+      "categoria": "cabeza",
+      "colores": {
+        "--objeto": "#ffffff",
+        "--objeto2": "#e63946"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-gorro-chef.svg",
+          "posicion": "delante",
+          "z": 4
+        }
+      ]
+    },
+    {
+      "id": "gorro-navidad",
+      "nombre": "Gorro navideño",
+      "categoria": "cabeza",
+      "colores": {
+        "--objeto": "#e63946",
+        "--objeto2": "#ffffff"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-gorro-navidad.svg",
+          "posicion": "delante",
+          "z": 4
+        }
+      ]
+    },
+    {
+      "id": "diadema-flor",
+      "nombre": "Diadema con flor",
+      "categoria": "cabeza",
+      "colores": {
+        "--objeto": "#9b5de5",
+        "--objeto2": "#ff8fab"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-diadema-flor.svg",
+          "posicion": "delante",
+          "z": 4
+        }
+      ]
+    },
+    {
+      "id": "lentes",
+      "nombre": "Lentes redondos",
+      "categoria": "cara",
+      "colores": {
+        "--objeto": "#c9a227",
+        "--objeto2": "#ffffff"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-lentes.svg",
+          "posicion": "delante",
+          "z": 3
+        }
+      ]
+    },
+    {
+      "id": "gafas-sol",
+      "nombre": "Gafas de sol",
+      "categoria": "cara",
+      "colores": {
+        "--objeto": "#2b2d42",
+        "--objeto2": "#ff5d8f"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-gafas-sol.svg",
+          "posicion": "delante",
+          "z": 3
+        }
+      ]
+    },
+    {
+      "id": "bufanda",
+      "nombre": "Bufanda",
+      "categoria": "cuello",
+      "colores": {
+        "--objeto": "#e63946",
+        "--objeto2": "#f4f1de"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-bufanda.svg",
+          "posicion": "delante",
+          "z": 2
+        }
+      ]
+    },
+    {
+      "id": "pajarita",
+      "nombre": "Pajarita",
+      "categoria": "cuello",
+      "colores": {
+        "--objeto": "#e63946",
+        "--objeto2": "#ffffff"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-pajarita.svg",
+          "posicion": "delante",
+          "z": 2
+        }
+      ]
+    },
+    {
+      "id": "collar-placa",
+      "nombre": "Collar con placa",
+      "categoria": "cuello",
+      "colores": {
+        "--objeto": "#e63946",
+        "--objeto2": "#ffc93c"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-collar-placa.svg",
+          "posicion": "delante",
+          "z": 2
+        }
+      ]
+    },
+    {
+      "id": "collar-flores",
+      "nombre": "Collar de flores",
+      "categoria": "cuello",
+      "colores": {
+        "--objeto": "#ff8fab",
+        "--objeto2": "#ffd23f"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-collar-flores.svg",
+          "posicion": "delante",
+          "z": 2
+        }
+      ]
+    },
+    {
+      "id": "tunica-mago",
+      "nombre": "Túnica de mago",
+      "categoria": "cuerpo",
+      "colores": {
+        "--objeto": "#5a4fcf",
+        "--objeto2": "#ffd23f"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-tunica-mago.svg",
+          "posicion": "delante",
+          "z": 1
+        }
+      ]
+    },
+    {
+      "id": "poncho",
+      "nombre": "Poncho andino",
+      "categoria": "cuerpo",
+      "colores": {
+        "--objeto": "#d62839",
+        "--objeto2": "#ffd23f"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-poncho.svg",
+          "posicion": "delante",
+          "z": 1
+        }
+      ]
+    },
+    {
+      "id": "capa-heroe",
+      "nombre": "Capa de héroe",
+      "categoria": "cuerpo",
+      "colores": {
+        "--objeto": "#e63946",
+        "--objeto2": "#ffd23f"
+      },
+      "capas": [
+        {
+          "archivo": "objetos/objeto-capa-heroe-detras.svg",
+          "posicion": "detras",
+          "z": -1
+        },
+        {
+          "archivo": "objetos/objeto-capa-heroe.svg",
+          "posicion": "delante",
+          "z": 1
+        }
+      ]
+    }
+  ]
+}

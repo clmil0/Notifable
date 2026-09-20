@@ -24,6 +24,10 @@ struct ExpenseEdit: Codable, Equatable {
     /// el correo. Guardar el valor original sería congelar un dato que el
     /// parser puede mejorar en la siguiente versión.
     var category: String?
+    /// Las etiquetas del gasto, **enteras**. Sin esto, etiquetar un gasto que
+    /// vino del correo se perdía en la siguiente lectura: el gasto se borra y
+    /// se rearma, y la etiqueta no está en ningún correo.
+    var tags: [String]?
     var merchant: String?
     var amount: Double?
     var occurredAt: Date?
@@ -45,7 +49,7 @@ struct ExpenseEdit: Codable, Equatable {
     /// Algo que el usuario cambió a mano. Lo que cuenta Ajustes y la
     /// advertencia de reemplazar la copia: el tipo de cambio no lo es.
     var isUserEdit: Bool {
-        category != nil || merchant != nil || amount != nil || occurredAt != nil
+        category != nil || tags != nil || merchant != nil || amount != nil || occurredAt != nil
             || notes != nil || isSubscription != nil || isDebt != nil || debtSettled != nil
             || cardLastDigits != nil
     }
@@ -55,6 +59,10 @@ struct ExpenseEdit: Codable, Equatable {
     func merged(with newer: ExpenseEdit) -> ExpenseEdit {
         ExpenseEdit(markKey: markKey,
                     category: newer.category ?? category,
+                    // La lista más nueva gana **entera**, no elemento a
+                    // elemento: unir las dos haría que quitar una etiqueta
+                    // perdiera siempre contra haberla puesto antes.
+                    tags: newer.tags ?? tags,
                     merchant: newer.merchant ?? merchant,
                     amount: newer.amount ?? amount,
                     occurredAt: newer.occurredAt ?? occurredAt,
@@ -71,16 +79,17 @@ struct ExpenseEdit: Codable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case markKey, category, merchant, amount, occurredAt, notes
+        case markKey, category, tags, merchant, amount, occurredAt, notes
         case isSubscription, isDebt, debtSettled, cardLastDigits, fxRate, updatedAt
     }
 
-    init(markKey: String, category: String? = nil, merchant: String? = nil,
+    init(markKey: String, category: String? = nil, tags: [String]? = nil, merchant: String? = nil,
          amount: Double? = nil, occurredAt: Date? = nil, notes: String? = nil,
          isSubscription: Bool? = nil, isDebt: Bool? = nil, debtSettled: Bool? = nil,
          cardLastDigits: String? = nil, fxRate: Double? = nil, updatedAt: Date = Date()) {
         self.markKey = markKey
         self.category = category
+        self.tags = tags
         self.merchant = merchant
         self.amount = amount.map(Money.normalized)
         self.occurredAt = occurredAt
@@ -97,6 +106,7 @@ struct ExpenseEdit: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         markKey = try c.decode(String.self, forKey: .markKey)
         category = try c.decodeIfPresent(String.self, forKey: .category)
+        tags = try c.decodeIfPresent([String].self, forKey: .tags)
         merchant = try c.decodeIfPresent(String.self, forKey: .merchant)
         // El monto viaja como texto decimal exacto (ver MoneyCoding); se
         // aceptan las dos formas para no romper respaldos anteriores.
@@ -123,6 +133,7 @@ struct ExpenseEdit: Codable, Equatable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(markKey, forKey: .markKey)
         try c.encodeIfPresent(category, forKey: .category)
+        try c.encodeIfPresent(tags, forKey: .tags)
         try c.encodeIfPresent(merchant, forKey: .merchant)
         try c.encodeIfPresent(amount.map(Money.decimalText), forKey: .amount)
         try c.encodeIfPresent(occurredAt, forKey: .occurredAt)
@@ -162,6 +173,7 @@ enum ExpenseEditStore {
     /// mano se respaldan enteros, así que anotar sus cambios sería duplicar.
     static func record(_ expense: Expense,
                        category: String? = nil,
+                       tags: [String]? = nil,
                        merchant: String? = nil,
                        amount: Double? = nil,
                        occurredAt: Date? = nil,
@@ -173,7 +185,7 @@ enum ExpenseEditStore {
                        defaults: UserDefaults = .standard) {
         guard expense.emailID != nil else { return }
         let edit = ExpenseEdit(markKey: TransactionKey.key(for: expense),
-                               category: category, merchant: merchant, amount: amount,
+                               category: category, tags: tags, merchant: merchant, amount: amount,
                                occurredAt: occurredAt, notes: notes,
                                isSubscription: isSubscription, isDebt: isDebt,
                                debtSettled: debtSettled,
@@ -260,6 +272,31 @@ enum ExpenseEditStore {
         if changed { persist(current, defaults: defaults) }
     }
 
+    /// Lo mismo que `replaceCategory` para las etiquetas: renombrar, fusionar
+    /// o borrar una etiqueta tiene que alcanzar también a las ediciones
+    /// guardadas, o tras reinstalar `apply` devolvería el nombre viejo.
+    /// `nil` como destino = la etiqueta se quita.
+    static func replaceTag(_ old: String, with new: String?, defaults: UserDefaults = .standard) {
+        let oldKey = TagCatalog.normalized(old)
+        let newKey = new.map(TagCatalog.normalized)
+        var current = all(defaults)
+        var changed = false
+        for (key, edit) in current {
+            guard let tags = edit.tags,
+                  tags.contains(where: { TagCatalog.normalized($0) == oldKey }) else { continue }
+            var list = tags.filter { TagCatalog.normalized($0) != oldKey }
+            if let new, let newKey, !list.contains(where: { TagCatalog.normalized($0) == newKey }) {
+                list.append(new)
+            }
+            var updated = edit
+            updated.tags = list
+            updated.updatedAt = Date()
+            current[key] = updated
+            changed = true
+        }
+        if changed { persist(current, defaults: defaults) }
+    }
+
     static func removeAll(_ defaults: UserDefaults = .standard) {
         defaults.removeObject(forKey: key)
     }
@@ -292,6 +329,7 @@ enum ExpenseEditStore {
             for newer in found.dropFirst() { edit = edit.merged(with: newer) }
             var touched = false
             if let value = edit.category, expense.category != value { expense.category = value; touched = true }
+            if let value = edit.tags, expense.tags != value { expense.tags = value; touched = true }
             if let value = edit.merchant, expense.merchant != value { expense.merchant = value; touched = true }
             if let value = edit.amount, Money.cents(expense.amount) != Money.cents(value) {
                 expense.amount = value; touched = true

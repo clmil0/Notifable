@@ -67,10 +67,15 @@ enum SummarySubtab: Int, AppSubtab {
     }
 }
 
+/// `Presupuestos` ya no está: repetía la lista de Categorías con otra forma,
+/// así que sus límites viven ahora bajo cada fila de `CategoriesOverviewView`
+/// y su proyección, en el detalle de la categoría. El sitio que dejó lo ocupa
+/// `Etiquetas`, que es el corte transversal que la categoría no puede dar:
+/// una categoría por gasto, pero las etiquetas que hagan falta.
 enum AnalysisSubtab: Int, AppSubtab {
     case pending = 0
     case categories = 1
-    case budgets = 2
+    case tags = 2
     case history = 3
 
     var id: Int { rawValue }
@@ -79,7 +84,7 @@ enum AnalysisSubtab: Int, AppSubtab {
         switch self {
         case .pending:    return "tray.full.fill"
         case .categories: return "square.grid.2x2.fill"
-        case .budgets:    return "target"
+        case .tags:       return "tag.fill"
         case .history:    return "chart.bar.fill"
         }
     }
@@ -88,32 +93,30 @@ enum AnalysisSubtab: Int, AppSubtab {
         switch self {
         case .pending:    return "Pendientes"
         case .categories: return "Categorías"
-        case .budgets:    return "Presupuestos"
+        case .tags:       return "Etiquetas"
         case .history:    return "Historial"
         }
     }
 }
 
 enum SocialSubtab: Int, AppSubtab {
-    case activity = 0
-    case friends = 1
-    case profile = 2
+    /// Actividad y Amigos, fusionadas (ver `SocialView`).
+    case social = 0
+    case profile = 1
 
     var id: Int { rawValue }
 
     var icon: String {
         switch self {
-        case .activity: return "bolt.fill"
-        case .friends:  return "person.2.fill"
-        case .profile:  return "person.crop.circle"
+        case .social:  return "person.2.fill"
+        case .profile: return "person.crop.circle"
         }
     }
 
     var title: String {
         switch self {
-        case .activity: return "Actividad"
-        case .friends:  return "Amigos"
-        case .profile:  return "Mi perfil"
+        case .social:  return "Social"
+        case .profile: return "Mi perfil"
         }
     }
 }
@@ -143,7 +146,7 @@ struct SubtabVisibility {
 
     var analysis: [AnalysisSubtab] {
         hasAnyPending || pendingCount > 0 ? AnalysisSubtab.allCases.map { $0 }
-                         : [.categories, .budgets, .history]
+                         : [.categories, .tags, .history]
     }
 
     var social: [SocialSubtab] { SocialSubtab.allCases.map { $0 } }

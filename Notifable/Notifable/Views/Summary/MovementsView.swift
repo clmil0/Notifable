@@ -31,9 +31,15 @@ struct MovementsView: View {
     @State private var showsPendingConfirmation = false
     @FocusState private var searchFocused: Bool
 
-    /// Sólo gastos o ingresos. Lo sin categoría ya no se filtra aquí: vive
-    /// en Análisis › Pendientes, que es donde se clasifica.
-    enum Kind: Hashable { case gastos, ingresos }
+    /// Gastos, ingresos y —sólo si hay— lo que está por cobrar. Lo sin
+    /// categoría ya no se filtra aquí: vive en Análisis › Pendientes, que es
+    /// donde se clasifica.
+    enum Kind: Hashable { case gastos, ingresos, porCobrar }
+
+    /// Gastos marcados por cobrar a los que aún les falta algo.
+    private var debts: [Expense] {
+        expenses.filter { $0.isDebt && Money.cents(Accounting.outstanding(of: $0)) > 0 }
+    }
 
     /// Se cargan de 20 en 20, y con botón: la carga automática al llegar al
     /// final deja la lista creciendo bajo el dedo mientras se clasifica, y se
@@ -59,25 +65,15 @@ struct MovementsView: View {
     ///   quedaban páginas.
     private var items: [TransactionItem] {
         let source: [TransactionItem]
-        if kind == .ingresos {
-            source = incomes.map { TransactionItem.income($0) }
-        } else {
-            source = expenses.map { TransactionItem.expense($0) }
+        switch kind {
+        case .ingresos:  source = incomes.map { TransactionItem.income($0) }
+        case .porCobrar: source = debts.map { TransactionItem.expense($0) }
+        case .gastos:    source = expenses.map { TransactionItem.expense($0) }
         }
 
         guard !searchText.isEmpty else { return source }
 
-        return source.filter { item in
-            switch item {
-            case .expense(let e):
-                return e.merchant.localizedCaseInsensitiveContains(searchText)
-                    || e.category.localizedCaseInsensitiveContains(searchText)
-            case .income(let i):
-                return i.source.localizedCaseInsensitiveContains(searchText)
-                    || (i.title ?? "").localizedCaseInsensitiveContains(searchText)
-                    || (i.notes ?? "").localizedCaseInsensitiveContains(searchText)
-            }
-        }
+        return source.filter { $0.matches(searchText) }
     }
 
     /// Agrupados por día, igual que Hoy: la lista no cambia de gramática al
@@ -98,6 +94,7 @@ struct MovementsView: View {
         let visible = Array(items.prefix(visibleCount))
         let buckets = groups(from: visible)
         let pending = self.pendingOccurrences
+        let hasDebts = !debts.isEmpty
 
         TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 0) {
@@ -106,8 +103,16 @@ struct MovementsView: View {
                 searchField
                     .padding(.bottom, 10)
 
-                ShellSegment(items: [Kind.gastos, .ingresos], selection: $kind) {
-                    $0 == .gastos ? "Gastos" : "Ingresos"
+                // La tercera opción sólo existe mientras haya algo por
+                // cobrar: un filtro que siempre dice «nada» es ruido.
+                ShellSegment(items: hasDebts ? [Kind.gastos, .ingresos, .porCobrar]
+                                             : [Kind.gastos, .ingresos],
+                             selection: $kind) { kind in
+                    switch kind {
+                    case .gastos:    return "Gastos"
+                    case .ingresos:  return "Ingresos"
+                    case .porCobrar: return "Por cobrar"
+                    }
                 }
                 .padding(.bottom, 18)
 
@@ -140,6 +145,11 @@ struct MovementsView: View {
         }
         .onChange(of: searchText) { _, _ in visibleCount = Self.pageSize }
         .onChange(of: kind) { _, _ in visibleCount = Self.pageSize }
+        // Al cobrar el último pendiente la pestaña desaparece: sin esto la
+        // lista se quedaba vacía y sin forma de salir.
+        .onChange(of: debts.isEmpty) { _, empty in
+            if empty, kind == .porCobrar { kind = .gastos }
+        }
         // Ir a un movimiento desde una hoja: se cierra lo que haya encima
         // y Hoy lo resalta.
         .onReceive(NotificationCenter.default.publisher(for: ActivityFocus.notification)) { _ in
@@ -170,7 +180,7 @@ struct MovementsView: View {
                 .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(palette.secondaryLabel)
 
-            TextField("Buscar por comercio…", text: $searchText)
+            TextField(MovementSearch.placeholder, text: $searchText)
                 .font(.system(size: 15))
                 .foregroundStyle(palette.label)
                 .focused($searchFocused)
@@ -340,6 +350,13 @@ struct MovementsView: View {
     }
 
     private func dayTotal(_ bucket: DayBucket) -> String {
+        if kind == .porCobrar {
+            let total = Money.sum(bucket.items.compactMap { item -> Double? in
+                guard case .expense(let e) = item else { return nil }
+                return Accounting.outstanding(of: e)
+            })
+            return "falta " + Money.format(total)
+        }
         if kind == .ingresos {
             let total = Money.sum(bucket.items.compactMap { item -> Double? in
                 guard case .income(let i) = item else { return nil }

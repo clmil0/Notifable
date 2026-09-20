@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--pelo:#f7f7fb;--pico:#2b2d42;--acento:#2b2d42">
+  <style>
+    .pelo        { fill: var(--pelo); }
+    .pelo-trazo  { stroke: var(--pelo); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .pelo-claro  { fill: color-mix(in srgb, var(--pelo) 65%, white); }
+    .pelo-oscuro { fill: color-mix(in srgb, var(--pelo) 80%, black); }
+    .pico        { fill: var(--pico); }
+    .pico-oscuro { fill: color-mix(in srgb, var(--pico) 78%, black); }
+    .acento      { fill: var(--acento); }
+    .acento-trazo{ stroke: var(--acento); fill: none; stroke-linejoin: round; }
+    .acento-suave{ fill: color-mix(in srgb, var(--acento) 40%, white); }
+    .linea       { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo       { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <defs><clipPath id="panda-clip"><path id="panda-cuerpo" d="M215 560 C205 470 200 390 222 320 C245 250 310 228 370 228 C440 228 500 250 515 320 C530 390 525 470 520 560 C520 600 460 616 370 616 C280 616 215 600 215 560 Z"/></clipPath></defs>
+  <g id="detras">
+  <circle class="acento linea" cx="270" cy="248" r="40"/><circle class="acento linea" cx="480" cy="248" r="40"/>
+  </g>
+  <g id="aleta-izq">
+    <path class="trazo" stroke-width="60" d="M244 408 L180 322"/><path class="acento-trazo" stroke-width="52" d="M244 408 L180 322"/>
+    
+    <ellipse class="acento-suave" cx="181" cy="328" rx="10" ry="8"/>
+    <circle class="acento-suave" cx="167" cy="314" r="4.5"/><circle class="acento-suave" cx="179" cy="308" r="4.5"/><circle class="acento-suave" cx="192" cy="313" r="4.5"/>
+  </g>
+  <g id="aleta-der">
+    <path class="trazo" stroke-width="60" d="M502 470 L558 544"/><path class="acento-trazo" stroke-width="52" d="M502 470 L558 544"/>
+    
+  </g>
+  <use href="#panda-cuerpo" class="pelo"/>
+  <g clip-path="url(#panda-clip)">
+    <path class="pelo-claro" d="M268 272 C310 246 432 240 488 272 C440 260 320 260 268 272 Z"/>
+    <g id="cara"><ellipse class="acento" cx="314" cy="356" rx="36" ry="46" transform="rotate(28 314 356)"/><ellipse class="acento" cx="444" cy="358" rx="36" ry="46" transform="rotate(-28 444 358)"/></g>
+    <ellipse cx="370" cy="618" rx="170" ry="30" fill="#e2e2ee"/>
+  </g>
+  <use href="#panda-cuerpo" fill="none" class="linea"/>
+  <g id="ojos">
+    <circle cx="318" cy="352" r="28" fill="#fff"/>
+    <circle cx="318" cy="352" r="24" fill="#1e1a6b"/>
+    <circle cx="309" cy="343" r="8" fill="#fff"/>
+    <circle cx="327" cy="362" r="3.5" fill="#fff"/>
+    <circle cx="440" cy="355" r="28" fill="#fff"/>
+    <circle cx="440" cy="355" r="24" fill="#1e1a6b"/>
+    <circle cx="431" cy="346" r="8" fill="#fff"/>
+    <circle cx="449" cy="365" r="3.5" fill="#fff"/>
+  </g>
+  <g id="encima"></g>
+  <g id="pico"><path class="pico linea" stroke-width="5" d="M354 384 C354 368 404 368 404 384 C404 398 392 406 379 406 C366 406 354 398 354 384 Z"/><ellipse cx="368" cy="382" rx="6" ry="3.5" fill="#fff" opacity=".7"/><path class="trazo" stroke-width="5" d="M379 406 L379 414 M379 414 C372.4 425 357 425 353 416 M379 414 C385.6 425 401 425 405 416"/></g>
+</svg>

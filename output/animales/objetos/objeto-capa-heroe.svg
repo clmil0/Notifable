@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#e63946;--objeto2:#ffd23f">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-capa-heroe"><path class="trazo" stroke-width="18" d="M226 426 C290 456 460 456 518 426"/><path class="objeto-trazo" stroke-width="10" d="M226 426 C290 456 460 456 518 426"/>
+    <circle class="objeto-2 linea" stroke-width="5" cx="373" cy="449" r="16"/><polygon class="objeto-oscuro"  points="373.0,440.0 375.4,445.7 381.6,446.2 376.9,450.3 378.3,456.3 373.0,453.1 367.7,456.3 369.1,450.3 364.4,446.2 370.6,445.7"/></g>
+</svg>

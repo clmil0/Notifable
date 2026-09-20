@@ -16,6 +16,16 @@ final class Expense {
     var emailID: String?
     var relatedEmailID: String?
     var isDebt: Bool = false
+
+    /// Etiquetas libres, transversales a la categoría: un gasto de Salud puede
+    /// llevar "madre" y otro "padre" sin dejar de ser Salud.
+    ///
+    /// Nombres y no ids, igual que `category`: es la clave en todo el proyecto
+    /// y ya hay maquinaria para renombrar en cascada (`TagEditor`). Además los
+    /// gastos del correo se borran y se rearman en cada relectura; una relación
+    /// a entidades se rompería en cada sincronización, un `[String]` no. Quien
+    /// las escribe pasa por `TagCatalog.use`, que devuelve la forma canónica.
+    var tags: [String] = []
     /// La deuda se dio por saldada aunque quedara saldo: lo que no se cobró
     /// pasa a ser gasto propio. Sólo tiene sentido con `isDebt == false`.
     var debtSettled: Bool = false
@@ -68,6 +78,31 @@ final class Expense {
 }
 
 extension Expense {
+
+    /// `true` si lleva esta etiqueta. Recibe la clave ya normalizada
+    /// (`TagCatalog.normalized`) porque quien filtra una lista larga la
+    /// calcula una vez, no una por gasto.
+    func hasTag(_ normalizedKey: String) -> Bool {
+        tags.contains { TagCatalog.normalized($0) == normalizedKey }
+    }
+
+    /// Pone o quita la etiqueta y lo deja anotado para que sobreviva a
+    /// "Volver a leer el correo desde cero". Un solo sitio para el gesto, que
+    /// se hace desde la ficha del gasto y desde el etiquetado múltiple.
+    func toggleTag(_ name: String, in modelContext: ModelContext) {
+        let key = TagCatalog.normalized(name)
+        guard !key.isEmpty else { return }
+        if hasTag(key) {
+            tags = tags.filter { TagCatalog.normalized($0) != key }
+        } else {
+            guard tags.count < TagCatalog.maxPerExpense,
+                  let canonical = TagCatalog.shared.use(name) else { return }
+            tags.append(canonical)
+        }
+        ExpenseEditStore.record(self, tags: tags)
+        try? modelContext.save()
+    }
+
     /// Alterna "por cobrar". Un solo sitio para la lógica que usan el botón
     /// del detalle (`ExpenseDetailsView`) y el menú contextual de Actividad
     /// Reciente: declararla saldada con un saldo pendiente no lo pone en

@@ -56,6 +56,7 @@ enum AppPreferences {
         .init(key: "notificationsEnabled", kind: .bool, note: "Aviso de presupuesto"),
         .init(key: "remindRecurring", kind: .bool, note: "Aviso de recurrentes por confirmar"),
         .init(key: "categoryLimitAlerts", kind: .bool, note: "Aviso al pasar el límite de una categoría"),
+        .init(key: "notifyImportedMovements", kind: .bool, note: "Aviso por cada pago registrado del correo"),
         .init(key: "debtReminderEnabled", kind: .bool, note: "Aviso de cobros pendientes"),
         .init(key: "debtReminderHour", kind: .int, note: "Hora del aviso de cobros"),
         .init(key: "debtReminderMinute", kind: .int, note: "Minuto del aviso de cobros"),
@@ -67,6 +68,10 @@ enum AppPreferences {
         // Preferencias de vista que sí son una elección duradera
         .init(key: DictationStyle.storageKey, kind: .string, note: "Animación del dictado por voz"),
         .init(key: "categoriesSegment", kind: .string, note: "Pestaña por defecto en Categorías"),
+        // Las etiquetas del usuario, en un solo JSON. Las que lleva cada gasto
+        // viajan con el gasto (`ManualTransactionBackup`) o con su edición
+        // (`ExpenseEdit`); esto es sólo la lista y su color.
+        .init(key: TagCatalog.key, kind: .string, note: "Etiquetas creadas y su color"),
 
         // Amigos. La sesión y los ids viven en el servidor; lo de aquí es lo
         // que sólo existe en este teléfono: cómo me presento y cómo llamo yo a

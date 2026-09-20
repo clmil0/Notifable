@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#5a4fcf;--objeto2:#ffd23f">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-tunica-mago"><defs><clipPath id="obj-tunica-mago-tun-c"><path d="M215 560 C205 470 200 390 222 320 C245 250 310 228 370 228 C440 228 500 250 515 320 C530 390 525 470 520 560 C520 600 460 616 370 616 C280 616 215 600 215 560 Z"/></clipPath><clipPath id="obj-tunica-mago-tun-r"><path d="M190 452 C260 470 330 480 379 520 C428 480 500 470 560 452 L560 650 L190 650 Z"/></clipPath></defs>
+    <g clip-path="url(#obj-tunica-mago-tun-c)">
+      <path class="objeto" d="M190 452 C260 470 330 480 379 520 C428 480 500 470 560 452 L560 650 L190 650 Z"/>
+      <ellipse class="objeto-oscuro" cx="370" cy="618" rx="170" ry="30"/>
+      <path class="objeto2-trazo" stroke-width="14" d="M190 452 C260 470 330 480 379 520 C428 480 500 470 560 452"/>
+      <path class="trazo" stroke-width="5" d="M190 444 C260 462 330 472 379 512 C428 472 500 462 560 444"/>
+      <path class="objeto2-trazo" stroke-width="10" d="M379 524 L379 640"/>
+      <polygon class="objeto-2"  points="300.0,546.0 303.7,554.9 313.3,555.7 306.0,561.9 308.2,571.3 300.0,566.3 291.8,571.3 294.0,561.9 286.7,555.7 296.3,554.9"/><polygon class="objeto-2"  points="452.0,537.0 454.9,544.0 462.5,544.6 456.7,549.5 458.5,556.9 452.0,553.0 445.5,556.9 447.3,549.5 441.5,544.6 449.1,544.0"/><polygon class="objeto-2"  points="470.0,588.0 472.1,593.1 477.6,593.5 473.4,597.1 474.7,602.5 470.0,599.6 465.3,602.5 466.6,597.1 462.4,593.5 467.9,593.1"/><polygon class="objeto-2"  points="268.0,513.0 269.9,517.5 274.7,517.8 271.0,521.0 272.1,525.7 268.0,523.1 263.9,525.7 265.0,521.0 261.3,517.8 266.1,517.5"/>
+    </g>
+    <g clip-path="url(#obj-tunica-mago-tun-r)"><path class="linea" fill="none" d="M215 560 C205 470 200 390 222 320 C245 250 310 228 370 228 C440 228 500 250 515 320 C530 390 525 470 520 560 C520 600 460 616 370 616 C280 616 215 600 215 560 Z"/></g></g>
+</svg>
