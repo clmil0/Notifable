@@ -1207,22 +1207,27 @@ struct FriendEditSheet: View {
                     Button("Guardar") { save() }
                 }
             }
-            .confirmationDialog("¿Dejar de compartir con " + shownName + "?",
-                                isPresented: $showStopConfirm,
-                                titleVisibility: .visible) {
+            // `alert` y no `confirmationDialog`: la hoja de acciones se anclaba
+            // al borde superior de la pantalla —lejos del botón que se acababa
+            // de tocar, y con el texto medio tapado por la barra—. La alerta
+            // sale centrada siempre, y además le cabe el porqué, que a una
+            // acción destructiva no le puede faltar.
+            .alert("¿Dejar de compartir con " + shownName + "?",
+                   isPresented: $showStopConfirm) {
+                Button("Cancelar", role: .cancel) {}
                 Button("Dejar de compartir", role: .destructive) {
                     Task {
                         await friendsManager.stopSharing(viewerID: friend.id)
                         dismiss()
                     }
                 }
-                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Dejará de ver tu gasto en cuanto abra la app. Seguirán siendo amigos, y puedes volver a compartirle cuando quieras.")
             }
-            .confirmationDialog("¿Eliminar a " + shownName + "?",
-                                isPresented: $showDeleteConfirm,
-                                titleVisibility: .visible) {
-                Button("Eliminar amigo", role: .destructive) { delete() }
+            .alert("¿Eliminar a " + shownName + "?",
+                   isPresented: $showDeleteConfirm) {
                 Button("Cancelar", role: .cancel) {}
+                Button("Eliminar amigo", role: .destructive) { delete() }
             } message: {
                 Text("Dejarán de verse el gasto el uno al otro. Puedes volver a agregarlo con un código.")
             }
@@ -1456,22 +1461,27 @@ struct FriendProfileView: View {
             .sheet(isPresented: $showShareEditor) {
                 AmigoDetailView(friend: friend, totals: totals)
             }
-            .confirmationDialog("¿Dejar de compartir con " + shownName + "?",
-                                isPresented: $showStopConfirm,
-                                titleVisibility: .visible) {
+            // `alert` y no `confirmationDialog`: la hoja de acciones se anclaba
+            // al borde superior de la pantalla —lejos del botón que se acababa
+            // de tocar, y con el texto medio tapado por la barra—. La alerta
+            // sale centrada siempre, y además le cabe el porqué, que a una
+            // acción destructiva no le puede faltar.
+            .alert("¿Dejar de compartir con " + shownName + "?",
+                   isPresented: $showStopConfirm) {
+                Button("Cancelar", role: .cancel) {}
                 Button("Dejar de compartir", role: .destructive) {
                     Task {
                         await friendsManager.stopSharing(viewerID: friend.id)
                         dismiss()
                     }
                 }
-                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Dejará de ver tu gasto en cuanto abra la app. Seguirán siendo amigos, y puedes volver a compartirle cuando quieras.")
             }
-            .confirmationDialog("¿Eliminar a " + shownName + "?",
-                                isPresented: $showDeleteConfirm,
-                                titleVisibility: .visible) {
-                Button("Eliminar amigo", role: .destructive) { deleteFriend() }
+            .alert("¿Eliminar a " + shownName + "?",
+                   isPresented: $showDeleteConfirm) {
                 Button("Cancelar", role: .cancel) {}
+                Button("Eliminar amigo", role: .destructive) { deleteFriend() }
             } message: {
                 Text("Dejarán de verse el gasto el uno al otro. Puedes volver a agregarlo con un código.")
             }
@@ -1802,22 +1812,21 @@ struct AmigoDetailView: View {
             .sheet(isPresented: $showEditSheet) {
                 FriendEditSheet(friend: friend)
             }
-            .confirmationDialog(stopConfirmTitle,
-                                isPresented: $showStopConfirm,
-                                titleVisibility: .visible) {
+            // Ver la nota de `FriendProfileView`: centrada, no anclada arriba.
+            .alert(stopConfirmTitle, isPresented: $showStopConfirm) {
+                Button("Cancelar", role: .cancel) {}
                 Button("Dejar de compartir", role: .destructive) {
                     Task {
                         await friendsManager.stopSharing(viewerID: friend.id)
                         dismiss()
                     }
                 }
-                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("Dejará de ver tu gasto en cuanto abra la app. Seguirán siendo amigos, y puedes volver a compartirle cuando quieras.")
             }
-            .confirmationDialog(deleteConfirmTitle,
-                                isPresented: $showDeleteConfirm,
-                                titleVisibility: .visible) {
-                Button("Eliminar amigo", role: .destructive) { deleteFriend() }
+            .alert(deleteConfirmTitle, isPresented: $showDeleteConfirm) {
                 Button("Cancelar", role: .cancel) {}
+                Button("Eliminar amigo", role: .destructive) { deleteFriend() }
             } message: {
                 Text("Dejarán de verse el gasto el uno al otro. Puedes volver a agregarlo con un código.")
             }

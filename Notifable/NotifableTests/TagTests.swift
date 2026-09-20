@@ -154,6 +154,49 @@ struct TagTests {
         #expect(!used.contains(TagCatalog.normalized("regalo")))
     }
 
+    // MARK: - Buscar con #
+
+    @Test("«#salidas» se lee como búsqueda de etiqueta; «salidas» no")
+    func consultaDeEtiqueta() {
+        #expect(TransactionItem.tagQuery("#salidas") == TagCatalog.normalized("salidas"))
+        #expect(TransactionItem.tagQuery("  #Salidas ") == TagCatalog.normalized("salidas"))
+        #expect(TransactionItem.tagQuery("salidas") == nil)
+        // Una almohadilla suelta es alguien a mitad de teclear, no una búsqueda.
+        #expect(TransactionItem.tagQuery("#") == nil)
+        #expect(TransactionItem.tagQuery("#  ") == nil)
+    }
+
+    @Test("«#salidas» ignora el comercio que se llama igual")
+    func buscarSoloPorEtiqueta() throws {
+        let etiquetado = Expense(amount: 40, merchant: "BEMBOS", category: "Comida")
+        etiquetado.tags = ["salidas"]
+        let homonimo = Expense(amount: 25, merchant: "Salidas Tours", category: "Transporte")
+
+        #expect(TransactionItem.expense(etiquetado).matches("#salidas"))
+        #expect(!TransactionItem.expense(homonimo).matches("#salidas"))
+        // Sin la almohadilla entran los dos: el texto libre busca en todo.
+        #expect(TransactionItem.expense(etiquetado).matches("salidas"))
+        #expect(TransactionItem.expense(homonimo).matches("salidas"))
+    }
+
+    @Test("Buscar por etiqueta deja fuera los ingresos, que no llevan ninguna")
+    func losIngresosNoTienenEtiqueta() {
+        let ingreso = Income(amount: 500, source: "Salidas SAC", title: "Sueldo")
+
+        #expect(!TransactionItem.income(ingreso).matches("#salidas"))
+        #expect(TransactionItem.income(ingreso).matches("salidas"))
+    }
+
+    @Test("La etiqueta se busca sin tildes ni mayúsculas")
+    func buscarSinTildes() {
+        let gasto = Expense(amount: 60, merchant: "FARMACIA", category: "Salud")
+        gasto.tags = ["Mamá"]
+
+        #expect(TransactionItem.expense(gasto).matches("#mama"))
+        #expect(TransactionItem.expense(gasto).matches("#MAMÁ"))
+        #expect(!TransactionItem.expense(gasto).matches("#papa"))
+    }
+
     @Test("El gasto neto manda: una devolución baja también el total de la etiqueta")
     func gastoNeto() {
         let expense = ExpenseSnapshot(amount: 100, currency: "PEN",
