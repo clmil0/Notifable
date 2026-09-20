@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#d62839;--objeto2:#ffd23f">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-poncho"><path class="trazo" stroke-width="9" d="M215 553 L213 566 M392 599 L394 612 M230 557 L228 570 M406 595 L408 608 M245 562 L243 575 M419 590 L421 603 M260 567 L258 580 M433 585 L435 598 M275 571 L273 584 M446 581 L448 594 M290 576 L288 589 M460 576 L462 589 M304 581 L302 594 M473 571 L475 584 M319 585 L317 598 M486 567 L488 580 M334 590 L332 603 M500 562 L502 575 M349 595 L347 608 M513 557 L515 570 M364 599 L362 612 M527 553 L529 566 "/><path class="objeto2-trazo" stroke-width="4" d="M215 553 L213 566 M392 599 L394 612 M230 557 L228 570 M406 595 L408 608 M245 562 L243 575 M419 590 L421 603 M260 567 L258 580 M433 585 L435 598 M275 571 L273 584 M446 581 L448 594 M290 576 L288 589 M460 576 L462 589 M304 581 L302 594 M473 571 L475 584 M319 585 L317 598 M486 567 L488 580 M334 590 L332 603 M500 562 L502 575 M349 595 L347 608 M513 557 L515 570 M364 599 L362 612 M527 553 L529 566 "/>
+    <path class="objeto linea" stroke-width="6" d="M206 446 C280 426 470 426 532 446 L540 548 L379 604 L200 548 Z"/>
+    <g clip-path="url(#obj-poncho-poncho)">
+      <rect class="objeto-2" x="190" y="474" width="360" height="34"/>
+      <polyline points="196,485 214,497 232,485 250,497 268,485 286,497 304,485 322,497 340,485 358,497 376,485 394,497 412,485 430,497 448,485 466,497 484,485 502,497 520,485 538,497" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>
+      <rect class="objeto-oscuro" x="190" y="528" width="360" height="12"/>
+      <path class="objeto-2" d="M250 446 L258 456 L250 466 L242 456 Z"/><path class="objeto-2" d="M286 446 L294 456 L286 466 L278 456 Z"/><path class="objeto-2" d="M322 446 L330 456 L322 466 L314 456 Z"/><path class="objeto-2" d="M358 446 L366 456 L358 466 L350 456 Z"/><path class="objeto-2" d="M394 446 L402 456 L394 466 L386 456 Z"/><path class="objeto-2" d="M430 446 L438 456 L430 466 L422 456 Z"/><path class="objeto-2" d="M466 446 L474 456 L466 466 L458 456 Z"/><path class="objeto-2" d="M502 446 L510 456 L502 466 L494 456 Z"/>
+    </g>
+    <path class="trazo" stroke-width="6" d="M206 446 C280 426 470 426 532 446 L540 548 L379 604 L200 548 Z"/>
+    <defs><clipPath id="obj-poncho-poncho"><path d="M206 446 C280 426 470 426 532 446 L540 548 L379 604 L200 548 Z"/></clipPath></defs></g>
+</svg>

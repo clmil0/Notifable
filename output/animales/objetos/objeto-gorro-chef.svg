@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#ffffff;--objeto2:#e63946">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-gorro-chef">
+    <circle class="trazo" fill="#1e1a6b" stroke-width="12" cx="334" cy="212" r="24"/><circle class="trazo" fill="#1e1a6b" stroke-width="12" cx="374" cy="200" r="26"/><circle class="trazo" fill="#1e1a6b" stroke-width="12" cx="414" cy="212" r="24"/><circle class="trazo" fill="#1e1a6b" stroke-width="12" cx="354" cy="220" r="20"/><circle class="trazo" fill="#1e1a6b" stroke-width="12" cx="394" cy="220" r="20"/><circle class="objeto" cx="334" cy="212" r="24"/><circle class="objeto" cx="374" cy="200" r="26"/><circle class="objeto" cx="414" cy="212" r="24"/><circle class="objeto" cx="354" cy="220" r="20"/><circle class="objeto" cx="394" cy="220" r="20"/>
+    <path class="objeto linea" stroke-width="6" d="M324 252 L328 214 L420 214 L424 252 C392 258 356 258 324 252 Z"/>
+    <path class="objeto-2" d="M326 234 L422 234 L423 243 L325 243 Z"/>
+    <path d="M356 218 L354 232 M376 218 L376 232 M396 218 L398 232" stroke="#1e1a6b" stroke-opacity=".25" stroke-width="3" fill="none"/></g>
+</svg>

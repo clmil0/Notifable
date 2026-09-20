@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--pelo:#f5ead8;--pico:#8a6a5a;--acento:#e0457b">
+  <style>
+    .pelo        { fill: var(--pelo); }
+    .pelo-trazo  { stroke: var(--pelo); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .pelo-claro  { fill: color-mix(in srgb, var(--pelo) 65%, white); }
+    .pelo-oscuro { fill: color-mix(in srgb, var(--pelo) 80%, black); }
+    .pico        { fill: var(--pico); }
+    .pico-oscuro { fill: color-mix(in srgb, var(--pico) 78%, black); }
+    .acento      { fill: var(--acento); }
+    .acento-trazo{ stroke: var(--acento); fill: none; stroke-linejoin: round; }
+    .acento-suave{ fill: color-mix(in srgb, var(--acento) 40%, white); }
+    .linea       { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo       { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <defs><clipPath id="alpaca-clip"><path id="alpaca-cuerpo" d="M215 560 C205 470 200 390 222 320 C245 250 310 228 370 228 C440 228 500 250 515 320 C530 390 525 470 520 560 C520 600 460 616 370 616 C280 616 215 600 215 560 Z"/></clipPath></defs>
+  <g id="detras">
+  <ellipse class="pelo linea" cx="300" cy="222" rx="16" ry="40" transform="rotate(-22 300 222)"/><ellipse class="pelo linea" cx="450" cy="222" rx="16" ry="40" transform="rotate(22 450 222)"/><ellipse class="pelo-claro" cx="300" cy="226" rx="8" ry="28.8" transform="rotate(-22 300 222)"/><ellipse class="pelo-claro" cx="450" cy="226" rx="8" ry="28.8" transform="rotate(22 450 222)"/>
+  </g>
+  <g id="aleta-izq">
+    <path class="trazo" stroke-width="60" d="M244 408 L180 322"/><path class="pelo-trazo" stroke-width="52" d="M244 408 L180 322"/>
+    
+    <ellipse class="acento-suave" cx="181" cy="328" rx="10" ry="8"/>
+    <circle class="acento-suave" cx="167" cy="314" r="4.5"/><circle class="acento-suave" cx="179" cy="308" r="4.5"/><circle class="acento-suave" cx="192" cy="313" r="4.5"/>
+  </g>
+  <g id="aleta-der">
+    <path class="trazo" stroke-width="60" d="M502 470 L558 544"/><path class="pelo-trazo" stroke-width="52" d="M502 470 L558 544"/>
+    
+  </g>
+  <use href="#alpaca-cuerpo" class="pelo"/>
+  <g clip-path="url(#alpaca-clip)">
+    <path class="pelo-claro" d="M268 272 C310 246 432 240 488 272 C440 260 320 260 268 272 Z"/>
+    <g id="cara"><ellipse class="pelo-claro" cx="379" cy="406" rx="50" ry="40"/><ellipse class="pelo-claro" cx="370" cy="574" rx="122" ry="104"/><ellipse cx="282" cy="402" rx="18" ry="11" fill="#ff8fa8" opacity=".45"/><ellipse cx="476" cy="404" rx="18" ry="11" fill="#ff8fa8" opacity=".45"/></g>
+    <ellipse cx="370" cy="618" rx="170" ry="30" fill="#e2e2ee"/>
+  </g>
+  <use href="#alpaca-cuerpo" fill="none" class="linea"/>
+  <g id="ojos">
+    <circle cx="318" cy="352" r="24" fill="#1e1a6b"/>
+    <circle cx="309" cy="343" r="8" fill="#fff"/>
+    <circle cx="327" cy="362" r="3.5" fill="#fff"/>
+    <circle cx="440" cy="355" r="24" fill="#1e1a6b"/>
+    <circle cx="431" cy="346" r="8" fill="#fff"/>
+    <circle cx="449" cy="365" r="3.5" fill="#fff"/>
+  </g>
+  <g id="encima"><circle class="trazo" fill="#1e1a6b" stroke-width="10" cx="330" cy="252" r="20"/><circle class="trazo" fill="#1e1a6b" stroke-width="10" cx="352" cy="236" r="22"/><circle class="trazo" fill="#1e1a6b" stroke-width="10" cx="380" cy="230" r="24"/><circle class="trazo" fill="#1e1a6b" stroke-width="10" cx="408" cy="236" r="22"/><circle class="trazo" fill="#1e1a6b" stroke-width="10" cx="430" cy="252" r="20"/><circle class="trazo" fill="#1e1a6b" stroke-width="10" cx="356" cy="262" r="18"/><circle class="trazo" fill="#1e1a6b" stroke-width="10" cx="404" cy="262" r="18"/><circle class="trazo" fill="#1e1a6b" stroke-width="10" cx="380" cy="258" r="20"/><circle class="pelo-claro" cx="330" cy="252" r="20"/><circle class="pelo-claro" cx="352" cy="236" r="22"/><circle class="pelo-claro" cx="380" cy="230" r="24"/><circle class="pelo-claro" cx="408" cy="236" r="22"/><circle class="pelo-claro" cx="430" cy="252" r="20"/><circle class="pelo-claro" cx="356" cy="262" r="18"/><circle class="pelo-claro" cx="404" cy="262" r="18"/><circle class="pelo-claro" cx="380" cy="258" r="20"/><circle class="acento linea" stroke-width="4" cx="296" cy="258" r="12"/><circle class="acento linea" stroke-width="4" cx="462" cy="258" r="12"/></g>
+  <g id="pico"><path class="pico linea" stroke-width="5" d="M364 386 C364 377 394 377 394 386 C394 394 386 400 379 400 C372 400 364 394 364 386 Z"/><ellipse cx="372" cy="384" rx="6" ry="3.5" fill="#fff" opacity=".7"/><path class="trazo" stroke-width="5" d="M379 400 L379 408 M379 408 C374.2 417 363 417 359 410 M379 408 C383.8 417 395 417 399 410"/></g>
+</svg>

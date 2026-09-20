@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#c9a227;--objeto2:#ffffff">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-lentes"><path class="trazo" stroke-width="13" d="M351 350 C364 340 394 340 407 353 M285 346 L230 336 M473 350 L516 342"/><path class="objeto-trazo" stroke-width="7" d="M351 350 C364 340 394 340 407 353 M285 346 L230 336 M473 350 L516 342"/><circle cx="318" cy="352" r="33" fill="#fff" fill-opacity=".22"/><circle class="trazo" stroke-width="13" cx="318" cy="352" r="33"/><circle class="objeto-trazo" stroke-width="7" cx="318" cy="352" r="33"/><path d="M304 332 C310 328 320 327 326 329" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" opacity=".8"/><circle cx="440" cy="355" r="33" fill="#fff" fill-opacity=".22"/><circle class="trazo" stroke-width="13" cx="440" cy="355" r="33"/><circle class="objeto-trazo" stroke-width="7" cx="440" cy="355" r="33"/><path d="M426 335 C432 331 442 330 448 332" stroke="#fff" stroke-width="4" fill="none" stroke-linecap="round" opacity=".8"/></g>
+</svg>

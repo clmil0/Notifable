@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#d62839;--objeto2:#ffd23f">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-chullo">
+    <defs><clipPath id="obj-chullo-chullo"><path d="M216 300 C226 246 296 220 370 220 C446 220 510 244 522 300 C470 286 280 286 216 300 Z"/></clipPath></defs>
+    <path class="trazo" stroke-width="12" d="M232 394 L228 440 M510 394 L514 440"/><path class="objeto2-trazo" stroke-width="5" d="M232 394 L228 440 M510 394 L514 440"/>
+    <circle class="objeto-2 linea" stroke-width="5" cx="228" cy="446" r="11"/><circle class="objeto-2 linea" stroke-width="5" cx="514" cy="446" r="11"/>
+    <path class="objeto linea" stroke-width="6" d="M218 292 C208 332 214 370 232 394 C250 386 262 348 264 292 Z"/><path class="objeto linea" stroke-width="6" d="M 524 292 C 534 332 528 370 510 394 C 492 386 480 348 478 292 Z"/>
+    <path class="objeto-2" d="M222 350 L234 336 L246 350 L234 364 Z M520 350 L508 336 L496 350 L508 364 Z"/>
+    <path class="objeto linea" stroke-width="6" d="M216 300 C226 246 296 220 370 220 C446 220 510 244 522 300 C470 286 280 286 216 300 Z"/>
+    <g clip-path="url(#obj-chullo-chullo)">
+      <path class="objeto-2" d="M200 266 C290 250 450 250 540 266 L540 284 C450 268 290 268 200 284 Z"/>
+      <polyline points="208,246 224,236 240,246 256,236 272,246 288,236 304,246 320,236 336,246 352,236 368,246 384,236 400,246 416,236 432,246 448,236 464,246 480,236 496,246 512,236 528,246" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>
+      <path fill="#fff" d="M248 262 L254 268 L248 274 L242 268 Z"/><path fill="#fff" d="M278 262 L284 268 L278 274 L272 268 Z"/><path fill="#fff" d="M308 262 L314 268 L308 274 L302 268 Z"/><path fill="#fff" d="M338 262 L344 268 L338 274 L332 268 Z"/><path fill="#fff" d="M368 262 L374 268 L368 274 L362 268 Z"/><path fill="#fff" d="M398 262 L404 268 L398 274 L392 268 Z"/><path fill="#fff" d="M428 262 L434 268 L428 274 L422 268 Z"/><path fill="#fff" d="M458 262 L464 268 L458 274 L452 268 Z"/><path fill="#fff" d="M488 262 L494 268 L488 274 L482 268 Z"/>
+    </g>
+    <path class="trazo" stroke-width="6" d="M216 300 C226 246 296 220 370 220 C446 220 510 244 522 300 C470 286 280 286 216 300 Z"/>
+    <circle class="objeto-2 linea" stroke-width="5" cx="370" cy="212" r="15"/></g>
+</svg>

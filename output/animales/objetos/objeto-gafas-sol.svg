@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#2b2d42;--objeto2:#ff5d8f">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-gafas-sol"><path class="trazo" stroke-width="7" d="M346 352 C360 342 398 342 412 354 M284 344 L230 336 M474 348 L516 342"/><path class="objeto linea" stroke-width="6" d="M286 330 C286 322 350 322 350 330 C350 364 336 378 318 378 C300 378 286 364 286 330 Z"/><path class="objeto-2" d="M286 330 C286 322 350 322 350 330 L350 338 C328 334 308 334 286 338 Z"/><path d="M300 346 L314 346 M300 356 L306 356" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".55"/><path class="objeto linea" stroke-width="6" d="M408 333 C408 325 472 325 472 333 C472 367 458 381 440 381 C422 381 408 367 408 333 Z"/><path class="objeto-2" d="M408 333 C408 325 472 325 472 333 L472 341 C450 337 430 337 408 341 Z"/><path d="M422 349 L436 349 M422 359 L428 359" stroke="#fff" stroke-width="4" stroke-linecap="round" opacity=".55"/></g>
+</svg>

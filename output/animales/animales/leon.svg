@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--pelo:#f2c14e;--pico:#7a4a3a;--acento:#c8641e">
+  <style>
+    .pelo        { fill: var(--pelo); }
+    .pelo-trazo  { stroke: var(--pelo); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .pelo-claro  { fill: color-mix(in srgb, var(--pelo) 65%, white); }
+    .pelo-oscuro { fill: color-mix(in srgb, var(--pelo) 80%, black); }
+    .pico        { fill: var(--pico); }
+    .pico-oscuro { fill: color-mix(in srgb, var(--pico) 78%, black); }
+    .acento      { fill: var(--acento); }
+    .acento-trazo{ stroke: var(--acento); fill: none; stroke-linejoin: round; }
+    .acento-suave{ fill: color-mix(in srgb, var(--acento) 40%, white); }
+    .linea       { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo       { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <defs><clipPath id="leon-clip"><path id="leon-cuerpo" d="M215 560 C205 470 200 390 222 320 C245 250 310 228 370 228 C440 228 500 250 515 320 C530 390 525 470 520 560 C520 600 460 616 370 616 C280 616 215 600 215 560 Z"/></clipPath></defs>
+  <g id="detras">
+  <circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="213" cy="412" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="201" cy="373" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="203" cy="333" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="217" cy="295" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="244" cy="262" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="281" cy="236" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="325" cy="220" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="372" cy="214" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="419" cy="220" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="463" cy="236" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="500" cy="262" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="527" cy="295" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="541" cy="333" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="543" cy="373" r="34"/><circle class="trazo" fill="#1e1a6b" stroke-width="16" cx="531" cy="412" r="34"/><circle class="acento" cx="213" cy="412" r="34"/><circle class="acento" cx="201" cy="373" r="34"/><circle class="acento" cx="203" cy="333" r="34"/><circle class="acento" cx="217" cy="295" r="34"/><circle class="acento" cx="244" cy="262" r="34"/><circle class="acento" cx="281" cy="236" r="34"/><circle class="acento" cx="325" cy="220" r="34"/><circle class="acento" cx="372" cy="214" r="34"/><circle class="acento" cx="419" cy="220" r="34"/><circle class="acento" cx="463" cy="236" r="34"/><circle class="acento" cx="500" cy="262" r="34"/><circle class="acento" cx="527" cy="295" r="34"/><circle class="acento" cx="541" cy="333" r="34"/><circle class="acento" cx="543" cy="373" r="34"/><circle class="acento" cx="531" cy="412" r="34"/><circle class="pelo linea" cx="282" cy="240" r="30"/><circle class="pelo linea" cx="468" cy="240" r="30"/><circle class="acento-suave" cx="280" cy="236" r="16"/><circle class="acento-suave" cx="470" cy="236" r="16"/><path class="trazo" stroke-width="22" d="M262 592 C214 606 180 596 170 566"/><path class="pelo-trazo" stroke-width="14" d="M262 592 C214 606 180 596 170 566"/><circle class="trazo" fill="#1e1a6b" stroke-width="12" cx="166" cy="556" r="16"/><circle class="trazo" fill="#1e1a6b" stroke-width="12" cx="158" cy="544" r="12"/><circle class="trazo" fill="#1e1a6b" stroke-width="12" cx="174" cy="546" r="11"/><circle class="acento" cx="166" cy="556" r="16"/><circle class="acento" cx="158" cy="544" r="12"/><circle class="acento" cx="174" cy="546" r="11"/>
+  </g>
+  <g id="aleta-izq">
+    <path class="trazo" stroke-width="60" d="M244 408 L180 322"/><path class="pelo-trazo" stroke-width="52" d="M244 408 L180 322"/>
+    
+    <ellipse class="acento-suave" cx="181" cy="328" rx="10" ry="8"/>
+    <circle class="acento-suave" cx="167" cy="314" r="4.5"/><circle class="acento-suave" cx="179" cy="308" r="4.5"/><circle class="acento-suave" cx="192" cy="313" r="4.5"/>
+  </g>
+  <g id="aleta-der">
+    <path class="trazo" stroke-width="60" d="M502 470 L558 544"/><path class="pelo-trazo" stroke-width="52" d="M502 470 L558 544"/>
+    
+  </g>
+  <use href="#leon-cuerpo" class="pelo"/>
+  <g clip-path="url(#leon-clip)">
+    <path class="pelo-claro" d="M268 272 C310 246 432 240 488 272 C440 260 320 260 268 272 Z"/>
+    <g id="cara"><ellipse class="pelo-claro" cx="379" cy="404" rx="58" ry="40"/><ellipse class="pelo-claro" cx="370" cy="574" rx="122" ry="104"/></g>
+    <ellipse cx="370" cy="618" rx="170" ry="30" fill="#e2e2ee"/>
+  </g>
+  <use href="#leon-cuerpo" fill="none" class="linea"/>
+  <g id="ojos">
+    <circle cx="318" cy="352" r="24" fill="#1e1a6b"/>
+    <circle cx="309" cy="343" r="8" fill="#fff"/>
+    <circle cx="327" cy="362" r="3.5" fill="#fff"/>
+    <circle cx="440" cy="355" r="24" fill="#1e1a6b"/>
+    <circle cx="431" cy="346" r="8" fill="#fff"/>
+    <circle cx="449" cy="365" r="3.5" fill="#fff"/>
+  </g>
+  <g id="encima"><circle fill="#1e1a6b" cx="336" cy="402" r="3.5"/><circle fill="#1e1a6b" cx="422" cy="402" r="3.5"/><circle fill="#1e1a6b" cx="326" cy="412" r="3.5"/><circle fill="#1e1a6b" cx="432" cy="412" r="3.5"/><circle fill="#1e1a6b" cx="340" cy="416" r="3.5"/><circle fill="#1e1a6b" cx="418" cy="416" r="3.5"/></g>
+  <g id="pico"><path class="pico linea" stroke-width="5" d="M354 384 C354 368 404 368 404 384 C404 398 392 406 379 406 C366 406 354 398 354 384 Z"/><ellipse cx="368" cy="382" rx="6" ry="3.5" fill="#fff" opacity=".7"/><path class="trazo" stroke-width="5" d="M379 406 L379 414 M379 414 C372.4 425 357 425 353 416 M379 414 C385.6 425 401 425 405 416"/></g>
+</svg>

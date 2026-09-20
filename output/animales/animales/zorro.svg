@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--pelo:#ef6f2e;--pico:#2b2238;--acento:#3a2c3c">
+  <style>
+    .pelo        { fill: var(--pelo); }
+    .pelo-trazo  { stroke: var(--pelo); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .pelo-claro  { fill: color-mix(in srgb, var(--pelo) 65%, white); }
+    .pelo-oscuro { fill: color-mix(in srgb, var(--pelo) 80%, black); }
+    .pico        { fill: var(--pico); }
+    .pico-oscuro { fill: color-mix(in srgb, var(--pico) 78%, black); }
+    .acento      { fill: var(--acento); }
+    .acento-trazo{ stroke: var(--acento); fill: none; stroke-linejoin: round; }
+    .acento-suave{ fill: color-mix(in srgb, var(--acento) 40%, white); }
+    .linea       { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo       { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <defs><clipPath id="zorro-clip"><path id="zorro-cuerpo" d="M215 560 C205 470 200 390 222 320 C245 250 310 228 370 228 C440 228 500 250 515 320 C530 390 525 470 520 560 C520 600 460 616 370 616 C280 616 215 600 215 560 Z"/></clipPath></defs>
+  <g id="detras">
+  <path class="pelo linea"  d="M238 312 C232 262 236 214 250 186 C282 196 316 218 340 244 Z"/>
+  <path class="pelo linea"  d="M 512 312 C 518 262 514 214 500 186 C 468 196 434 218 410 244 Z"/>
+  <path class="acento-suave"  d="M254 292 C250 256 254 226 262 208 C284 218 304 232 320 248 Z"/>
+  <path class="acento-suave"  d="M 496 292 C 500 256 496 226 488 208 C 466 218 446 232 430 248 Z"/>
+  <path class="acento"  d="M250 186 C262 190 276 197 290 205 C278 208 262 212 244 222 C245 208 247 196 250 186 Z"/>
+  <path class="acento"  d="M 500 186 C 488 190 474 197 460 205 C 472 208 488 212 506 222 C 505 208 503 196 500 186 Z"/><clipPath id="zorro-cola"><path d="M264 560 C222 536 168 536 148 578 C138 604 160 626 192 620 C222 614 252 604 268 594 Z"/></clipPath><path class="pelo linea" d="M264 560 C222 536 168 536 148 578 C138 604 160 626 192 620 C222 614 252 604 268 594 Z"/><g clip-path="url(#zorro-cola)"><ellipse cx="150" cy="604" rx="34" ry="40" fill="#fff"/></g><path class="trazo" stroke-width="8" fill="none" d="M264 560 C222 536 168 536 148 578 C138 604 160 626 192 620 C222 614 252 604 268 594"/>
+  </g>
+  <g id="aleta-izq">
+    <path class="trazo" stroke-width="60" d="M244 408 L180 322"/><path class="pelo-trazo" stroke-width="52" d="M244 408 L180 322"/>
+    <circle class="acento" cx="180" cy="322" r="22"/>
+    <ellipse class="acento-suave" cx="181" cy="328" rx="10" ry="8"/>
+    <circle class="acento-suave" cx="167" cy="314" r="4.5"/><circle class="acento-suave" cx="179" cy="308" r="4.5"/><circle class="acento-suave" cx="192" cy="313" r="4.5"/>
+  </g>
+  <g id="aleta-der">
+    <path class="trazo" stroke-width="60" d="M502 470 L558 544"/><path class="pelo-trazo" stroke-width="52" d="M502 470 L558 544"/>
+    <circle class="acento" cx="558" cy="544" r="22"/>
+  </g>
+  <use href="#zorro-cuerpo" class="pelo"/>
+  <g clip-path="url(#zorro-clip)">
+    <path class="pelo-claro" d="M268 272 C310 246 432 240 488 272 C440 260 320 260 268 272 Z"/>
+    <g id="cara"><path fill="#fff" d="M200 372 C250 368 320 392 379 440 C438 392 508 368 540 372 L540 640 L200 640 Z"/></g>
+    <ellipse cx="370" cy="618" rx="170" ry="30" fill="#e2e2ee"/>
+  </g>
+  <use href="#zorro-cuerpo" fill="none" class="linea"/>
+  <g id="ojos">
+    <circle cx="318" cy="352" r="24" fill="#1e1a6b"/>
+    <circle cx="309" cy="343" r="8" fill="#fff"/>
+    <circle cx="327" cy="362" r="3.5" fill="#fff"/>
+    <circle cx="440" cy="355" r="24" fill="#1e1a6b"/>
+    <circle cx="431" cy="346" r="8" fill="#fff"/>
+    <circle cx="449" cy="365" r="3.5" fill="#fff"/>
+  </g>
+  <g id="encima"></g>
+  <g id="pico"><path class="pico linea" stroke-width="5" d="M354 384 C354 368 404 368 404 384 C404 398 392 406 379 406 C366 406 354 398 354 384 Z"/><ellipse cx="368" cy="382" rx="6" ry="3.5" fill="#fff" opacity=".7"/><path class="trazo" stroke-width="5" d="M379 406 L379 414 M379 414 C372.4 425 357 425 353 416 M379 414 C385.6 425 401 425 405 416"/></g>
+</svg>

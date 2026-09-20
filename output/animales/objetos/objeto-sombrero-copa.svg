@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#2b2d42;--objeto2:#e63946">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-sombrero-copa">
+    <g transform="rotate(-8 375 240)">
+      <path class="objeto linea" stroke-width="6" d="M332 238 L327 190 C327 182 423 182 423 190 L418 238 Z"/>
+      <path class="objeto-2" d="M330.3 218 L419.7 218 L418.3 234 L331.7 234 Z"/>
+      <path class="objeto-claro" opacity=".5" d="M348 194 L350 212 L357 212 L355 194 Z"/>
+      <ellipse class="objeto linea" stroke-width="6" cx="375" cy="240" rx="80" ry="13"/>
+    </g></g>
+</svg>

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="140 170 470 460" width="470" height="460" style="--objeto:#e63946;--objeto2:#ffffff">
+  <style>
+    .objeto        { fill: var(--objeto); }
+    .objeto-claro  { fill: color-mix(in srgb, var(--objeto) 60%, white); }
+    .objeto-oscuro { fill: color-mix(in srgb, var(--objeto) 75%, black); }
+    .objeto-trazo  { stroke: var(--objeto); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .objeto-2      { fill: var(--objeto2); }
+    .objeto-2-oscuro { fill: color-mix(in srgb, var(--objeto2) 70%, black); }
+    .objeto2-trazo { stroke: var(--objeto2); fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .linea         { stroke: #1e1a6b; stroke-width: 8; stroke-linejoin: round; stroke-linecap: round; }
+    .trazo         { stroke: #1e1a6b; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+  <g id="obj-pajarita">
+    <path class="objeto linea" stroke-width="5" d="M379 456 L332 432 C320 444 320 470 332 482 Z"/>
+    <path class="objeto linea" stroke-width="5" d="M 379 456 L 426 432 C 438 444 438 470 426 482 Z"/>
+    <circle class="objeto-2" cx="340" cy="448" r="4"/><circle class="objeto-2" cx="336" cy="466" r="4"/><circle class="objeto-2" cx="418" cy="448" r="4"/><circle class="objeto-2" cx="422" cy="466" r="4"/><circle class="objeto-2" cx="352" cy="458" r="3.5"/><circle class="objeto-2" cx="406" cy="458" r="3.5"/>
+    <rect class="objeto-oscuro linea" stroke-width="5" x="366" y="444" width="26" height="24" rx="7"/></g>
+</svg>
