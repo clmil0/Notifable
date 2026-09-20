@@ -12,6 +12,10 @@ struct ExpenseSnapshot {
     var date: Date
     var category: String
     var merchant: String
+    /// Etiquetas del gasto. Viajan en el snapshot para que los cortes por
+    /// etiqueta se puedan calcular y probar sin `ModelContainer`, igual que
+    /// los de categoría.
+    var tags: [String]
     var isDebt: Bool
     /// Soles por 1 USD el día del movimiento. `nil` en registros antiguos.
     var fxRateAtCapture: Double?
@@ -25,6 +29,7 @@ struct ExpenseSnapshot {
          date: Date,
          category: String = "Otros",
          merchant: String = "",
+         tags: [String] = [],
          isDebt: Bool = false,
          fxRateAtCapture: Double? = nil,
          paymentsInOwnCurrency: Double = 0,
@@ -34,6 +39,7 @@ struct ExpenseSnapshot {
         self.date = date
         self.category = category
         self.merchant = merchant
+        self.tags = tags
         self.isDebt = isDebt
         self.fxRateAtCapture = fxRateAtCapture
         self.paymentsInOwnCurrency = paymentsInOwnCurrency

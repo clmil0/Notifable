@@ -754,6 +754,7 @@ final class ConfigBackupManager {
                     occurredAt: e.date, notes: e.notes,
                     isSubscription: e.isSubscription, isDebt: e.isDebt,
                     debtSettled: e.debtSettled ? true : nil,
+                    tags: e.tags.isEmpty ? nil : e.tags,
                     cardLastDigits: e.cardLastDigits, fxRate: e.fxRateAtCapture,
                     debtMarkKey: nil, isFinalDebtPayment: false, createdAt: e.date))
             }
@@ -954,6 +955,10 @@ final class ConfigBackupManager {
                             cardLastDigits: t.cardLastDigits, fxRateAtCapture: t.fxRate)
             e.id = t.id
             e.debtSettled = t.debtSettled ?? false
+            // El catálogo se restaura antes (viaja en `preferences`), pero se
+            // pasa por `use` igual: un respaldo de otro teléfono puede traer
+            // una etiqueta que aquí todavía no existía.
+            e.tags = (t.tags ?? []).compactMap { TagCatalog.shared.use($0) }
             modelContext.insert(e)
             byKey[TransactionKey.key(for: e)] = e
         }
@@ -1222,6 +1227,9 @@ struct ManualTransactionBackup: Codable {
     var isDebt: Bool
     /// Opcional: los respaldos anteriores no lo traen.
     var debtSettled: Bool? = nil
+    /// Las etiquetas del gasto. Opcional por lo mismo. En los ingresos no
+    /// aplica: las etiquetas son de gastos.
+    var tags: [String]? = nil
     var cardLastDigits: String?
     @RateCoded var fxRate: Double?
     var debtMarkKey: String?

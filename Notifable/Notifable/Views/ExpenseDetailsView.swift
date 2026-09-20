@@ -26,7 +26,9 @@ struct ExpenseDetailsView: View {
     @State private var showingCategoryPicker = false
     @State private var showingEditor = false
     @State private var showingCollect = false
+    @State private var showingReminder = false
     @State private var showingDeleteConfirmation = false
+    @State private var showingTagPicker = false
     @State private var showingRecurrence = false
     @State private var editingRule: RecurringExpense?
     @State private var recurrence = RecurrenceDraft()
@@ -111,8 +113,23 @@ struct ExpenseDetailsView: View {
             .sheet(isPresented: $showingEditor) {
                 EditExpenseSheet(expense: expense)
             }
+            .sheet(isPresented: $showingTagPicker) {
+                // `toggleTag` ya anota la edición y guarda: etiquetar un gasto
+                // que vino del correo tiene que sobrevivir a la relectura.
+                TagPickerSheet(selected: expense.tags) { tag in
+                    withAnimation(.snappy(duration: 0.2)) {
+                        expense.toggleTag(tag, in: modelContext)
+                    }
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(28)
+            }
             .sheet(isPresented: $showingCollect) {
                 AddTransactionSheet(collecting: expense)
+            }
+            .sheet(isPresented: $showingReminder) {
+                ReminderComposerSheet(initialDebt: expense)
             }
             .alert("¿Eliminar movimiento?", isPresented: $showingDeleteConfirmation) {
                 Button("Cancelar", role: .cancel) {}
@@ -197,7 +214,7 @@ struct ExpenseDetailsView: View {
     private var properties: some View {
         VStack(spacing: 0) {
             Button { showingCategoryPicker = true } label: {
-                propertyRow(title: "Categoría", icon: "tag") {
+                propertyRow(title: "Categoría", icon: "square.grid.2x2") {
                     HStack(spacing: 6) {
                         Text(expense.category)
                             .fontWeight(.semibold)
@@ -209,6 +226,10 @@ struct ExpenseDetailsView: View {
                 }
             }
             .buttonStyle(.plain)
+
+            divider
+
+            tagsRow
 
             divider
 
@@ -357,6 +378,46 @@ struct ExpenseDetailsView: View {
         return "Correo"
     }
 
+    /// Las etiquetas van pegadas a la categoría, y no en cualquier otro sitio
+    /// de la ficha, porque es ahí donde se entiende la diferencia: arriba la
+    /// que clasifica el gasto —una, obligatoria, la que lleva el límite—, y
+    /// debajo las que lo cruzan —las que hagan falta, opcionales, sin límite—.
+    private var tagsRow: some View {
+        Button { showingTagPicker = true } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    Image(systemName: "tag")
+                        .font(.system(size: 15))
+                        .foregroundStyle(palette.secondaryLabel)
+                        .frame(width: 20)
+                    Text("Etiquetas")
+                        .foregroundStyle(palette.label)
+                    Spacer(minLength: 12)
+                    if expense.tags.isEmpty {
+                        Text("Agregar")
+                            .foregroundStyle(palette.secondaryLabel)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption2)
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+
+                if !expense.tags.isEmpty {
+                    TagFlowLayout {
+                        ForEach(expense.tags, id: \.self) { tag in
+                            TagChip(name: tag)
+                        }
+                    }
+                    .padding(.leading, 32)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private var divider: some View {
         Rectangle()
             .fill(palette.separator)
@@ -462,6 +523,20 @@ struct ExpenseDetailsView: View {
             if expense.isDebt {
                 Button { showingCollect = true } label: {
                     Label("Registrar cobro", systemImage: "plus")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(accent.onSurface(colorScheme))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 42)
+                        .background(themeColor.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
+
+                // Cobrar por dentro de la app: un recado al amigo, que no
+                // mueve ni un sol de ninguna de las dos contabilidades.
+                Button { showingReminder = true } label: {
+                    Label("Recordar a un amigo", systemImage: "bell.badge")
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(accent.onSurface(colorScheme))
                         .frame(maxWidth: .infinity)

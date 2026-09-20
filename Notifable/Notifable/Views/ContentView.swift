@@ -13,7 +13,7 @@ struct ContentView: View {
     // ícono de la pestaña ya activa devuelve a la sub-vista por defecto.
     @State private var summarySub: SummarySubtab = .today
     @State private var analysisSub: AnalysisSubtab = .categories
-    @State private var socialSub: SocialSubtab = .activity
+    @State private var socialSub: SocialSubtab = .social
 
     /// El desplazamiento de la pestaña visible, en una clase observable para
     /// no invalidar este cuerpo en cada fotograma (ver `ScrollProgress`).
@@ -125,10 +125,14 @@ struct ContentView: View {
             selectedTransactionType = nil
             analysisSub = .history
             selectedTab = .analysis
+        case .friends:
+            selectedTransactionType = nil
+            socialSub = .social
+            selectedTab = .social
         case .friendInvite(let code):
             selectedTransactionType = nil
             FriendInviteRouter.shared.pendingCode = code
-            socialSub = .friends
+            socialSub = .social
             selectedTab = .social
         }
     }
@@ -196,6 +200,7 @@ struct ContentView: View {
                                    isDictating: showsDictation,
                                    badge: { tab in
                                        let requests = FriendsManager.shared.incomingRequests.count
+                                           + PaymentReminders.shared.inbox.count
                                        return tab == .social && requests > 0 ? requests : nil
                                    },
                                    onReselect: reselect,
@@ -345,18 +350,16 @@ struct ContentView: View {
                 PendingView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
             case .categories:
                 CategoriesOverviewView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
-            case .budgets:
-                BudgetsView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
+            case .tags:
+                TagsView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
             case .history:
                 HistoryView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
             }
 
         case .social:
             switch socialSub {
-            case .activity:
-                ActivityView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
-            case .friends:
-                FriendsListView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
+            case .social:
+                SocialHubView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
             case .profile:
                 ProfileView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
             }
@@ -412,7 +415,7 @@ struct ContentView: View {
             switch tab {
             case .summary:  summarySub = .today
             case .analysis: analysisSub = .categories
-            case .social:   socialSub = .activity
+            case .social:   socialSub = .social
             }
         }
     }

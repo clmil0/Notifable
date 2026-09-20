@@ -1,117 +1,55 @@
 import SwiftUI
 import SwiftData
 
-/// Social › Amigos (`2h`).
+/// Las piezas de Amigos dentro de Social (`2c`).
 ///
-/// Lista única con **el estado de compartir como subtítulo**: recíproco, sólo
-/// tú, sólo él. Antes había una sección por estado, así que un amigo cambiaba
-/// de sitio en la pantalla al tocarle el interruptor y costaba encontrarlo otra
-/// vez. Invitar y canjear viven arriba, juntos, no repartidos por la pantalla.
-///
-/// Las solicitudes (`2c`: quien usó mi invitación y espera que lo acepte, y a
-/// quién espero yo) van antes de la lista, en filas compactas con las acciones
-/// a la derecha: son la única forma de que alguien pase a ser amigo. Sin cuenta
-/// de Google (`2g`) no se dibujan las acciones de invitar.
-struct FriendsListView: View {
-    @Binding var scrollToTopTrigger: Bool
-    let progress: ScrollProgress
+/// Viven en dos vistas y no en una: en la pantalla fusionada, lo que se hace
+/// —invitar, cobrar, contestar— va arriba, y la lista de amigos al final,
+/// después de lo que te comparten. Cada una guarda su propio estado y sus
+/// propias hojas, así que el orden se decide en `SocialView` y aquí no hay que
+/// tocar nada.
+
+/// Invitar y cobrar, los cobros que te recuerdan y las solicitudes.
+struct FriendsActionsSection: View {
 
     @Environment(\.colorScheme) private var scheme
-    @Query private var expenses: [Expense]
-    @StateObject private var rates = ExchangeRateService.shared
     @State private var friendsManager = FriendsManager.shared
     @State private var auth = SupabaseAuthManager.shared
     @State private var inviteRouter = FriendInviteRouter.shared
+    @State private var reminders = PaymentReminders.shared
 
-    @State private var showProfileSheet = false
     @State private var showInviteSheet = false
-    @State private var inviteSheetMode: AddFriendSheet.Mode = .invite
+    @State private var showsComposer = false
     @State private var showGmailSettings = false
     @State private var invitedCode: String?
-    @State private var selectedFriend: Friend?
-
-    init(scrollToTopTrigger: Binding<Bool>, progress: ScrollProgress) {
-        self._scrollToTopTrigger = scrollToTopTrigger
-        self.progress = progress
-
-        let window = Period(granularity: .mes, reference: Date()).dataWindow()
-        let start = window.start
-        let end = window.end
-        _expenses = Query(filter: #Predicate<Expense> { $0.date >= start && $0.date < end },
-                          sort: \Expense.date, order: .reverse)
-    }
 
     private var palette: Palette { Palette(scheme) }
     private var accent: AppThemeColor { .current }
 
-    private var totals: PeriodTotals {
-        Accounting.totals(expenses: expenses, incomes: [],
-                          period: Period(granularity: .mes, reference: Date()),
-                          usdToPen: rates.usdToPenRate)
-    }
-
     var body: some View {
-        let friends = friendsManager.friends
-
-        TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
-            VStack(spacing: 14) {
-                ShellTitle(title: "Amigos",
-                           subtitle: "Con una invitación de un solo uso, no por nombre.")
-
-                if auth.needsGoogleAccount {
-                    needsGoogle
-                } else {
-                    actions
-
-                    requestsSection
-
-                    if friends.isEmpty {
-                        ShellEmptyState(icon: "person.2",
-                                        title: "Todavía no tienes amigos aquí",
-                                        message: "Crea una invitación o usa la de alguien para empezar.")
-                    }
-                }
-
-                if !friends.isEmpty && !auth.needsGoogleAccount {
-                    VStack(spacing: 0) {
-                        ShellSectionHeader(title: friends.count == 1 ? "1 amigo"
-                                                                    : "\(friends.count) amigos")
-                        MovementCard {
-                            ForEach(Array(friends.enumerated()), id: \.element.id) { index, friend in
-                                friendRow(friend)
-                                if index < friends.count - 1 { MovementSeparator() }
-                            }
-                        }
-                    }
-                }
+        VStack(spacing: 14) {
+            if auth.needsGoogleAccount {
+                needsGoogle
+            } else {
+                actions
+                remindersSection
+                requestsSection
             }
-            .padding(.horizontal, 16)
-            .padding(.top, ShellMetrics.contentTopInset)
-            .padding(.bottom, ShellMetrics.contentBottomInset)
         }
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            geometry.contentOffset.y + geometry.contentInsets.top
-        } action: { _, offset in
-            progress.update(offset)
-        }
-        .socialSession(showProfileSheet: $showProfileSheet)
         .onChange(of: auth.isReady) { _, ready in
             guard ready else { return }
             presentPendingInvite()
         }
         .onChange(of: inviteRouter.pendingCode) { _, _ in presentPendingInvite() }
-        .sheet(isPresented: $showProfileSheet) { MyProfileSheet() }
+        .task { await reminders.refresh() }
+        .sheet(isPresented: $showsComposer) { ReminderComposerSheet() }
         .sheet(isPresented: $showInviteSheet, onDismiss: { invitedCode = nil }) {
-            AddFriendSheet(invitedCode: invitedCode, mode: inviteSheetMode)
+            AddFriendSheet(invitedCode: invitedCode, startsOnRedeem: invitedCode != nil)
         }
         .sheet(isPresented: $showGmailSettings) {
             NavigationStack { GmailBanksView() }
                 .appAppearance()
                 .appTextSize()
-        }
-        .sheet(item: $selectedFriend) { friend in
-            FriendProfileView(friend: friend, totals: totals,
-                              incoming: friendsManager.acceptedIncoming.first { $0.sharerID == friend.id })
         }
     }
 
@@ -120,18 +58,20 @@ struct FriendsListView: View {
     private var actions: some View {
         HStack(spacing: 10) {
             Button {
-                inviteSheetMode = .invite
                 showInviteSheet = true
             } label: {
                 actionLabel(icon: "person.badge.plus", title: "Invitar", filled: true)
             }
             .buttonStyle(.plain)
 
+            // «Usar una invitación» ya no compite aquí: vive al pie de la
+            // hoja de invitar, plegada, que es donde se busca cuando alguien
+            // te pasó un código.
+            // Cobrar desde aquí: la deuda se elige dentro.
             Button {
-                inviteSheetMode = .redeem
-                showInviteSheet = true
+                showsComposer = true
             } label: {
-                actionLabel(icon: "ticket", title: "Usar invitación", filled: false)
+                actionLabel(icon: "bell.badge", title: "Cobrar", filled: false)
             }
             .buttonStyle(.plain)
         }
@@ -198,6 +138,85 @@ struct FriendsListView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, 24)
         .padding(.top, 40)
+    }
+
+    // MARK: - Recordatorios de cobro
+
+    /// Lo que un amigo te recuerda que le debes. No mueve nada de tus
+    /// cuentas: se lee y se cierra.
+    @ViewBuilder
+    private var remindersSection: some View {
+        let inbox = reminders.inbox
+        if !inbox.isEmpty {
+            VStack(spacing: 0) {
+                ShellSectionHeader(title: inbox.count == 1 ? "Te recuerdan un pago"
+                                                           : "Te recuerdan \(inbox.count) pagos")
+                MovementCard {
+                    ForEach(Array(inbox.enumerated()), id: \.element.id) { index, reminder in
+                        reminderRow(reminder)
+                        if index < inbox.count - 1 { MovementSeparator() }
+                    }
+                }
+            }
+        }
+    }
+
+    private func reminderRow(_ reminder: PaymentReminder) -> some View {
+        let friend = friendsManager.friend(with: reminder.fromUser)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                FriendAvatar(friend: friend)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(friend.name + " te recuerda un pago")
+                        .font(.system(size: 15.5, weight: .semibold))
+                        .foregroundStyle(palette.label)
+                        .lineLimit(1)
+
+                    Text(reminderDetail(reminder))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(palette.secondaryLabel)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                if let amount = reminder.amount {
+                    Text(Money.format(amount, currency: reminder.currency))
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(palette.label)
+                }
+            }
+
+            if !reminder.message.isEmpty {
+                Text("«" + reminder.message + "»")
+                    .font(.system(size: 13.5))
+                    .foregroundStyle(palette.label)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            HStack {
+                Spacer()
+                Button {
+                    Task { await reminders.dismiss(reminder) }
+                } label: {
+                    Text("Listo")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(accent.onSurface(scheme))
+                        .padding(.horizontal, 18)
+                        .frame(height: 32)
+                        .background(accent.color.opacity(0.12), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+    }
+
+    private func reminderDetail(_ reminder: PaymentReminder) -> String {
+        guard let day = reminder.occurredOn else { return reminder.merchant }
+        return reminder.merchant + " · " + day.formatted(.dateTime.day().month(.abbreviated))
     }
 
     // MARK: - Solicitudes (2c)
@@ -315,6 +334,70 @@ struct FriendsListView: View {
         return "Desde hace \(days) días"
     }
 
+    // MARK: - Invitación
+
+    /// Sin sesión no se puede canjear: el código espera en el router hasta que
+    /// `auth.isReady`.
+    private func presentPendingInvite() {
+        guard auth.isReady, inviteRouter.pendingCode != nil, let code = inviteRouter.take() else { return }
+        invitedCode = code
+        showInviteSheet = true
+    }
+}
+
+/// La lista de amigos, al final de Social.
+struct FriendsRosterSection: View {
+
+    @Environment(\.colorScheme) private var scheme
+    @Query private var expenses: [Expense]
+    @StateObject private var rates = ExchangeRateService.shared
+    @State private var friendsManager = FriendsManager.shared
+    @State private var auth = SupabaseAuthManager.shared
+    @State private var selectedFriend: Friend?
+
+    init() {
+        let window = Period(granularity: .mes, reference: Date()).dataWindow()
+        let start = window.start
+        let end = window.end
+        _expenses = Query(filter: #Predicate<Expense> { $0.date >= start && $0.date < end },
+                          sort: \Expense.date, order: .reverse)
+    }
+
+    private var palette: Palette { Palette(scheme) }
+    private var accent: AppThemeColor { .current }
+
+    private var totals: PeriodTotals {
+        Accounting.totals(expenses: expenses, incomes: [],
+                          period: Period(granularity: .mes, reference: Date()),
+                          usdToPen: rates.usdToPenRate)
+    }
+
+    var body: some View {
+        let friends = friendsManager.friends
+
+        VStack(spacing: 0) {
+            if friends.isEmpty {
+                if !auth.needsGoogleAccount {
+                    ShellEmptyState(icon: "person.2",
+                                    title: "Todavía no tienes amigos aquí",
+                                    message: "Crea una invitación o usa la de alguien para empezar.")
+                }
+            } else {
+                ShellSectionHeader(title: friends.count == 1 ? "1 amigo" : "\(friends.count) amigos")
+                MovementCard {
+                    ForEach(Array(friends.enumerated()), id: \.element.id) { index, friend in
+                        friendRow(friend)
+                        if index < friends.count - 1 { MovementSeparator() }
+                    }
+                }
+            }
+        }
+        .sheet(item: $selectedFriend) { friend in
+            FriendProfileView(friend: friend, totals: totals,
+                              incoming: friendsManager.acceptedIncoming.first { $0.sharerID == friend.id })
+        }
+    }
+
     // MARK: - Fila
 
     private func friendRow(_ friend: Friend) -> some View {
@@ -369,16 +452,5 @@ struct FriendsListView: View {
         case (false, true):  return ("arrow.left", "Sólo él te comparte")
         case (false, false): return ("minus", "Sin compartir")
         }
-    }
-
-    // MARK: - Invitación
-
-    /// Sin sesión no se puede canjear: el código espera en el router hasta que
-    /// `auth.isReady`.
-    private func presentPendingInvite() {
-        guard auth.isReady, inviteRouter.pendingCode != nil, let code = inviteRouter.take() else { return }
-        invitedCode = code
-        inviteSheetMode = .redeem
-        showInviteSheet = true
     }
 }

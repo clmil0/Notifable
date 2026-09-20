@@ -19,6 +19,8 @@ enum AppDeepLink: Equatable {
     case rhythm
     /// Invitación de un amigo: abre Amigos con la hoja lista para aceptar.
     case friendInvite(code: String)
+    /// Amigos, sin invitación: lo que abre un recordatorio de cobro.
+    case friends
 
     var url: URL {
         var c = URLComponents()
@@ -36,6 +38,7 @@ enum AppDeepLink: Equatable {
         case .categories: c.host = "categories"
         case .pending:    c.host = "pending"
         case .rhythm:     c.host = "rhythm"
+        case .friends:    c.host = "amigos"
         case .friendInvite(let code):
             c.host = "amigo"
             c.queryItems = [URLQueryItem(name: "codigo", value: code)]
@@ -71,6 +74,7 @@ enum AppDeepLink: Equatable {
         case "categories": self = .categories
         case "pending":    self = .pending
         case "rhythm":     self = .rhythm
+        case "amigos":     self = .friends
         case "amigo":
             guard let code = query["codigo"].flatMap(InviteLinks.normalizedCode) else { return nil }
             self = .friendInvite(code: code)

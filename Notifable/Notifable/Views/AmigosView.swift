@@ -15,10 +15,9 @@ struct AddFriendSheet: View {
     /// Token de un enlace de invitación (2e). Con él la hoja pregunta si
     /// mandar la solicitud en vez de mostrar el formulario completo.
     var invitedCode: String? = nil
-    /// «Invitar» y «Usar invitación» abren hojas distintas: juntas en una
-    /// sola, cada una estorbaba a la otra.
-    enum Mode { case invite, redeem }
-    var mode: Mode = .invite
+    /// Abierta desde el enlace de alguien: se despliega ya en «Usar una
+    /// invitación», con el código puesto.
+    var startsOnRedeem = false
 
     @State private var friendsManager = FriendsManager.shared
     @State private var dismissedInvite = false
@@ -27,6 +26,9 @@ struct AddFriendSheet: View {
 
     @State private var invite: FriendInvite?
     @State private var isCreatingInvite = false
+    /// «Usar una invitación», al pie y plegada: la hoja es para invitar, y
+    /// canjear se busca sólo cuando alguien te pasó un código.
+    @State private var showsRedeem = false
     @State private var createFailure: FriendsManager.InviteCreateFailure?
     @State private var showsCode = false
     @State private var copied = false
@@ -53,7 +55,8 @@ struct AddFriendSheet: View {
             .padding(.bottom, 26)
         }
         .task { inviteLinkReady = await InviteLinkCheck.isReady() }
-        .task { if invitedCode == nil, mode == .invite { await createInvite(reusingRecent: true) } }
+        .task { if invitedCode == nil, !startsOnRedeem { await createInvite(reusingRecent: true) } }
+        .onAppear { if startsOnRedeem { showsRedeem = true } }
         .confirmationDialog("¿Invalidar tus invitaciones abiertas?", isPresented: $confirmRevoke,
                             titleVisibility: .visible) {
             Button("Invalidar", role: .destructive) { Task { await revokeInvites() } }
@@ -71,20 +74,14 @@ struct AddFriendSheet: View {
         .appTextSize()
     }
 
-    /// Hasta la mitad de la pantalla; lo que no quepa se desplaza dentro.
+    /// A media altura mientras sea sólo invitar; crece al desplegar el canje.
     private var detents: Set<PresentationDetent> {
-        invitedCode != nil ? [.large] : [.medium]
+        invitedCode != nil || showsRedeem ? [.medium, .large] : [.medium]
     }
 
     // MARK: - Formulario (2a)
 
-    @ViewBuilder
-    private var form: some View {
-        switch mode {
-        case .invite: inviteForm
-        case .redeem: redeemForm
-        }
-    }
+    private var form: some View { inviteForm }
 
     private var inviteForm: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -108,22 +105,47 @@ struct AddFriendSheet: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, 14)
                 .padding(.bottom, 2)
+
+            redeemSection
+                .padding(.top, 10)
         }
     }
 
-    private var redeemForm: some View {
+    /// Al pie y plegado: «¿Te pasaron una a ti?».
+    private var redeemSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header(title: "Usar una invitación",
-                   subtitle: "Pega el enlace o el código que te mandaron.")
-                .padding(.bottom, 18)
+            Rectangle().fill(palette.hairline).frame(height: 0.5)
+                .padding(.bottom, 12)
 
-            redeemRow
-            redeemFootnote
-                .padding(.top, 8)
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { showsRedeem.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "ticket")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("¿Te pasaron una a ti? Úsala aquí")
+                        .font(.system(size: 14, weight: .semibold))
+                    Spacer(minLength: 6)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .bold))
+                        .rotationEffect(.degrees(showsRedeem ? 180 : 0))
+                }
+                .foregroundStyle(palette.label)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
 
-            if let outcome {
-                outcomeCard(outcome)
-                    .padding(.top, 14)
+            if showsRedeem {
+                redeemRow
+                    .padding(.top, 10)
+                redeemFootnote
+                    .padding(.top, 8)
+
+                if let outcome {
+                    outcomeCard(outcome)
+                        .padding(.top, 14)
+                }
             }
         }
     }

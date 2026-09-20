@@ -134,10 +134,7 @@ struct MovementRow: View {
                         assignRow(showsSource: false)
                     }
                 } else {
-                    Text(subtitle)
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(palette.secondaryLabel)
-                        .lineLimit(1)
+                    subtitleLine
                 }
 
                 if let debtNote {
@@ -222,6 +219,45 @@ struct MovementRow: View {
                     .foregroundStyle(palette.secondaryLabel)
                     .fixedSize()
             }
+        }
+    }
+
+    /// «Salud · ●madre +2» cuando el movimiento lleva etiqueta; si no, el
+    /// «Categoría · Origen» de siempre.
+    ///
+    /// La etiqueta **desplaza al origen**, no se añade: en una línea de 12.5 pt
+    /// no caben las dos cosas, y saber que el gasto es de tu madre dice más que
+    /// saber que llegó por Yape —que además ya se ve en el ícono—. El punto de
+    /// color es lo único que la distingue de la categoría, que va en gris y
+    /// sin punto.
+    @ViewBuilder
+    private var subtitleLine: some View {
+        if let tag = expense.tags.first {
+            HStack(spacing: 5) {
+                Text(expense.category + " ·")
+                    .foregroundStyle(palette.secondaryLabel)
+
+                Circle()
+                    .fill(TagCatalog.shared.color(for: tag))
+                    .frame(width: 7, height: 7)
+
+                Text(tag)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(palette.label)
+                    .lineLimit(1)
+
+                if expense.tags.count > 1 {
+                    Text("+\(expense.tags.count - 1)")
+                        .foregroundStyle(palette.secondaryLabel)
+                        .fixedSize()
+                }
+            }
+            .font(.system(size: 12.5))
+        } else {
+            Text(subtitle)
+                .font(.system(size: 12.5))
+                .foregroundStyle(palette.secondaryLabel)
+                .lineLimit(1)
         }
     }
 

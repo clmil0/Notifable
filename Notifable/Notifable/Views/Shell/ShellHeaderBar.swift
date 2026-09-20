@@ -95,8 +95,11 @@ struct ShellHeaderBar: View {
                 }
             case .social:
                 SubtabPill(tabs: visibility.social, selection: $socialSub) { subtab in
-                    let requests = FriendsManager.shared.incomingRequests.count
-                    return subtab == .friends && requests > 0 ? requests : nil
+                    // Solicitudes de amistad y cobros que te recuerdan: los
+                    // dos se atienden en la misma pantalla fusionada.
+                    let pending = FriendsManager.shared.incomingRequests.count
+                        + PaymentReminders.shared.inbox.count
+                    return subtab == .social && pending > 0 ? pending : nil
                 }
             }
         }

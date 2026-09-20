@@ -26,6 +26,9 @@ struct NotifableApp: App {
         // app en segundo plano no se monta ninguna escena, y el guardado de un
         // intent también tiene que llegar a los widgets.
         WidgetSnapshotWriter.shared.start(container: AppModelContainer.shared)
+        // También en `init`: registrar una tarea de segundo plano después de
+        // que la app termine de lanzarse es un error fatal.
+        BackgroundSync.register()
         // Quien ya venía usando la app no tiene por qué ver el onboarding: si
         // hay correo conectado o correos ya procesados, se da por visto.
         let defaults = UserDefaults.standard
@@ -59,6 +62,10 @@ struct NotifableApp: App {
                     // Pinta Amigos con lo último que se vio, antes de que
                     // AmigosHubView llegue a pedir nada por red.
                     FriendsManager.shared.configure(container: sharedModelContainer)
+                    Task {
+                        await PaymentReminders.shared.uploadStoredToken()
+                        await PaymentReminders.shared.refresh()
+                    }
                     // Duplicados de Apple que dejaron las lecturas por rango
                     // anteriores al arreglo de `existingEmailIDs`.
                     GmailSyncService.removeLinkedDuplicates(in: sharedModelContainer.mainContext)
@@ -114,6 +121,9 @@ struct NotifableApp: App {
             } else {
                 AppLock.shared.sceneWillResignActive()
                 GmailSyncService.shared.stopForegroundPolling()
+                // Con la app cerrada el correo lo mira el sistema cuando
+                // puede; ver `BackgroundSync`.
+                BackgroundSync.schedule()
             }
 
             if newPhase == .active {
@@ -123,6 +133,9 @@ struct NotifableApp: App {
                 }
                 GmailSyncService.shared.startForegroundPolling()
                 Task { await ConfigBackupManager.shared.checkForExistingBackup() }
+                // Al volver a la app: si llegó un recordatorio con ella
+                // cerrada, aquí aparece aunque la notificación se perdiera.
+                Task { await PaymentReminders.shared.refresh() }
                 // Sólo pregunta la versión; baja la lista si hay comercios nuevos.
                 Task { await MerchantCatalog.shared.refreshIfNeeded() }
             }
