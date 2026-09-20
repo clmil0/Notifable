@@ -399,7 +399,7 @@ struct MovementsView: View {
         if !searchText.isEmpty {
             ShellEmptyState(icon: "magnifyingglass",
                             title: "Sin resultados para «" + searchText + "»",
-                            message: "Prueba con el nombre del comercio o el de la categoría.")
+                            message: MovementSearch.emptyMessage(for: searchText))
         } else {
             ShellEmptyState(icon: "tray",
                             title: "Nada por aquí",

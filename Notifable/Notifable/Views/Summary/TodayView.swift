@@ -445,7 +445,7 @@ struct TodayView: View {
     private var noSearchResults: some View {
         ShellEmptyState(icon: "magnifyingglass",
                         title: "Sin resultados para «" + searchText + "»",
-                        message: "Prueba con el nombre del comercio, la categoría o una etiqueta.")
+                        message: MovementSearch.emptyMessage(for: searchText))
             .padding(.top, 8)
     }
 
