@@ -28,7 +28,8 @@ extension Expense {
             isDebt: isDebt,
             fxRateAtCapture: fxRateAtCapture,
             paymentsInOwnCurrency: paymentsInOwnCurrency,
-            hasForeignPayments: hasForeignPayments
+            hasForeignPayments: hasForeignPayments,
+            isTransfer: isTransfer
         )
     }
 
@@ -54,7 +55,8 @@ extension Income {
             currency: currency,
             date: date,
             isDebtPayment: debtReference != nil,
-            fxRateAtCapture: fxRateAtCapture
+            fxRateAtCapture: fxRateAtCapture,
+            isTransfer: isTransfer
         )
     }
 }

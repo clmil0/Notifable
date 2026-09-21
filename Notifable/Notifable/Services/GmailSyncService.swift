@@ -579,7 +579,12 @@ class GmailSyncService: ObservableObject {
                 if let context = self?.modelContext {
                     Self.removeLinkedDuplicates(in: context)
                     ConfigBackupManager.reapplyPendingDecisions(modelContext: context)
+                    // Lo recién llegado puede ir a una cuenta tuya.
+                    TransferDetector.apply(in: context)
                 }
+                // Lo importado antes de guardar el banco se completa aparte,
+                // una vez por correo.
+                self?.backfillAccountData(token: token)
                 print("Sync complete. Found \(newExpensesFound) new expenses of \(newMessages.count) checked.")
                 Diagnostics.shared.log("Sync Gmail: fin, \(newExpensesFound) nuevos")
                 self?.finishRun()
@@ -666,6 +671,8 @@ class GmailSyncService: ObservableObject {
                 if let context = self?.modelContext {
                     Self.removeLinkedDuplicates(in: context)
                     ConfigBackupManager.reapplyPendingDecisions(modelContext: context)
+                    // Lo recién llegado puede ir a una cuenta tuya.
+                    TransferDetector.apply(in: context)
                 }
                 print("Recovery complete. Restored \(newExpensesFound) expenses.")
             }
@@ -950,6 +957,9 @@ class GmailSyncService: ObservableObject {
                     Diagnostics.shared.log("Sync Gmail: \(parser.bankName) sin fecha legible, se usa la del correo")
                     expense.date = fixed
                 }
+                // De qué cuenta salió y, en un Plin/Yape, a qué billetera fue:
+                // lo que el carrusel de Movimientos y los traslados necesitan.
+                Self.applyAccountDetails(to: expense, bankName: parser.bankName, cleanText: cleanText)
                 return (applyAutoCategorization(to: expense), nil, parser.bankName)
             }
         }
@@ -964,6 +974,16 @@ class GmailSyncService: ObservableObject {
         }
 
         return nil
+    }
+
+    /// De qué cuenta salió, a qué billetera fue, el celular de quien lo
+    /// recibió y si la tarjeta es de débito o crédito. Lo que el carrusel de
+    /// Movimientos y los traslados necesitan (`EmailAccountDetails`).
+    static func applyAccountDetails(to expense: Expense, bankName: String, cleanText: String) {
+        expense.sourceBank = bankName
+        expense.destinationWallet = EmailAccountDetails.destinationWallet(in: cleanText)
+        expense.payeePhone = EmailAccountDetails.payeePhone(in: cleanText)
+        expense.cardKind = EmailAccountDetails.cardKind(in: cleanText, digits: expense.cardLastDigits)
     }
     
     // MARK: - Autocategorización Global
@@ -1102,6 +1122,9 @@ class GmailSyncService: ObservableObject {
                     // que sí la tiene.
                     match.date = date
                     if let card = newExpense.cardLastDigits { match.cardLastDigits = card }
+                    // El recibo de Apple no dice de qué banco salió; el cargo sí.
+                    match.sourceBank = expenseData.bankName
+                    match.cardKind = newExpense.cardKind
                     match.relatedEmailID = emailID
                 }
                 try? context.save()
@@ -1136,5 +1159,120 @@ class GmailSyncService: ObservableObject {
         context.insert(income)
         try? context.save()
         return true
+    }
+}
+
+// MARK: - Relleno de datos de cuenta
+
+extension GmailSyncService {
+
+    /// Correos ya releídos para el relleno, aunque no dieran nada (el correo
+    /// se borró, ningún parser lo reconoce): no se vuelven a pedir.
+    private static let backfillTriedKey = "accountBackfillTriedIDs"
+
+    /// Lo importado antes de que se guardara el banco (`sourceBank`) no dice
+    /// de qué tarjeta salió. Un consumo BBVA —«Comercio: … tarjeta terminada
+    /// en 8156»— no lleva prefijo en el comercio, así que caía en «Tarjeta
+    /// ••••8156» aunque fuera BBVA, y dos tarjetas BBVA se veían como una BBVA
+    /// y una «Tarjeta».
+    ///
+    /// Se relee cada correo **una vez** y se rellenan banco, destino, celular,
+    /// tipo de tarjeta y —si faltaban— los dígitos. Nada más: categoría,
+    /// etiquetas, notas o monto editado no se tocan.
+    func backfillAccountData(token: String) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { self.backfillAccountData(token: token) }
+            return
+        }
+        guard !Self.isBackfilling, let context = modelContext else { return }
+
+        let tried = Set(UserDefaults.standard.stringArray(forKey: Self.backfillTriedKey) ?? [])
+        let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.emailID != nil && $0.sourceBank == nil })
+        var byID: [UUID: Expense] = [:]
+        var jobs: [(id: UUID, emailIDs: [String])] = []
+        for expense in (try? context.fetch(descriptor)) ?? [] {
+            // Un gasto unido a un recibo de Apple lleva los dos correos; el
+            // del banco es el que dice la tarjeta, y no se sabe cuál llegó
+            // primero.
+            let emailIDs = [expense.emailID, expense.relatedEmailID].compactMap { $0 }.filter { !tried.contains($0) }
+            guard !emailIDs.isEmpty else { continue }
+            byID[expense.id] = expense
+            jobs.append((expense.id, emailIDs))
+        }
+        guard !jobs.isEmpty else { return }
+
+        Self.isBackfilling = true
+        Diagnostics.shared.log("Cuentas: releyendo \(jobs.count) correos antiguos para saber su banco")
+
+        struct Found { var bank: String; var destination: String?; var phone: String?; var kind: String?; var digits: String? }
+        let queue = DispatchQueue(label: "com.notifable.accountBackfill")
+        var found: [UUID: Found] = [:]
+        var attempted: [String] = []
+        let group = DispatchGroup()
+        let semaphore = DispatchSemaphore(value: 5)
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            for job in jobs {
+                semaphore.wait()
+                group.enter()
+                self?.backfillFetch(emailIDs: job.emailIDs, token: token) { result, fetched in
+                    queue.sync {
+                        attempted.append(contentsOf: fetched)
+                        if let result {
+                            found[job.id] = Found(bank: result.sourceBank ?? "", destination: result.destinationWallet,
+                                                  phone: result.payeePhone, kind: result.cardKind,
+                                                  digits: result.cardLastDigits)
+                        }
+                    }
+                    semaphore.signal()
+                    group.leave()
+                }
+            }
+            group.wait()
+
+            DispatchQueue.main.async {
+                let (found, attempted) = queue.sync { (found, attempted) }
+                for (id, data) in found {
+                    guard let expense = byID[id], !data.bank.isEmpty else { continue }
+                    expense.sourceBank = data.bank
+                    expense.destinationWallet = data.destination
+                    expense.payeePhone = data.phone
+                    expense.cardKind = data.kind
+                    if expense.cardLastDigits == nil { expense.cardLastDigits = data.digits }
+                }
+                try? context.save()
+                UserDefaults.standard.set(Array(tried.union(attempted)), forKey: Self.backfillTriedKey)
+                TransferDetector.apply(in: context)
+                Self.isBackfilling = false
+                Diagnostics.shared.log("Cuentas: \(found.count) de \(jobs.count) gastos antiguos con banco")
+            }
+        }
+    }
+
+    private static var isBackfilling = false
+
+    /// Relee los correos de un gasto en orden y se queda con el primero que
+    /// diga un banco de verdad (no el recibo de Apple). Devuelve también los
+    /// ids que sí se descargaron, para no volver a pedirlos.
+    private func backfillFetch(emailIDs: [String], token: String,
+                               completion: @escaping (Expense?, [String]) -> Void) {
+        var remaining = emailIDs
+        var fetched: [String] = []
+        var fallback: Expense?
+
+        func next() {
+            guard !remaining.isEmpty else { return completion(fallback, fetched) }
+            let id = remaining.removeFirst()
+            fetchMessageDetails(id: id, token: token) { [weak self] body, receivedAt in
+                guard let body else { return next() }   // red: se reintenta otro día
+                fetched.append(id)
+                if let parsed = self?.parseEmailBody(body, receivedAt: receivedAt), let expense = parsed.expense {
+                    if parsed.bankName != "Apple" { return completion(expense, fetched) }
+                    fallback = fallback ?? expense
+                }
+                next()
+            }
+        }
+        next()
     }
 }

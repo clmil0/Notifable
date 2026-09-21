@@ -34,7 +34,6 @@ struct ShellHeaderBar: View {
 
     @AppStorage(BudgetStore.monthlyBudgetKey) private var monthlyBudget = 0.0
     @AppStorage(BudgetStore.enabledKey) private var budgetEnabled = false
-    @StateObject private var categoryBudgets = CategoryBudgetStore.shared
 
     init(tab: AppTab,
          progress: ScrollProgress,
@@ -58,24 +57,29 @@ struct ShellHeaderBar: View {
         let end = month.end
         let unclassifiedName = Accounting.unclassified
         _unclassified = Query(filter: #Predicate<Expense> {
-            $0.category == unclassifiedName && $0.date >= start && $0.date < end
+            $0.category == unclassifiedName && !$0.isTransfer && $0.date >= start && $0.date < end
         })
 
+        // Los traslados entre tus cuentas no se clasifican: no cuentan aquí.
         var anyDescriptor = FetchDescriptor<Expense>(predicate: #Predicate<Expense> {
-            $0.category == unclassifiedName
+            $0.category == unclassifiedName && !$0.isTransfer
         })
         anyDescriptor.fetchLimit = 1
         _anyUnclassified = Query(anyDescriptor)
     }
 
     /// `3d`: nada vacío se dibuja. Pendientes sólo con movimientos sin
-    /// clasificar (de cualquier mes; el badge cuenta sólo los de éste); Balance sólo con un presupuesto definido.
+    /// clasificar (de cualquier mes; el badge cuenta sólo los de éste); Balance
+    /// sólo con el presupuesto general activo.
+    ///
+    /// - Note: los límites por categoría **no** cuentan. Antes bastaba uno
+    ///   para que Balance siguiera en la píldora tras apagar el presupuesto, y
+    ///   Balance no enseña nada de esos límites: viven en Análisis › Categorías.
     private var visibility: SubtabVisibility {
         var visibility = SubtabVisibility()
         visibility.pendingCount = Set(unclassified.map(\.merchant)).count
         visibility.hasAnyPending = !anyUnclassified.isEmpty
         visibility.hasBudget = BudgetStore.hasBudget(monthlyBudget: monthlyBudget, enabled: budgetEnabled)
-            || categoryBudgets.budgets.contains { $0.value.hasLimit }
         return visibility
     }
 
@@ -102,6 +106,11 @@ struct ShellHeaderBar: View {
                     return subtab == .social && pending > 0 ? pending : nil
                 }
             }
+        }
+        // Se apagó el presupuesto estando en Balance: se vuelve a Hoy. Sin
+        // esto la pantalla seguía abierta sin su ícono en la píldora.
+        .onChange(of: visibility.hasBudget) { _, hasBudget in
+            if !hasBudget, summarySub == .balance { summarySub = .today }
         }
         .background(
             GeometryReader { geo in

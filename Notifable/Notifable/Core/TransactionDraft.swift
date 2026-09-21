@@ -30,8 +30,12 @@ struct TransactionDraft {
     var category: String = "Otros"
     var isSubscription: Bool = false
 
+    /// De dónde sale (gasto) o a dónde llega (ingreso): Efectivo, Yape,
+    /// Plin, Transferencia u Otro. En un gasto queda en `sourceBank`, para
+    /// que caiga en su tarjeta del carrusel de Movimientos.
+    var source: String = "Efectivo"
+
     // Ingreso
-    var source: String = "Transferencia"
     var title: String = ""
     var isDebtPayment: Bool = false
 
@@ -121,8 +125,10 @@ struct TransactionDraft {
         if Money.cents(amount) > 100_000_000 {
             return .invalid("Monto demasiado alto. Revisa las cifras.")
         }
-        if type == .gasto && merchant.trimmed.isEmpty {
-            return .blocked("Falta el nombre del comercio")
+        // El título es opcional (va en «+ Detalle»); la categoría no: sin
+        // título, el gasto se llama como ella.
+        if type == .gasto && category.trimmed.isEmpty {
+            return .blocked("Elige una categoría")
         }
         if type == .ingreso, isDebtPayment {
             guard let debt = selectedDebt else {
@@ -233,15 +239,19 @@ struct TransactionDraft {
     func makeExpense() -> Expense? {
         guard validation.isReady, type == .gasto else { return nil }
         // El orden de los parámetros es el del `init` del modelo.
-        return Expense(
+        let expense = Expense(
             amount: Money.normalized(amount),
-            merchant: merchant.trimmed,
+            // Sin título, el nombre de la categoría: «Comida» se lee mejor
+            // en la lista que un comercio vacío.
+            merchant: merchant.trimmed.isEmpty ? category : merchant.trimmed,
             date: date,
             category: category,
             notes: notes.trimmed.isEmpty ? nil : notes.trimmed,
             isSubscription: isSubscription,
             currency: currency
         )
+        expense.sourceBank = source
+        return expense
     }
 
     /// Todo lo que hace falta para guardar un cobro, resuelto **de una vez**.

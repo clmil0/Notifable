@@ -30,6 +30,8 @@ struct AddTransactionSheet: View {
     @State private var justSaved = false
     @State private var recurrence = RecurrenceDraft()
     @State private var showRecurrenceSheet = false
+    @State private var showSourcePicker = false
+    @State private var showDetail = false
     @State private var showQuickEditor = false
     @State private var activeQuickID: UUID?
     @State private var saveAsQuick = false
@@ -44,14 +46,22 @@ struct AddTransactionSheet: View {
     @FocusState private var focused: Field?
 
     init(transactionType: TransactionType = .gasto) {
-        _draft = State(initialValue: TransactionDraft(type: transactionType))
+        _draft = State(initialValue: Self.blankDraft(transactionType))
+    }
+
+    /// La categoría empieza vacía («Toca para elegir»): que el gasto caiga en
+    /// «Otros» sin que nadie lo decida llenaba esa categoría de ruido.
+    private static func blankDraft(_ type: TransactionType) -> TransactionDraft {
+        var draft = TransactionDraft(type: type)
+        draft.category = ""
+        return draft
     }
 
     /// Desde un enlace `agrupay://` (widget o Atajos): ingreso con la fuente
     /// ya elegida, o un gasto rápido que se registra al abrir con la opción de
     /// deshacer — el mismo camino que el doble toque.
     init(transactionType: TransactionType, source: String?, savingQuick quickID: UUID?) {
-        var draft = TransactionDraft(type: transactionType)
+        var draft = Self.blankDraft(transactionType)
         if let source { draft.source = source }
         _draft = State(initialValue: draft)
         _pendingQuickSave = State(initialValue: quickID)
@@ -92,20 +102,32 @@ struct AddTransactionSheet: View {
 
     // MARK: - Cuerpo
 
+    /// Lo mínimo a la vista: monto, tres cápsulas (de dónde, gasto o ingreso,
+    /// cuándo), «+ Detalle» para título y descripción, y la categoría. Todo lo
+    /// demás —repetir, guardar como atajo— vive dentro de Detalle.
     var body: some View {
         VStack(spacing: 0) {
             topBar
             amountHero
 
             ScrollView {
-                VStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 16) {
+                    capsuleRow
+                    detailRow
+
+                    // Los atajos sólo mientras no hay monto (`4b`): son una
+                    // forma de rellenar; con el monto escrito sobran.
+                    if draft.type == .gasto && !draft.hasAmount {
+                        quickExpenseRow
+                    }
+
                     if draft.type == .gasto {
-                        expenseFields
+                        categoryCard
                     } else {
                         incomeFields
                     }
                 }
-                .padding(.vertical, 14)
+                .padding(.vertical, 12)
             }
             .scrollDismissesKeyboard(.interactively)
 
@@ -117,7 +139,7 @@ struct AddTransactionSheet: View {
         .presentationCornerRadius(32)
         .presentationBackground(palette.background)
         // Con datos escritos no se descarta de un arrastre; para salir hay que
-        // usar Cancelar, que sí pregunta.
+        // usar la X, que sí pregunta.
         .interactiveDismissDisabled(draft.hasAmount)
         .confirmationDialog("¿Descartar este movimiento?",
                             isPresented: $showDiscardDialog,
@@ -135,12 +157,8 @@ struct AddTransactionSheet: View {
         .sheet(isPresented: $showDatePicker) { datePickerSheet }
         .sheet(isPresented: $showAllCategories) { categoryListSheet }
         .sheet(isPresented: $showDebtPicker) { debtPickerSheet }
-        .sheet(isPresented: $showRecurrenceSheet) {
-            RecurrenceSheet(draft: $recurrence,
-                            merchant: draft.merchant,
-                            amount: draft.amount,
-                            currency: draft.currency)
-        }
+        .sheet(isPresented: $showSourcePicker) { sourcePickerSheet }
+        .sheet(isPresented: $showDetail, onDismiss: suggestCategoryFromTitle) { detailSheet }
         .sheet(isPresented: $showQuickEditor) {
             QuickExpenseEditor(quick: editingQuick)
         }
@@ -165,40 +183,38 @@ struct AddTransactionSheet: View {
 
     // MARK: - 1. Barra superior
 
-    /// Sólo "Cancelar". El tipo de movimiento se elige en los botones flotantes
-    /// del `+` antes de abrir, así que un segmentado aquí repetía esa decisión y
-    /// se comía la altura que el teclado necesita.
+    /// Cerrar a la izquierda y la moneda a la derecha. El tipo ya no va aquí:
+    /// es la cápsula del medio.
     private var topBar: some View {
         HStack {
             Button {
                 if draft.hasAmount { showDiscardDialog = true } else { dismiss() }
             } label: {
-                Text("Cancelar")
-                    .font(.body)
-                    .foregroundStyle(accentText)
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(palette.label)
+                    .frame(width: 44, height: 44)
+                    .background(palette.surface, in: Circle())
+                    .overlay(Circle().stroke(palette.hairline, lineWidth: 0.5))
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Cerrar")
 
             Spacer()
+
+            currencyPicker
         }
         .padding(.horizontal, 16)
-        .frame(height: 56)
+        .padding(.top, 14)
+        .padding(.bottom, 4)
     }
 
-    // MARK: - 2. Hero de monto
+    // MARK: - 2. Monto
 
+    /// Sin rótulo «Monto del gasto»: el número grande ya dice qué es, y la
+    /// cápsula de tipo dice si entra o sale.
     private var amountHero: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text(amountLabel)
-                    .font(.caption)
-                    .tracking(0.3)
-                    .foregroundStyle(palette.secondaryLabel)
-
-                Spacer()
-
-                currencyPicker
-            }
-
             amountRow
 
             if case .invalid(let message) = draft.validation {
@@ -208,8 +224,8 @@ struct AddTransactionSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -221,8 +237,8 @@ struct AddTransactionSheet: View {
     }
 
     private var amountLabel: String {
-        if draft.type == .ingreso && draft.isDebtPayment { return "MONTO DEL ABONO" }
-        return draft.type == .gasto ? "MONTO DEL GASTO" : "MONTO DEL INGRESO"
+        if draft.type == .ingreso && draft.isDebtPayment { return "Monto del cobro" }
+        return draft.type == .gasto ? "Monto del gasto" : "Monto del ingreso"
     }
 
     private var isInvalid: Bool {
@@ -230,38 +246,34 @@ struct AddTransactionSheet: View {
         return false
     }
 
+    /// El número y, detrás, la moneda: «120 S/» como en el diseño.
     private var amountRow: some View {
-        let symbolColor: Color = isInvalid ? palette.negative
-            : (draft.type == .ingreso ? accentText : palette.secondaryLabel)
         let amountColor: Color = isInvalid ? palette.negative
             : (draft.amountText.isEmpty ? palette.tertiaryLabel : palette.label)
 
-        return HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(symbolPrefix)
-                .font(.system(size: 34, weight: .semibold, design: .rounded))
-                .foregroundStyle(symbolColor)
-
-            TextField("0.00", text: amountBinding)
-                .font(.system(size: 52, weight: .bold, design: .rounded))
+        return HStack(alignment: .firstTextBaseline, spacing: 10) {
+            TextField("0", text: amountBinding)
+                .font(.system(size: 64, weight: .bold, design: .rounded))
                 .foregroundStyle(amountColor)
                 .keyboardType(.decimalPad)
                 .focused($focused, equals: .amount)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
+                .fixedSize(horizontal: true, vertical: false)
                 .accessibilityLabel(amountLabel)
+
+            Text(draft.currency == "USD" ? "US$" : "S/")
+                .font(.system(size: 30, weight: .medium, design: .rounded))
+                .foregroundStyle(isInvalid ? palette.negative : palette.secondaryLabel)
 
             Spacer(minLength: 0)
         }
-        .frame(height: 60)
+        .frame(height: 76)
+        .contentShape(Rectangle())
+        .onTapGesture { focused = .amount }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(amountLabel)
         .accessibilityValue(Money.format(draft.amount, currency: draft.currency))
-    }
-
-    private var symbolPrefix: String {
-        let symbol = draft.currency == "USD" ? "US$" : "S/"
-        // Un cobro de deuda no lleva "+": no es ingreso (ver `Income.amountSign`).
-        return draft.type == .ingreso && !draft.isDebtPayment ? "+ " + symbol : symbol
     }
 
     /// Sólo hay dos monedas: un segmentado de 26 pt en vez del `Picker` de rueda
@@ -273,7 +285,8 @@ struct AddTransactionSheet: View {
         }
         .padding(2)
         .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .clipShape(Capsule())
+        .overlay(Capsule().stroke(palette.hairline, lineWidth: 0.5))
     }
 
     private func currencyOption(_ label: String, value: String) -> some View {
@@ -283,55 +296,353 @@ struct AddTransactionSheet: View {
             withAnimation(.easeInOut(duration: 0.15)) { draft.currency = value }
         } label: {
             Text(label)
-                .font(.caption.weight(.semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(selected ? Color.white : palette.secondaryLabel)
-                .frame(width: 44, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(selected ? accentFill : Color.clear)
-                )
+                .frame(width: 50, height: 32)
+                .background(Capsule().fill(selected ? accentFill : Color.clear))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? [.isSelected] : [])
     }
 
-    // MARK: - 3a. Campos de gasto
+    // MARK: - 3. Cápsulas
 
-    @ViewBuilder
-    private var expenseFields: some View {
-        // Los atajos sólo mientras no hay monto (`4b`): son una forma de
-        // rellenar, y con el monto ya escrito ocupan el sitio de la categoría.
-        if !draft.hasAmount {
-            quickExpenseRow
-        }
-
-        merchantField
-        descriptionField
-
-        if focused != .amount, !merchantSuggestions.isEmpty {
-            chipRow {
-                ForEach(merchantSuggestions, id: \.self) { name in
-                    Button { pickMerchant(name) } label: {
-                        chipLabel(Accounting.displayName(name), tint: palette.secondaryLabel, selected: false)
+    /// De dónde · gasto o ingreso · cuándo. Cada una es un toque.
+    private var capsuleRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 10) {
+                Button { showSourcePicker = true } label: {
+                    capsule {
+                        sourceIcon(Self.source(named: draft.source), size: 22)
+                        Text(draft.source)
                     }
-                    .buttonStyle(.plain)
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel((draft.type == .gasto ? "Pagado con " : "Recibido en ") + draft.source)
+
+                Button(action: toggleType) {
+                    capsule {
+                        Image(systemName: draft.type == .gasto ? "arrow.down.right" : "arrow.up.right")
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(draft.type == .gasto ? palette.negative : accentText)
+                        Text(draft.type == .gasto ? "Gasto" : "Ingreso")
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(draft.type == .gasto ? "Gasto" : "Ingreso")
+                .accessibilityHint("Toca para cambiar entre gasto e ingreso")
+
+                Button { showDatePicker = true } label: {
+                    capsule {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 17))
+                            .foregroundStyle(palette.secondaryLabel)
+                        Text(capsuleDateLabel)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Fecha: " + dateLabel)
             }
-        }
-
-        // Con el teclado del monto abierto la categoría espera: sin comercio
-        // no hay sugerencia que dar, y el teclado ya tapa la mitad de abajo.
-        if focused != .amount {
-            categoryChips
-        }
-
-        // Fecha, Repetir y «Guardar como atajo» sólo con el teclado cerrado
-        // (`4c`): son ajustes de un gasto ya escrito, no de uno que empieza.
-        if focused == nil {
-            dateAndSubscriptionCard
+            .padding(.horizontal, 16)
         }
     }
 
+    private func capsule<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 8) { content() }
+            .font(.system(size: 17, weight: .medium))
+            .foregroundStyle(palette.label)
+            .padding(.horizontal, 16)
+            .frame(height: 46)
+            .background(palette.surface, in: Capsule())
+            .overlay(Capsule().stroke(palette.hairline, lineWidth: 0.5))
+    }
+
+    /// Gasto ⇄ ingreso sin cerrar la hoja. Lo que sólo vale para uno de los
+    /// dos se limpia al cambiar: un cobro de deuda no sobrevive a pasar a gasto.
+    private func toggleType() {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+            if draft.type == .gasto {
+                draft.type = .ingreso
+                // El título es uno solo en pantalla: viaja de un tipo al otro.
+                if draft.title.isEmpty { draft.title = draft.merchant }
+            } else {
+                draft.type = .gasto
+                draft.isDebtPayment = false
+                draft.selectDebt(nil)
+                if draft.merchant.isEmpty { draft.merchant = draft.title }
+            }
+            activeQuickID = nil
+        }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+
+    /// «Hoy», «Ayer» o «20 set»: lo justo para una cápsula.
+    private var capsuleDateLabel: String {
+        if isSameDay(draft.date, Date()) { return "Hoy" }
+        if isSameDay(draft.date, yesterday) { return "Ayer" }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "es_PE")
+        f.dateFormat = "d MMM"
+        return f.string(from: draft.date).replacingOccurrences(of: ".", with: "")
+    }
+
+    // MARK: - 4. Detalle
+
+    /// El título que se ve y se edita: el comercio en un gasto, el título en un
+    /// ingreso.
+    private var titleBinding: Binding<String> {
+        draft.type == .gasto ? $draft.merchant : $draft.title
+    }
+
+    /// «+ Detalle» mientras no haya nada; con título o descripción, su resumen
+    /// para ver lo escrito sin abrirlo.
+    @ViewBuilder
+    private var detailRow: some View {
+        let title = titleBinding.wrappedValue.trimmed
+        let notes = draft.notes.trimmed
+
+        Button { showDetail = true } label: {
+            if title.isEmpty && notes.isEmpty && !recurrence.repeats {
+                Text("+ Detalle")
+                    .font(.system(size: 17))
+                    .foregroundStyle(palette.secondaryLabel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title.isEmpty ? "Sin título" : title)
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(title.isEmpty ? palette.secondaryLabel : palette.label)
+                            .lineLimit(1)
+                        if !notes.isEmpty {
+                            Text(notes)
+                                .font(.subheadline)
+                                .foregroundStyle(palette.secondaryLabel)
+                                .lineLimit(2)
+                        }
+                        if recurrence.repeats {
+                            Label(recurrence.label(merchant: draft.merchant, amount: draft.amount, currency: draft.currency),
+                                  systemImage: "arrow.clockwise")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(accentText)
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: "pencil")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 20)
+        .accessibilityLabel(title.isEmpty && notes.isEmpty ? "Añadir detalle" : "Editar detalle")
+    }
+
+    /// Título y descripción; en un gasto, también Repetir y Guardar como atajo.
+    private var detailSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField(draft.type == .gasto ? "Título (dónde, qué)" : "Título (Sueldo, venta…)",
+                              text: titleBinding)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+
+                    TextField("Descripción", text: $draft.notes, axis: .vertical)
+                        .lineLimit(2...5)
+                        .textInputAutocapitalization(.sentences)
+                } footer: {
+                    Text(draft.type == .gasto
+                         ? "Opcional. Sin título, el gasto se llama como su categoría."
+                         : "Opcional.")
+                }
+
+                // Los comercios frecuentes que coinciden con lo escrito: tocar
+                // uno lo completa y trae su categoría de siempre.
+                if draft.type == .gasto && !merchantSuggestions.isEmpty {
+                    Section("Frecuentes") {
+                        ForEach(merchantSuggestions, id: \.self) { name in
+                            Button { pickMerchant(name) } label: {
+                                Text(Accounting.displayName(name))
+                                    .foregroundStyle(palette.label)
+                            }
+                        }
+                    }
+                }
+
+                if draft.type == .gasto {
+                    Section {
+                        repeatRow
+                            .listRowInsets(EdgeInsets())
+                        if canSaveAsQuick {
+                            saveAsQuickRow
+                                .listRowInsets(EdgeInsets())
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Detalle")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Listo") { showDetail = false }
+                        .fontWeight(.semibold)
+                }
+            }
+            .sheet(isPresented: $showRecurrenceSheet) {
+                RecurrenceSheet(draft: $recurrence,
+                                merchant: draft.merchant,
+                                amount: draft.amount,
+                                currency: draft.currency)
+            }
+        }
+        .tint(accentText)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(28)
+    }
+
+    /// Al cerrar Detalle con un título conocido y sin categoría todavía, se
+    /// rellena la de siempre: la misma sugerencia que antes daba el campo de
+    /// comercio mientras se escribía.
+    private func suggestCategoryFromTitle() {
+        guard draft.type == .gasto, draft.category.trimmed.isEmpty else { return }
+        let title = draft.merchant.trimmed
+        guard !title.isEmpty else { return }
+        let match = history.first {
+            Accounting.displayName($0.merchant).caseInsensitiveCompare(title) == .orderedSame
+        }?.merchant ?? title
+        if let usual = usualCategory(for: match) {
+            withAnimation(.easeInOut(duration: 0.2)) { draft.category = usual }
+        }
+    }
+
+    // MARK: - 5. Categoría
+
+    private var categoryCard: some View {
+        let category = draft.category.trimmed
+        let hasCategory = !category.isEmpty
+        let color = hasCategory ? CategoryStyle.color(for: category, accent: themeAccent.color) : palette.secondaryLabel
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Button { showAllCategories = true } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: hasCategory ? CategoryStyle.icon(for: category) : "tray")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(color)
+                        .frame(width: 30)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Categoría")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(palette.label)
+                        Text(hasCategory ? category : "Toca para elegir")
+                            .font(.subheadline)
+                            .foregroundStyle(hasCategory ? color : palette.secondaryLabel)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+                .padding(.horizontal, 18)
+                .frame(minHeight: 68)
+                .background(palette.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(palette.hairline, lineWidth: 0.5)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            }
+            .buttonStyle(.plain)
+
+            // Por qué se eligió sola: sin esta línea parecía un error.
+            if let reason = suggestionReason {
+                Label(reason, systemImage: "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
+                    .padding(.horizontal, 6)
+                    .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 16)
+    }
+
+    // MARK: - 6. Fuente
+
+    /// Efectivo, Yape, Plin, Transferencia u Otro. En un gasto es con qué
+    /// pagaste; en un ingreso, dónde te llegó.
+    private var sourcePickerSheet: some View {
+        NavigationStack {
+            List(Self.sources, id: \.name) { source in
+                Button {
+                    draft.source = source.name
+                    showSourcePicker = false
+                } label: {
+                    HStack(spacing: 12) {
+                        sourceIcon(source, size: 30)
+                        Text(source.name)
+                            .foregroundStyle(palette.label)
+                        Spacer()
+                        if draft.source == source.name {
+                            Image(systemName: "checkmark")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(accentText)
+                        }
+                    }
+                }
+                .accessibilityAddTraits(draft.source == source.name ? [.isSelected] : [])
+            }
+            .navigationTitle(draft.type == .gasto ? "¿Con qué pagaste?" : "¿Dónde te llegó?")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cerrar") { showSourcePicker = false }
+                }
+            }
+        }
+        .tint(accentText)
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    private static func source(named name: String) -> SourceOption {
+        sources.first { $0.name == name } ?? SourceOption(name: name, symbol: "ellipsis.circle", asset: nil)
+    }
+
+    @ViewBuilder
+    private func sourceIcon(_ source: SourceOption, size: CGFloat) -> some View {
+        if let asset = source.asset {
+            Image(asset)
+                .resizable()
+                .scaledToFill()
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+        } else {
+            Image(systemName: source.symbol ?? "ellipsis.circle")
+                .font(.system(size: size * 0.62))
+                .foregroundStyle(palette.secondaryLabel)
+                .frame(width: size, height: size)
+        }
+    }
+
+    private struct SourceOption {
+        let name: String
+        let symbol: String?
+        let asset: String?
+    }
+
+    private static let sources: [SourceOption] = [
+        SourceOption(name: "Efectivo", symbol: "banknote", asset: nil),
+        SourceOption(name: "Yape", symbol: nil, asset: "yape_icon"),
+        SourceOption(name: "Plin", symbol: nil, asset: "plin_icon"),
+        SourceOption(name: "Transferencia", symbol: "building.columns", asset: nil),
+        SourceOption(name: "Otro", symbol: "ellipsis.circle", asset: nil)
+    ]
     // MARK: - Atajos
 
     @ViewBuilder
@@ -518,59 +829,6 @@ struct AddTransactionSheet: View {
         }
     }
 
-    private var merchantField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "bag")
-                .font(.system(size: 19))
-                .foregroundStyle(palette.secondaryLabel)
-
-            TextField("Comercio", text: $draft.merchant)
-                .font(.body)
-                .textInputAutocapitalization(.words)
-                .disableAutocorrection(true)
-                .submitLabel(.done)
-                .focused($focused, equals: .text)
-                .onSubmit { focused = nil }
-
-            if !draft.merchant.isEmpty {
-                Button { draft.merchant = "" } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(palette.secondaryLabel)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 46)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 0.5)
-        )
-        .padding(.horizontal, 16)
-    }
-
-    /// Descripción opcional, debajo del nombre — sirve igual para un gasto que
-    /// para un ingreso, así que vive en `draft.notes` sin distinción de tipo.
-    private var descriptionField: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "note.text")
-                .font(.system(size: 19))
-                .foregroundStyle(palette.secondaryLabel)
-
-            TextField("Descripción (opcional)", text: $draft.notes)
-                .font(.subheadline)
-                .textInputAutocapitalization(.sentences)
-                .submitLabel(.done)
-                .focused($focused, equals: .text)
-                .onSubmit { focused = nil }
-        }
-        .padding(.horizontal, 14)
-        .frame(height: 40)
-        .padding(.horizontal, 16)
-    }
-
     /// Los comercios más frecuentes. Tocar uno llena el campo y preselecciona la
     /// categoría que ese comercio ya tiene: el atajo que hace innecesario escribir.
     private var merchantSuggestions: [String] {
@@ -610,56 +868,6 @@ struct AddTransactionSheet: View {
         return counts.max { $0.value < $1.value }?.key
     }
 
-    private var categoryChips: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("CATEGORÍA")
-                .font(.caption)
-                .tracking(0.3)
-                .foregroundStyle(palette.secondaryLabel)
-                .padding(.horizontal, 16)
-
-            chipRow {
-                ForEach(orderedCategories.prefix(6), id: \.self) { category in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.15)) { draft.category = category }
-                    } label: {
-                        categoryChip(category)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(draft.category == category ? [.isSelected] : [])
-                }
-
-                Button { showAllCategories = true } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(palette.secondaryLabel)
-                        .frame(width: 38, height: 34)
-                        .background(palette.surface)
-                        .clipShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Más categorías")
-            }
-
-            if let reason = suggestionReason {
-                Label(reason, systemImage: "sparkles")
-                    .font(.caption)
-                    .foregroundStyle(palette.secondaryLabel)
-                    .padding(.horizontal, 16)
-                    .transition(.opacity)
-            }
-        }
-    }
-
-    /// La sugerida primero: el chip que se enciende solo tiene que estar a la
-    /// vista, no perdido al final de una fila que hay que desplazar.
-    private var orderedCategories: [String] {
-        let all = selectableCategories
-        let current = draft.category
-        guard all.contains(current) else { return all }
-        return [current] + all.filter { $0 != current }
-    }
-
     /// Por qué hay una categoría preseleccionada. Sin esta línea el chip se
     /// encendía solo, sin motivo visible, y parecía un error.
     private var suggestionReason: String? {
@@ -679,76 +887,6 @@ struct AddTransactionSheet: View {
         return count == 1
             ? "Sugerida por tu compra anterior en " + merchant
             : "Sugerida por tus \(count) compras anteriores en " + merchant
-    }
-
-    private var selectableCategories: [String] {
-        CategoryStyle.selectable(history: history)
-    }
-
-    private func categoryChip(_ category: String) -> some View {
-        let color = CategoryStyle.color(for: category, accent: themeAccent.color)
-        let selected = draft.category == category
-
-        return HStack(spacing: 6) {
-            Image(systemName: CategoryStyle.icon(for: category))
-                .font(.caption)
-            Text(category)
-                .font(.caption.weight(.semibold))
-        }
-        // Elegida: relleno sólido del color de la categoría y texto blanco.
-        // El tinte suave de antes se confundía con las no elegidas en claro.
-        .foregroundStyle(selected ? Color.white : palette.label)
-        .padding(.horizontal, 12)
-        .frame(height: 34)
-        .background(selected ? color : palette.surface)
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(selected ? Color.clear : palette.hairline, lineWidth: 0.5))
-    }
-
-    private var dateAndSubscriptionCard: some View {
-        VStack(spacing: 0) {
-            dateRow
-            Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 14)
-            repeatRow
-
-            if canSaveAsQuick {
-                Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 14)
-                saveAsQuickRow
-            }
-        }
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 0.5)
-        )
-        .padding(.horizontal, 16)
-    }
-
-    /// **Campo nuevo:** el gasto no tenía fecha, siempre se guardaba con `Date()`.
-    /// Registrar el almuerzo de ayer era imposible.
-    /// Una sola fila con el día y la hora (`4c`). Los chips Hoy/Ayer/Otra
-    /// ocupaban el ancho entero para decir lo que una fecha escrita dice sola.
-    private var dateRow: some View {
-        Button { showDatePicker = true } label: {
-            HStack(spacing: 10) {
-                Image(systemName: "calendar")
-                    .font(.system(size: 17))
-                    .foregroundStyle(palette.secondaryLabel)
-
-                Text(dateLabel)
-                    .foregroundStyle(palette.label)
-
-                Spacer()
-
-                Text(draft.date.formatted(.dateTime.hour().minute()))
-                    .foregroundStyle(palette.secondaryLabel)
-            }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 46)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
     }
 
     /// «Hoy, 17 set», «Ayer, 16 set», o el día con su fecha.
@@ -836,13 +974,12 @@ struct AddTransactionSheet: View {
         .frame(minHeight: 52)
     }
 
-    // MARK: - 3b. Campos de ingreso
+    // MARK: - 3b. Ingreso
 
+    /// En un ingreso, la tarjeta de categoría pasa a ser «¿Es un cobro?»: es
+    /// lo único que hay que decidir, y sólo si hay algo por cobrar.
     @ViewBuilder
     private var incomeFields: some View {
-        sourceChips
-        titleAndDateCard
-
         if !activeDebts.isEmpty {
             debtToggle
         }
@@ -853,129 +990,6 @@ struct AddTransactionSheet: View {
             explanationNote
         }
     }
-
-    private var sourceChips: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("FUENTE")
-                .font(.caption)
-                .tracking(0.3)
-                .foregroundStyle(palette.secondaryLabel)
-                .padding(.horizontal, 16)
-
-            chipRow {
-                ForEach(Self.sources, id: \.name) { source in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.15)) { draft.source = source.name }
-                    } label: {
-                        sourceChip(source)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(draft.source == source.name ? [.isSelected] : [])
-                }
-            }
-        }
-    }
-
-    private struct SourceOption {
-        let name: String
-        let symbol: String?
-        let asset: String?
-    }
-
-    private static let sources: [SourceOption] = [
-        SourceOption(name: "Transferencia", symbol: "building.columns", asset: nil),
-        SourceOption(name: "Yape", symbol: nil, asset: "yape_icon"),
-        SourceOption(name: "Plin", symbol: nil, asset: "plin_icon"),
-        SourceOption(name: "Efectivo", symbol: "banknote", asset: nil),
-        SourceOption(name: "Otro", symbol: "ellipsis.circle", asset: nil)
-    ]
-
-    private func sourceChip(_ source: SourceOption) -> some View {
-        let selected = draft.source == source.name
-
-        return HStack(spacing: 6) {
-            if let asset = source.asset {
-                Image(asset)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: 16, height: 16)
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-            } else if let symbol = source.symbol {
-                Image(systemName: symbol)
-                    .font(.caption)
-            }
-            Text(source.name)
-                .font(.caption.weight(.semibold))
-        }
-        .foregroundStyle(selected ? Color.white : palette.label)
-        .padding(.horizontal, 12)
-        .frame(height: 34)
-        .background(selected ? accentFill : palette.surface)
-        .clipShape(Capsule())
-        .overlay(Capsule().stroke(selected ? Color.clear : palette.hairline, lineWidth: 0.5))
-    }
-
-    private var titleAndDateCard: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "text.alignleft")
-                    .font(.system(size: 17))
-                    .foregroundStyle(palette.secondaryLabel)
-
-                TextField("Título", text: $draft.title)
-                    .font(.body)
-                    .textInputAutocapitalization(.sentences)
-                    .submitLabel(.done)
-                    .focused($focused, equals: .text)
-                    .onSubmit { focused = nil }
-
-                // "Opcional" a la derecha en vez de dentro del placeholder: así
-                // no desaparece en cuanto empiezas a escribir.
-                if draft.title.isEmpty {
-                    Text("Opcional")
-                        .font(.footnote)
-                        .foregroundStyle(palette.secondaryLabel)
-                }
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 46)
-
-            Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 14)
-
-            HStack(spacing: 10) {
-                Image(systemName: "note.text")
-                    .font(.system(size: 17))
-                    .foregroundStyle(palette.secondaryLabel)
-
-                TextField("Descripción", text: $draft.notes)
-                    .font(.subheadline)
-                    .textInputAutocapitalization(.sentences)
-                    .submitLabel(.done)
-                    .focused($focused, equals: .text)
-                    .onSubmit { focused = nil }
-
-                if draft.notes.isEmpty {
-                    Text("Opcional")
-                        .font(.footnote)
-                        .foregroundStyle(palette.secondaryLabel)
-                }
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 40)
-
-            Rectangle().fill(palette.separator).frame(height: 0.5).padding(.leading, 14)
-
-            dateRow
-        }
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 0.5)
-        )
-        .padding(.horizontal, 16)
-    }
-
     private var debtToggle: some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.circle")
@@ -1206,7 +1220,7 @@ struct AddTransactionSheet: View {
         .padding(.horizontal, 16)
     }
 
-    // MARK: - 5. Botón principal
+    // MARK: - 7. Botón principal
 
     @ViewBuilder
     private var primaryButton: some View {
@@ -1455,17 +1469,6 @@ struct AddTransactionSheet: View {
             }
             .padding(.horizontal, 16)
         }
-    }
-
-    private func chipLabel(_ text: String, tint: Color, selected: Bool) -> some View {
-        Text(text)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(tint)
-            .lineLimit(1)
-            .padding(.horizontal, 12)
-            .frame(height: 34)
-            .background(palette.surface)
-            .clipShape(Capsule())
     }
 }
 

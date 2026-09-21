@@ -136,7 +136,8 @@ struct SubtabVisibility {
     /// Pendientes exista en la píldora, aunque el mes esté al día y no haya
     /// badge.
     var hasAnyPending: Bool = false
-    /// Sólo con un presupuesto definido (general o por categoría). Sin él,
+    /// Sólo con el presupuesto general activo; los límites por categoría no
+    /// cuentan (viven en Análisis › Categorías). Sin él,
     /// ingresos y «queda» ya viven en Hoy y Balance no aporta nada.
     var hasBudget: Bool = false
 

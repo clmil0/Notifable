@@ -20,6 +20,9 @@ final class Income {
     /// `ConfigBackupManager` — se rearma solo releyendo el correo.
     var emailID: String?
 
+    /// Llega desde una cuenta tuya (`TransferDetector`): no es ingreso.
+    var isTransfer: Bool = false
+
     // Relación a Deuda (Opcional)
     var debtReference: Expense?
     var isFinalDebtPayment: Bool? = false

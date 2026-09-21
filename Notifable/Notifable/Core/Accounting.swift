@@ -23,6 +23,9 @@ struct ExpenseSnapshot {
     var paymentsInOwnCurrency: Double
     /// Hay abonos en otra moneda: el saldo no se puede calcular. Se avisa en la UI.
     var hasForeignPayments: Bool
+    /// Dinero que va a una cuenta tuya (`TransferDetector`): no es gasto. No
+    /// suma en ningún total ni en ningún corte.
+    var isTransfer: Bool
 
     init(amount: Double,
          currency: String = "PEN",
@@ -33,7 +36,8 @@ struct ExpenseSnapshot {
          isDebt: Bool = false,
          fxRateAtCapture: Double? = nil,
          paymentsInOwnCurrency: Double = 0,
-         hasForeignPayments: Bool = false) {
+         hasForeignPayments: Bool = false,
+         isTransfer: Bool = false) {
         self.amount = amount
         self.currency = currency
         self.date = date
@@ -44,6 +48,7 @@ struct ExpenseSnapshot {
         self.fxRateAtCapture = fxRateAtCapture
         self.paymentsInOwnCurrency = paymentsInOwnCurrency
         self.hasForeignPayments = hasForeignPayments
+        self.isTransfer = isTransfer
     }
 }
 
@@ -55,17 +60,22 @@ struct IncomeSnapshot {
     /// pasivo, no ingreso.
     var isDebtPayment: Bool
     var fxRateAtCapture: Double?
+    /// Llega desde una cuenta tuya: no es ingreso nuevo, es el mismo dinero
+    /// cambiando de sitio (ver `TransferDetector`).
+    var isTransfer: Bool
 
     init(amount: Double,
          currency: String = "PEN",
          date: Date,
          isDebtPayment: Bool = false,
-         fxRateAtCapture: Double? = nil) {
+         fxRateAtCapture: Double? = nil,
+         isTransfer: Bool = false) {
         self.amount = amount
         self.currency = currency
         self.date = date
         self.isDebtPayment = isDebtPayment
         self.fxRateAtCapture = fxRateAtCapture
+        self.isTransfer = isTransfer
     }
 }
 
@@ -229,9 +239,11 @@ enum Accounting {
                        usdToPen: Double) -> PeriodTotals {
 
         let interval = period.interval
-        // Intervalo semiabierto [start, end) — ACCOUNTING.md §1.
-        let periodExpenses = expenses.filter { $0.date >= interval.start && $0.date < interval.end }
-        let periodIncomes = incomes.filter { $0.date >= interval.start && $0.date < interval.end }
+        // Intervalo semiabierto [start, end) — ACCOUNTING.md §1. Los traslados
+        // entre tus cuentas no entran: ni gasto, ni ingreso, ni categoría
+        // (ver `TransferDetector`).
+        let periodExpenses = expenses.filter { !$0.isTransfer && $0.date >= interval.start && $0.date < interval.end }
+        let periodIncomes = incomes.filter { !$0.isTransfer && $0.date >= interval.start && $0.date < interval.end }
 
         let cal = Period.calendar
 
@@ -358,8 +370,13 @@ enum Accounting {
     /// costó" y sirve para cualquier gasto; `outstanding` es "cuánto me deben"
     /// y sólo tiene sentido en uno marcado por cobrar. Se dejan separadas para
     /// que cambiar una no arrastre a la otra sin querer.
+    ///
+    /// Un traslado cuesta cero: el dinero sigue siendo tuyo. Así lo excluye
+    /// cualquier suma que pase por aquí —límites, etiquetas, detalle de
+    /// categoría—, no sólo `totals`.
     static func netCost(of expense: ExpenseSnapshot) -> Double {
-        Money.clampedToZero(Money.subtract(expense.amount, expense.paymentsInOwnCurrency))
+        guard !expense.isTransfer else { return 0 }
+        return Money.clampedToZero(Money.subtract(expense.amount, expense.paymentsInOwnCurrency))
     }
 
     static func outstanding(of expense: ExpenseSnapshot) -> Double {

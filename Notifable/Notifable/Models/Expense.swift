@@ -31,6 +31,27 @@ final class Expense {
     var debtSettled: Bool = false
     var cardLastDigits: String?
 
+    /// El parser que lo leyó (`BankEmailParser.bankName`): "BBVA", "Yape"…
+    /// Con `cardLastDigits` define de qué cuenta salió (`AccountResolver`).
+    /// `nil` en lo anotado a mano y en lo importado antes de guardarlo; para
+    /// ésos el origen se deduce del prefijo del comercio.
+    var sourceBank: String?
+    /// La billetera o banco que recibió un Plin/Yape, cuando el correo lo
+    /// dice ("Destino: Yape"). Sólo para dibujar el traslado «BBVA → Yape»;
+    /// que sea traslado lo decide el destinatario, no esto.
+    var destinationWallet: String?
+    /// Los últimos dígitos del celular de quien recibió un Plin/Yape
+    /// ("Celular: •7209"). Se guarda junto al nombre: dos personas pueden
+    /// llamarse igual, y el nombre a veces llega recortado.
+    var payeePhone: String?
+    /// "Débito" o "Crédito", cuando el correo lo dice junto a los dígitos. Da
+    /// nombre a dos tarjetas del mismo banco ("BBVA Débito", "BBVA Crédito").
+    var cardKind: String?
+    /// Va a una cuenta tuya (`TransferDetector`): no cuenta como gasto. Se
+    /// recalcula desde `AccountBook`, así que no hace falta anotarlo en
+    /// `ExpenseEditStore` para que sobreviva a releer el correo.
+    var isTransfer: Bool = false
+
     /// Soles por 1 USD el día del movimiento.
     ///
     /// Sin esto, `ExchangeRateService.usdToPenRate` —un valor vivo— se aplicaba a

@@ -11,6 +11,8 @@ struct BBVAParser: BankEmailParser {
     }
     
     func parse(cleanText: String) -> Expense? {
+        if let expense = parseATMWithdrawal(cleanText) { return expense }
+        if let expense = parseCardlessWithdrawal(cleanText) { return expense }
         if let expense = parsePlinSent(cleanText) { return expense }
         if let expense = parseBBVATransfer(cleanText) { return expense }
         if let expense = parseBBVAAutomaticPayment(cleanText) { return expense }
@@ -346,5 +348,70 @@ struct BBVAParser: BankEmailParser {
         }
 
         return Expense(amount: amount, merchant: merchant, date: expenseDate, category: "Sin Clasificar", currency: currency, cardLastDigits: cardLastDigits)
+    }
+
+    // MARK: - Retiros de efectivo
+
+    /// Un retiro no es un gasto: el dinero pasa de BBVA a tu efectivo, y lo
+    /// que gastes en efectivo es lo que cuenta. El comercio lleva el prefijo
+    /// `AccountResolver.withdrawalPrefix` y `TransferDetector` lo marca siempre
+    /// como traslado BBVA → Efectivo.
+
+    /// «Constancia de Retiro en ATM» (formato antiguo): «Retiro de efectivo»,
+    /// «Monto de retiro S/ 70.00», «Número de tarjeta · 8156». Trae también
+    /// «Número de cuenta · 2368», pero la que cuenta es la tarjeta: es el
+    /// número con el que llegan sus otros movimientos.
+    private func parseATMWithdrawal(_ cleanText: String) -> Expense? {
+        guard cleanText.contains("Retiro de efectivo"),
+              let (currency, amount) = Self.money(after: "Monto de retiro", in: cleanText) else { return nil }
+        let date = Self.operationDate(in: cleanText) ?? Date()
+        let card = Self.capture("N[uú]mero de tarjeta\\s*[·•*]?\\s*([0-9]{4})", in: cleanText)
+        return Expense(amount: amount, merchant: AccountResolver.withdrawalPrefix + "Cajero", date: date,
+                       category: "Sin Clasificar", currency: currency, cardLastDigits: card)
+    }
+
+    /// «Constancia Retiro sin tarjeta»: llega al **generar** la clave («Estado:
+    /// Por cobrar»), no al cobrarla. Se registra con esa fecha; si caduca sin
+    /// cobrarse, se borra a mano. «Cuenta de Origen: Cuenta Digital *2368».
+    private func parseCardlessWithdrawal(_ cleanText: String) -> Expense? {
+        guard let (currency, amount) = Self.money(after: "retiro sin tarjeta de", in: cleanText) else { return nil }
+        let date = Self.operationDate(in: cleanText) ?? Date()
+        let account = Self.capture("Cuenta de Origen:?\\s*[^0-9]{0,30}?\\*?\\s*([0-9]{4})", in: cleanText)
+        return Expense(amount: amount, merchant: AccountResolver.withdrawalPrefix + "Sin tarjeta", date: date,
+                       category: "Sin Clasificar", currency: currency, cardLastDigits: account)
+    }
+
+    /// "S/ 200", "S/  70.00", "US$ 50.00" justo después de `label`.
+    private static func money(after label: String, in text: String) -> (currency: String, amount: Double)? {
+        let pattern = NSRegularExpression.escapedPattern(for: label) + "\\s*(S/\\.?|US\\$|\\$)\\s*([0-9][0-9.,]*)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)),
+              let curRange = Range(match.range(at: 1), in: text),
+              let amtRange = Range(match.range(at: 2), in: text),
+              let amount = Double(String(text[amtRange]).replacingOccurrences(of: ",", with: "")) else { return nil }
+        return (text[curRange].contains("$") ? "USD" : "PEN", amount)
+    }
+
+    /// «Fecha y hora de la operación(:) 16 de setiembre de 2026 21:14» o
+    /// «25 de julio, 2026 07:57:29». Los segundos, si vienen, se ignoran.
+    private static func operationDate(in text: String) -> Date? {
+        let pattern = "Fecha y hora de la operaci[oó]n:?\\s*([0-9]{1,2})\\s+de\\s+([a-zA-Z]+),?\\s+(?:de\\s+)?([0-9]{4})\\s+([0-9]{2}:[0-9]{2})"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: []),
+              let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)),
+              let day = Range(match.range(at: 1), in: text), let monthName = Range(match.range(at: 2), in: text),
+              let year = Range(match.range(at: 3), in: text), let time = Range(match.range(at: 4), in: text) else { return nil }
+        let months = ["enero": "01", "febrero": "02", "marzo": "03", "abril": "04", "mayo": "05", "junio": "06", "julio": "07", "agosto": "08", "septiembre": "09", "setiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"]
+        guard let month = months[text[monthName].lowercased()] else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "dd MM yyyy HH:mm"
+        return formatter.date(from: "\(text[day]) \(month) \(text[year]) \(text[time])")
+    }
+
+    private static func capture(_ pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)),
+              let range = Range(match.range(at: 1), in: text) else { return nil }
+        return String(text[range])
     }
 }

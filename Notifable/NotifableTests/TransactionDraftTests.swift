@@ -61,21 +61,31 @@ struct TransactionDraftTests {
 
     // MARK: - 7. Validación
 
-    @Test("7. Sin monto y sin comercio el botón dice qué falta")
+    @Test("7. Sin monto o sin categoría el botón dice qué falta; el título es opcional")
     func validacionExplica() {
         var draft = TransactionDraft(type: .gasto)
+        draft.category = ""
         #expect(draft.validation == .blocked("Escribe un monto"))
 
         draft.amountText = "50"
-        #expect(draft.validation == .blocked("Falta el nombre del comercio"))
+        #expect(draft.validation == .blocked("Elige una categoría"))
 
-        draft.merchant = "   "
-        #expect(draft.validation == .blocked("Falta el nombre del comercio"),
-                "un nombre de sólo espacios no cuenta")
-
-        draft.merchant = "Metro"
-        #expect(draft.validation == .ready)
+        draft.category = "Comida"
+        #expect(draft.validation == .ready, "sin título también se puede guardar")
         #expect(draft.actionTitle.contains("Añadir gasto"))
+    }
+
+    @Test("7b. Sin título, el gasto se llama como su categoría y guarda su fuente")
+    func sinTitulo() throws {
+        var draft = TransactionDraft(type: .gasto)
+        draft.amountText = "12.50"
+        draft.category = "Comida"
+        draft.merchant = "   "
+        draft.source = "Yape"
+        let expense = try #require(draft.makeExpense())
+        #expect(expense.merchant == "Comida")
+        #expect(expense.sourceBank == "Yape")
+        #expect(expense.originKey == "o:yape")
     }
 
     @Test("Un monto absurdo o una fecha futura se marcan como error")

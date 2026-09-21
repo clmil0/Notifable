@@ -71,6 +71,10 @@ enum MovementStyle {
         if let card = expense.cardLastDigits, !card.isEmpty { return "•••• " + card }
         return nil
     }
+
+    /// El subtítulo de un traslado donde se lo vea suelto (Hoy, una búsqueda):
+    /// explica por qué no suma.
+    static let transferNote = "Traslado entre tus cuentas"
 }
 
 /// Una fila de la lista de Hoy: ícono, comercio, `Categoría · Origen`, monto.
@@ -89,8 +93,9 @@ struct MovementRow: View {
     private var palette: Palette { Palette(scheme) }
     private var accent: AppThemeColor { .current }
 
+    /// Un traslado no se clasifica: no es gasto.
     private var isUnclassified: Bool {
-        expense.category == Accounting.unclassified
+        expense.category == Accounting.unclassified && !expense.isTransfer
     }
 
     /// Un gasto marcado «por cobrar», o con abonos ya recibidos. La fila no
@@ -149,7 +154,7 @@ struct MovementRow: View {
 
             Text(amountText)
                 .font(.system(size: 16.5, weight: .semibold))
-                .foregroundStyle(palette.label)
+                .foregroundStyle(expense.isTransfer ? palette.secondaryLabel : palette.label)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -262,6 +267,7 @@ struct MovementRow: View {
     }
 
     private var subtitle: String {
+        if expense.isTransfer { return MovementStyle.transferNote }
         if let source = MovementStyle.source(for: expense) {
             return expense.category + " · " + source
         }
@@ -274,7 +280,8 @@ struct MovementRow: View {
         let paid = Accounting.paid(of: expense)
         let outstanding = Accounting.outstanding(of: expense)
         let displayed = (expense.isDebt || Money.cents(paid) > 0) ? outstanding : expense.amount
-        return "–" + Money.format(displayed, currency: expense.currency)
+        // Un traslado no resta: el dinero sigue siendo tuyo.
+        return (expense.isTransfer ? "" : "–") + Money.format(displayed, currency: expense.currency)
     }
 }
 
@@ -302,7 +309,7 @@ struct IncomeRow: View {
                     .foregroundStyle(palette.label)
                     .lineLimit(1)
 
-                Text(income.source)
+                Text(income.isTransfer ? MovementStyle.transferNote : income.source)
                     .font(.system(size: 12.5))
                     .foregroundStyle(palette.secondaryLabel)
                     .lineLimit(1)
@@ -310,9 +317,10 @@ struct IncomeRow: View {
 
             Spacer(minLength: 8)
 
-            Text("+" + Money.format(income.amount, currency: income.currency))
+            // Un traslado no es ingreso: sin «+» y sin el color de ingreso.
+            Text((income.isTransfer ? "" : "+") + Money.format(income.amount, currency: income.currency))
                 .font(.system(size: 16.5, weight: .semibold))
-                .foregroundStyle(accent.incomeColor(scheme))
+                .foregroundStyle(income.isTransfer ? palette.secondaryLabel : accent.incomeColor(scheme))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)

@@ -755,7 +755,7 @@ final class ConfigBackupManager {
                     isSubscription: e.isSubscription, isDebt: e.isDebt,
                     debtSettled: e.debtSettled ? true : nil,
                     tags: e.tags.isEmpty ? nil : e.tags,
-                    cardLastDigits: e.cardLastDigits, fxRate: e.fxRateAtCapture,
+                    cardLastDigits: e.cardLastDigits, source: e.sourceBank, fxRate: e.fxRateAtCapture,
                     debtMarkKey: nil, isFinalDebtPayment: false, createdAt: e.date))
             }
             // Los gastos que vienen del correo no se suben: lo que viaja de
@@ -859,6 +859,9 @@ final class ConfigBackupManager {
         if let preferences = payload.preferences {
             AppPreferences.apply(preferences)
             applyDecisionExtras(preferences)
+            // «Tus cuentas» acaba de escribirse en `UserDefaults`; el detector
+            // de traslados corre al volver a abrir la app (`ContentView`).
+            AccountBook.shared.reload()
         }
 
         // Amigos: el apodo, el color y lo que le comparto a cada uno acaban de
@@ -954,6 +957,7 @@ final class ConfigBackupManager {
                             emailID: nil, isDebt: t.isDebt,
                             cardLastDigits: t.cardLastDigits, fxRateAtCapture: t.fxRate)
             e.id = t.id
+            e.sourceBank = t.source
             e.debtSettled = t.debtSettled ?? false
             // El catálogo se restaura antes (viaja en `preferences`), pero se
             // pasa por `use` igual: un respaldo de otro teléfono puede traer
@@ -1231,6 +1235,9 @@ struct ManualTransactionBackup: Codable {
     /// aplica: las etiquetas son de gastos.
     var tags: [String]? = nil
     var cardLastDigits: String?
+    /// Gasto: la fuente elegida al anotarlo (Efectivo, Yape…). Opcional: los
+    /// respaldos anteriores no la traen.
+    var source: String? = nil
     @RateCoded var fxRate: Double?
     var debtMarkKey: String?
     var isFinalDebtPayment: Bool

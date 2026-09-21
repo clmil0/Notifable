@@ -41,7 +41,6 @@ struct ContentView: View {
     /// Un enlace que llegó con la app bloqueada o con el splash: se aplica al
     /// desbloquear, nunca por encima de la pantalla de bloqueo.
     @State private var pendingLink: AppDeepLink?
-    @State private var showAddPicker = false
     @State private var showSplash = true
     @StateObject private var appLock = AppLock.shared
     @State private var tabWidth: CGFloat = 0
@@ -67,6 +66,10 @@ struct ContentView: View {
 
         RecurringEngine.applyAutomatic(rules: recurringRules, expenses: expenses, in: modelContext)
         try? modelContext.save()
+
+        // También una vez por sesión: `isTransfer` al día con «Tus cuentas»
+        // aunque éstas hayan llegado de un respaldo o de otra versión.
+        TransferDetector.apply(in: modelContext)
 
         let awaiting = RecurringEngine.pending(rules: recurringRules, expenses: expenses)
             .filter(\.isAwaiting)
@@ -98,7 +101,6 @@ struct ContentView: View {
     private func applyPendingLinkIfReady() {
         guard let link = pendingLink, !appLock.isLocked, !showSplash else { return }
         pendingLink = nil
-        showAddPicker = false
         showSettings = false
 
         switch link {
@@ -178,25 +180,10 @@ struct ContentView: View {
                 }
                 .ignoresSafeArea(edges: .bottom)
 
-                if showAddPicker {
-                    AddMenu(onPick: { type in
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                    showAddPicker = false
-                                }
-                                presentAdd(type, source: nil, quickID: nil)
-                            },
-                            onDismiss: {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
-                                    showAddPicker = false
-                                }
-                            })
-                }
-
                 VStack(spacing: 0) {
                     Spacer(minLength: 0)
                     ShellBottomBar(selection: tabSelection,
                                    progress: scrollProgress,
-                                   isAddMenuOpen: showAddPicker,
                                    isDictating: showsDictation,
                                    badge: { tab in
                                        let requests = FriendsManager.shared.incomingRequests.count
@@ -204,11 +191,9 @@ struct ContentView: View {
                                        return tab == .social && requests > 0 ? requests : nil
                                    },
                                    onReselect: reselect,
-                                   onAdd: {
-                                       withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                           showAddPicker.toggle()
-                                       }
-                                   },
+                                   // Directo al formulario, en ingreso; a gasto
+                                   // se cambia dentro, en la cápsula del medio.
+                                   onAdd: { presentAdd(.ingreso, source: nil, quickID: nil) },
                                    onDictate: { showsDictation = true })
                         .padding(.bottom, 4)
                 }
@@ -228,7 +213,6 @@ struct ContentView: View {
                 showSettings = false
                 selectedTransactionType = nil
                 showsDictation = false
-                showAddPicker = false
             }
             .gmailLinkFlow(isEnabled: !showSettings)
             // Las solicitudes de amistad pintan un número en la pestaña

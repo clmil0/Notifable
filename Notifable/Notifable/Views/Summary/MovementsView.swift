@@ -8,6 +8,12 @@ import SwiftData
 /// distinto; el mismo texto daba dos resultados y ninguno de los dos era «todo
 /// lo que tengo».
 ///
+/// Arriba, el carrusel de **tus cuentas** (`1b`): filtra la lista por la tarjeta
+/// o billetera de la que salió —o a la que llegó— cada movimiento. «Editar»
+/// abre «Tus cuentas» (`1c`), donde se marca qué es tuyo; lo que va de una
+/// cuenta tuya a otra sale de la lista y de los totales, y se ve aparte en
+/// TRASLADOS (`TransferDetector`).
+///
 /// «Por confirmar» va arriba del todo porque afecta a las cifras del mes: son
 /// gastos recurrentes que la app ya detectó pero que no cuentan hasta que los
 /// aceptas, y dejarlos al final sería esconder por qué un total no cuadra.
@@ -21,6 +27,7 @@ struct MovementsView: View {
     @Query(sort: \Income.date, order: .reverse) private var incomes: [Income]
     @Query private var recurringRules: [RecurringExpense]
     @StateObject private var rates = ExchangeRateService.shared
+    @StateObject private var accountBook = AccountBook.shared
 
     @State private var searchText = ""
     @State private var kind: Kind = .gastos
@@ -29,6 +36,9 @@ struct MovementsView: View {
     @State private var selectedIncome: Income?
     @State private var expenseToCategorize: Expense?
     @State private var showsPendingConfirmation = false
+    /// La cuenta del carrusel; `nil` es «Todas».
+    @State private var selectedAccount: String?
+    @State private var showsAccounts = false
     @FocusState private var searchFocused: Bool
 
     /// Gastos, ingresos y —sólo si hay— lo que está por cobrar. Lo sin
@@ -38,7 +48,7 @@ struct MovementsView: View {
 
     /// Gastos marcados por cobrar a los que aún les falta algo.
     private var debts: [Expense] {
-        expenses.filter { $0.isDebt && Money.cents(Accounting.outstanding(of: $0)) > 0 }
+        expenses.filter { $0.isDebt && !$0.isTransfer && Money.cents(Accounting.outstanding(of: $0)) > 0 }
     }
 
     /// Se cargan de 20 en 20, y con botón: la carga automática al llegar al
@@ -63,17 +73,117 @@ struct MovementsView: View {
     ///   era volver a ordenar el historial entero en cada pasada del cuerpo —y
     ///   el cuerpo lo leía dos veces, una para la lista y otra para saber si
     ///   quedaban páginas.
-    private var items: [TransactionItem] {
-        let source: [TransactionItem]
+    ///
+    /// Los traslados no están: tienen su propia sección arriba.
+    private var source: [TransactionItem] {
         switch kind {
-        case .ingresos:  source = incomes.map { TransactionItem.income($0) }
-        case .porCobrar: source = debts.map { TransactionItem.expense($0) }
-        case .gastos:    source = expenses.map { TransactionItem.expense($0) }
+        case .ingresos:  return incomes.filter { !$0.isTransfer }.map { TransactionItem.income($0) }
+        case .porCobrar: return debts.map { TransactionItem.expense($0) }
+        case .gastos:    return expenses.filter { !$0.isTransfer }.map { TransactionItem.expense($0) }
+        }
+    }
+
+    private func items(from source: [TransactionItem], catalog: AccountCatalog) -> [TransactionItem] {
+        var result = source
+        if let selectedAccount {
+            result = result.filter { accountKeys(of: $0, catalog: catalog).contains(selectedAccount) }
+        }
+        guard !searchText.isEmpty else { return result }
+        return result.filter { $0.matches(searchText) }
+    }
+
+    // MARK: - Cuentas
+
+    /// Las cuentas que toca un movimiento: la de origen (ya unida a su
+    /// tarjeta, ver `AccountCatalog.canonical`) y, si va a una persona, la
+    /// del destinatario.
+    private func accountKeys(of item: TransactionItem, catalog: AccountCatalog) -> [String] {
+        switch item {
+        case .expense(let e):
+            return (catalog.resolve(e.originKey, at: e.date).map { [$0] } ?? []) + (e.payeeKey.map { [$0] } ?? [])
+        case .income(let i):
+            return (catalog.resolve(i.originKey, at: i.date).map { [$0] } ?? []) + (i.senderKey.map { [$0] } ?? [])
+        }
+    }
+
+    private func badge(_ key: String?, at date: Date = .distantPast, catalog: AccountCatalog) -> AccountBadge? {
+        guard let key = catalog.resolve(key, at: date), let account = catalog.accounts[key] else { return nil }
+        return AccountBadge(name: accountBook.preferences.name(for: account),
+                            institution: account.institution ?? account.via)
+    }
+
+    /// Los traslados a mostrar: los del mes, o todos los que coincidan si se
+    /// está buscando. Un gasto y su ingreso gemelo (mismo monto, minutos de
+    /// diferencia) son una sola fila «BBVA → Yape».
+    private func transferEntries(catalog: AccountCatalog) -> [TransferEntry] {
+        let month = Period(granularity: .mes, reference: Date()).interval
+        func inScope(_ item: TransactionItem) -> Bool {
+            searchText.isEmpty
+                ? item.date >= month.start && item.date < month.end
+                : item.matches(searchText)
+        }
+        let outgoing = expenses.filter { $0.isTransfer && inScope(.expense($0)) }
+        let incoming = incomes.filter { $0.isTransfer && inScope(.income($0)) }
+
+        let pairs = TransferDetector.pairs(
+            outgoing: outgoing.map { .init(id: $0.id, cents: Money.cents($0.amount), currency: $0.currency, date: $0.date) },
+            incoming: incoming.map { .init(id: $0.id, cents: Money.cents($0.amount), currency: $0.currency, date: $0.date) })
+        let incomesByID = Dictionary(uniqueKeysWithValues: incoming.map { ($0.id, $0) })
+        let paired = Set(pairs.values)
+
+        var entries: [TransferEntry] = outgoing.map { expense in
+            let from = badge(expense.originKey, at: expense.date, catalog: catalog)
+                ?? AccountBadge(name: "Tu cuenta", institution: nil)
+            let twin = pairs[expense.id].flatMap { incomesByID[$0] }
+            // El destino, de más a menos preciso: la cuenta donde entró el
+            // ingreso gemelo, la billetera que dijo el correo, el nombre
+            // que le diste al destinatario.
+            let wallet = expense.destinationWallet.flatMap(Institution.init(name:))
+            let payee = badge(expense.payeeKey, catalog: catalog)
+            let cash = AccountResolver.originKey(.efectivo)
+            // Un retiro va siempre a tu efectivo.
+            let to = expense.isCashWithdrawal
+                ? (badge(cash, catalog: catalog) ?? AccountBadge(name: "Efectivo", institution: .efectivo))
+                : badge(twin?.originKey, at: twin?.date ?? expense.date, catalog: catalog)
+                    ?? payee.map { AccountBadge(name: $0.name, institution: wallet ?? $0.institution) }
+                    ?? AccountBadge(name: wallet?.name ?? "Tu cuenta", institution: wallet)
+            var keys: Set<String> = []
+            if let origin = catalog.resolve(expense.originKey, at: expense.date) { keys.insert(origin) }
+            if expense.isCashWithdrawal { keys.insert(cash) }
+            if let payee = expense.payeeKey { keys.insert(payee) }
+            if let twin, let twinOrigin = catalog.resolve(twin.originKey, at: twin.date) { keys.insert(twinOrigin) }
+            return TransferEntry(id: expense.id, from: from, to: to, amount: expense.amount,
+                                 currency: expense.currency, date: expense.date,
+                                 expense: expense, income: twin, keys: keys)
         }
 
-        guard !searchText.isEmpty else { return source }
+        for income in incoming where !paired.contains(income.id) {
+            let from = badge(income.senderKey, catalog: catalog)
+                ?? AccountBadge(name: income.senderName ?? "Tu cuenta", institution: nil)
+            let to = badge(income.originKey, at: income.date, catalog: catalog)
+                ?? AccountBadge(name: income.source, institution: Institution(name: income.source))
+            var keys: Set<String> = []
+            if let origin = catalog.resolve(income.originKey, at: income.date) { keys.insert(origin) }
+            if let sender = income.senderKey { keys.insert(sender) }
+            entries.append(TransferEntry(id: income.id, from: from, to: to, amount: income.amount,
+                                         currency: income.currency, date: income.date,
+                                         expense: nil, income: income, keys: keys))
+        }
 
-        return source.filter { $0.matches(searchText) }
+        if let selectedAccount {
+            entries = entries.filter { $0.keys.contains(selectedAccount) }
+        }
+        return entries.sorted { $0.date > $1.date }
+    }
+
+    /// Movimientos de la lista actual por cuenta, para las tarjetas del
+    /// carrusel.
+    private func counts(in source: [TransactionItem], catalog: AccountCatalog) -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for item in source {
+            for key in Set(accountKeys(of: item, catalog: catalog)) { counts[key, default: 0] += 1 }
+        }
+        return counts
     }
 
     /// Agrupados por día, igual que Hoy: la lista no cambia de gramática al
@@ -90,15 +200,42 @@ struct MovementsView: View {
     }
 
     var body: some View {
-        let items = self.items
+        let catalog = AccountCatalog(expenses: expenses, incomes: incomes)
+        let carousel = accountBook.preferences.carousel(from: catalog)
+        let source = self.source
+        let items = self.items(from: source, catalog: catalog)
         let visible = Array(items.prefix(visibleCount))
         let buckets = groups(from: visible)
         let pending = self.pendingOccurrences
         let hasDebts = !debts.isEmpty
+        let transfers = kind == .porCobrar ? [] : transferEntries(catalog: catalog)
 
         TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 0) {
                 ShellTitle(title: "Movimientos")
+
+                // Con alguna cuenta detectada, aunque ninguna esté marcada
+                // como tuya: «Editar» es la puerta para marcarlas.
+                if !catalog.accounts.isEmpty {
+                    AccountCarousel(accounts: carousel,
+                                    name: { accountBook.preferences.name(for: $0) },
+                                    counts: counts(in: source, catalog: catalog),
+                                    total: source.count,
+                                    selection: $selectedAccount,
+                                    onEdit: { showsAccounts = true })
+                        .padding(.horizontal, -16)
+                        .padding(.bottom, 14)
+                        // Una cuenta que dejó de ser tuya ya no está en el
+                        // carrusel: el filtro vuelve a «Todas».
+                        .onChange(of: carousel.map(\.key)) { _, keys in
+                            if let selectedAccount, !keys.contains(selectedAccount) { self.selectedAccount = nil }
+                        }
+                        .sheet(isPresented: $showsAccounts) {
+                            AccountsSheet(catalog: catalog, preferences: accountBook.preferences)
+                                .presentationDragIndicator(.visible)
+                                .presentationCornerRadius(28)
+                        }
+                }
 
                 searchField
                     .padding(.bottom, 10)
@@ -116,13 +253,19 @@ struct MovementsView: View {
                 }
                 .padding(.bottom, 18)
 
-                if !pending.isEmpty, kind == .gastos {
+                // Lo programado no tiene cuenta todavía: sólo en «Todas».
+                if !pending.isEmpty, kind == .gastos, selectedAccount == nil {
                     pendingConfirmation(pending)
                         .padding(.bottom, 20)
                 }
 
+                if !transfers.isEmpty {
+                    transfersSection(transfers)
+                        .padding(.bottom, 20)
+                }
+
                 if buckets.isEmpty {
-                    emptyState
+                    if transfers.isEmpty { emptyState }
                 } else {
                     ForEach(buckets) { bucket in
                         dayBlock(bucket)
@@ -145,6 +288,7 @@ struct MovementsView: View {
         }
         .onChange(of: searchText) { _, _ in visibleCount = Self.pageSize }
         .onChange(of: kind) { _, _ in visibleCount = Self.pageSize }
+        .onChange(of: selectedAccount) { _, _ in visibleCount = Self.pageSize }
         // Al cobrar el último pendiente la pestaña desaparece: sin esto la
         // lista se quedaba vacía y sin forma de salir.
         .onChange(of: debts.isEmpty) { _, empty in
@@ -315,6 +459,33 @@ struct MovementsView: View {
         try? modelContext.save()
     }
 
+    // MARK: - Traslados
+
+    private func transfersSection(_ entries: [TransferEntry]) -> some View {
+        VStack(spacing: 8) {
+            ShellSectionHeader(title: "Traslados",
+                               trailing: searchText.isEmpty ? "\(entries.count) este mes" : "\(entries.count)")
+
+            MovementCard {
+                ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
+                    TransferRowView(entry: entry) {
+                        if let expense = entry.expense { selectedExpense = expense }
+                        else if let income = entry.income { selectedIncome = income }
+                    }
+                    if index < entries.count - 1 { MovementSeparator() }
+                }
+            }
+
+            Text(kind == .ingresos ? "Entre tus cuentas. No cuentan como ingreso del mes."
+                                   : "Entre tus cuentas. No cuentan como gasto del mes.")
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondaryLabel)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 6)
+                .padding(.top, 2)
+        }
+    }
+
     // MARK: - Lista
 
     private func dayBlock(_ bucket: DayBucket) -> some View {
@@ -400,6 +571,10 @@ struct MovementsView: View {
             ShellEmptyState(icon: "magnifyingglass",
                             title: "Sin resultados para «" + searchText + "»",
                             message: MovementSearch.emptyMessage(for: searchText))
+        } else if selectedAccount != nil {
+            ShellEmptyState(icon: "tray",
+                            title: "Nada en esta cuenta",
+                            message: "No hay movimientos de esta cuenta en esta lista.")
         } else {
             ShellEmptyState(icon: "tray",
                             title: "Nada por aquí",

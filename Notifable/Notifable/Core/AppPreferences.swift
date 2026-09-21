@@ -72,6 +72,9 @@ enum AppPreferences {
         // viajan con el gasto (`ManualTransactionBackup`) o con su edición
         // (`ExpenseEdit`); esto es sólo la lista y su color.
         .init(key: TagCatalog.key, kind: .string, note: "Etiquetas creadas y su color"),
+        // Movimientos › Tus cuentas: cuáles son tuyas (lo que va a ellas es
+        // traslado), cómo se llaman y su orden en el carrusel.
+        .init(key: AccountBook.key, kind: .string, note: "Tus cuentas: cuáles son tuyas, nombres y orden"),
 
         // Amigos. La sesión y los ids viven en el servidor; lo de aquí es lo
         // que sólo existe en este teléfono: cómo me presento y cómo llamo yo a

@@ -648,7 +648,7 @@ private struct SettingsCounts {
             predicate: #Predicate { $0.date >= start && $0.date < end }))) ?? 0
 
         let unclassified = Accounting.unclassified
-        var pending = FetchDescriptor<Expense>(predicate: #Predicate { $0.category == unclassified })
+        var pending = FetchDescriptor<Expense>(predicate: #Predicate { $0.category == unclassified && !$0.isTransfer })
         pending.propertiesToFetch = [\.merchant]
         let merchants = ((try? context.fetch(pending)) ?? []).map(\.merchant)
         unclassifiedMerchants = Set(merchants).count
