@@ -242,7 +242,7 @@ struct WidgetDerived: Equatable {
     static let calendar: Calendar = {
         var c = Calendar(identifier: .gregorian)
         c.firstWeekday = 2
-        c.locale = Locale(identifier: "es_PE")
+        c.locale = Locale(identifier: "es_ES")
         c.timeZone = .current
         return c
     }()

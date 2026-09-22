@@ -169,7 +169,7 @@ struct ReversalResolveView: View {
 
     private func stamp(_ date: Date) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM HH:mm"
         return f.string(from: date).replacingOccurrences(of: ".", with: "")
     }

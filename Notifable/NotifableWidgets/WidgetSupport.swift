@@ -93,7 +93,7 @@ enum WidgetFormat {
 
     static func monthName(_ date: Date, abbreviated: Bool = false) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.calendar = WidgetDerived.calendar
         f.dateFormat = abbreviated ? "MMM" : "MMMM"
         let name = f.string(from: date).replacingOccurrences(of: ".", with: "")
@@ -114,7 +114,7 @@ enum WidgetFormat {
         case 1: return "mañana"
         default:
             let f = DateFormatter()
-            f.locale = Locale(identifier: "es_PE")
+            f.locale = Locale(identifier: "es_ES")
             f.dateFormat = "EEE d"
             return f.string(from: date).replacingOccurrences(of: ".", with: "")
         }

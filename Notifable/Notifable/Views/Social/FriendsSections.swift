@@ -216,7 +216,7 @@ struct FriendsActionsSection: View {
 
     private func reminderDetail(_ reminder: PaymentReminder) -> String {
         guard let day = reminder.occurredOn else { return reminder.merchant }
-        return reminder.merchant + " · " + day.formatted(.dateTime.day().month(.abbreviated))
+        return reminder.merchant + " · " + day.formatted(.dateTime.day().month(.abbreviated).locale(Locale(identifier: "es_ES")))
     }
 
     // MARK: - Solicitudes (2c)

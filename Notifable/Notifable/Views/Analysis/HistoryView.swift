@@ -1,7 +1,8 @@
 import SwiftUI
 import SwiftData
 
-/// Análisis › Historial (`2f`): **el único sitio de la app con periodo**.
+/// Análisis (`1b`), la hermana de Movimientos: **el único sitio de la app con
+/// periodo**.
 ///
 /// El selector Día · Semana · Mes · Año que antes vivía arriba de Resumen, de
 /// Categorías y de Ritmo —tres barras distintas para un mismo ajuste global—
@@ -57,28 +58,41 @@ struct HistoryView: View {
         return result.reversed()
     }
 
-    private func totals(for period: Period) -> PeriodTotals {
-        Accounting.totals(expenses: expenses, incomes: incomes, period: period, usdToPen: rate)
+    /// Una sola conversión a snapshots por dibujado: la pantalla pide nueve
+    /// totales —siete barras más el periodo y el anterior— y cada uno sobre
+    /// los modelos volvía a convertir el historial entero.
+    private func totals(for period: Period,
+                        _ snapshots: (expenses: [ExpenseSnapshot], incomes: [IncomeSnapshot])) -> PeriodTotals {
+        Accounting.totals(expenses: snapshots.expenses, incomes: snapshots.incomes, period: period, usdToPen: rate)
     }
 
     var body: some View {
+        let snapshots = (expenses: expenses.map(\.accountingSnapshot),
+                         incomes: incomes.map(\.accountingSnapshot))
         let periods = self.periods
-        let series = periods.map { (period: $0, total: totals(for: $0).spent) }
+        let series = periods.map { (period: $0, total: totals(for: $0, snapshots).spent) }
         let current = periods.last ?? Period(granularity: granularity, reference: Date())
-        let currentTotals = totals(for: current)
-        let previousTotals = totals(for: current.previous)
+        let currentTotals = totals(for: current, snapshots)
+        let previousTotals = totals(for: current.previous, snapshots)
         let rhythm = Rhythm(period: current, current: currentTotals, previous: previousTotals)
 
         TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
-            VStack(spacing: 18) {
-                ShellSegment(items: Self.selectable, selection: $granularity) { $0.rawValue }
+            VStack(spacing: 0) {
+                ShellTitle(title: "Análisis", subtitle: windowSubtitle)
+
+                ShellSegment(items: Self.selectable, selection: $granularity,
+                             tint: palette.expense) { $0.rawValue }
+                    .padding(.bottom, 24)
 
                 chartCard(series: series)
+                    .padding(.bottom, 26)
 
                 headline(period: current, totals: currentTotals, rhythm: rhythm, series: series)
+                    .padding(.bottom, 22)
 
                 if !rhythm.categoryChanges.isEmpty {
                     changesSection(rhythm: rhythm, previous: current.previous)
+                        .padding(.bottom, 22)
                 }
 
                 let subscriptions = detectedSubscriptions(in: current)
@@ -86,9 +100,9 @@ struct HistoryView: View {
                     subscriptionsSection(subscriptions)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ShellMetrics.sideInset)
             .padding(.top, ShellMetrics.contentTopInset)
-            .padding(.bottom, ShellMetrics.contentBottomInset)
+            .padding(.bottom, 40)
         }
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             geometry.contentOffset.y + geometry.contentInsets.top
@@ -100,66 +114,81 @@ struct HistoryView: View {
 
     // MARK: - Gráfico
 
+    /// «Los últimos siete meses»: cuánto abarcan las barras.
+    private var windowSubtitle: String {
+        let words = [5: "cinco", 7: "siete", 10: "diez", 14: "catorce"]
+        let count = words[bucketCount] ?? "\(bucketCount)"
+        switch granularity {
+        case .dia:    return "Los últimos \(count) días"
+        case .semana: return "Las últimas \(count) semanas"
+        case .mes:    return "Los últimos \(count) meses"
+        case .anio:   return "Los últimos \(count) años"
+        case .rango:  return "El rango elegido"
+        }
+    }
+
+    /// Suelto sobre el fondo (`1b`): la barra de la derecha, el periodo que se
+    /// mira, en el naranja del gasto; las demás, en gris.
     private func chartCard(series: [(period: Period, total: Double)]) -> some View {
         let maximum = series.map(\.total).max() ?? 0
 
-        return ShellCard(padding: 16) {
-            VStack(spacing: 10) {
-                HStack(alignment: .bottom, spacing: 6) {
-                    ForEach(Array(series.enumerated()), id: \.offset) { index, item in
-                        let isCurrent = index == series.count - 1
-                        let fraction = maximum > 0 ? item.total / maximum : 0
+        return VStack(spacing: 10) {
+            HStack(alignment: .bottom, spacing: 8) {
+                ForEach(Array(series.enumerated()), id: \.offset) { index, item in
+                    let isCurrent = index == series.count - 1
+                    let fraction = maximum > 0 ? item.total / maximum : 0
 
-                        VStack(spacing: 6) {
-                            ZStack(alignment: .bottom) {
-                                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                    .fill(Color.clear)
-                                    .frame(height: 110)
+                    VStack(spacing: 8) {
+                        ZStack(alignment: .bottom) {
+                            Color.clear.frame(height: 118)
 
-                                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                    .fill(isCurrent ? accent.color : palette.track)
-                                    .frame(height: max(3, 110 * fraction))
-                            }
-
-                            Text(axisLabel(for: item.period))
-                                .font(.system(size: 10, weight: isCurrent ? .bold : .regular))
-                                .foregroundStyle(isCurrent ? accent.onSurface(scheme) : palette.tertiaryLabel)
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(isCurrent
+                                      ? AnyShapeStyle(LinearGradient(colors: [palette.expenseLight, palette.expense],
+                                                                     startPoint: .top, endPoint: .bottom))
+                                      : AnyShapeStyle(palette.track))
+                                .frame(height: max(4, 118 * fraction))
                         }
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            // Tocar una barra mueve la ventana hasta ella: el
-                            // pasado se navega tocando, no con flechas.
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                offset += (series.count - 1 - index)
-                            }
+
+                        Text(axisLabel(for: item.period))
+                            .font(.system(size: 11, weight: isCurrent ? .semibold : .regular))
+                            .foregroundStyle(isCurrent ? palette.expenseText : palette.secondaryLabel)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        // Tocar una barra mueve la ventana hasta ella: el
+                        // pasado se navega tocando, no con flechas.
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            offset += (series.count - 1 - index)
                         }
                     }
-                }
-
-                if offset > 0 {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.25)) { offset = 0 }
-                    } label: {
-                        Text("Volver a " + (granularity == .anio ? "este año" : "hoy"))
-                            .font(.system(size: 12.5, weight: .semibold))
-                            .foregroundStyle(accent.onSurface(scheme))
-                    }
-                    .buttonStyle(.plain)
                 }
             }
+
+            if offset > 0 {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.25)) { offset = 0 }
+                } label: {
+                    Text("Volver a " + (granularity == .anio ? "este año" : "hoy"))
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(accent.onSurface(scheme))
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .padding(.horizontal, 2)
     }
 
     private func axisLabel(for period: Period) -> String {
         let date = period.interval.start
         switch granularity {
         case .dia:
-            return date.formatted(.dateTime.day().locale(Locale(identifier: "es_PE")))
+            return date.formatted(.dateTime.day().locale(Locale(identifier: "es_ES")))
         case .semana:
-            return date.formatted(.dateTime.day().month(.abbreviated).locale(Locale(identifier: "es_PE")))
+            return date.formatted(.dateTime.day().month(.abbreviated).locale(Locale(identifier: "es_ES")))
         case .mes, .rango:
             return Period.spanishMonthName(for: date, abbreviated: true)
         case .anio:
@@ -180,82 +209,86 @@ struct HistoryView: View {
         let delta = Money.subtract(totals.spent, previous)
         let isUp = Money.cents(delta) > 0
         let average = Money.sum(series.map(\.total)) / Double(max(1, series.count))
+        let highest = series.max { $0.total < $1.total }
 
         let hasComparison = !Money.isZero(previous) && !Money.isZero(delta)
 
-        return ShellCard {
-            VStack(alignment: .leading, spacing: 8) {
-                headlineRow(title: periodTitle(period),
-                            total: totals.spent,
-                            delta: hasComparison ? delta : nil,
-                            isUp: isUp)
+        return ShellCard(padding: 16) {
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(periodTitle(period).capitalizedFirst)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(palette.secondaryLabel)
 
-                if hasComparison {
-                    secondaryLine("Gastaste " + Money.format(abs(delta))
-                                  + (isUp ? " más" : " menos") + " que " + previousLabel() + ".")
+                    Text(Money.format(totals.spent))
+                        .font(.system(size: 30, weight: .bold))
+                        .tracking(-0.8)
+                        .monospacedDigit()
+                        .foregroundStyle(palette.label)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                 }
 
-                secondaryLine(averageLabel() + ": " + Money.format(average) + ".")
+                if hasComparison {
+                    HStack(spacing: 7) {
+                        deltaBadge(delta, isUp: isUp)
+                        Text((isUp ? "más que " : "menos que ") + previousLabel())
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(palette.secondaryLabel)
+                    }
+                }
+
+                Rectangle().fill(palette.separator).frame(height: 0.5)
+
+                HStack(alignment: .top, spacing: 18) {
+                    miniStat(label: averageLabel(), value: Money.formatCompact(average))
+                    if let highest, Money.cents(highest.total) > 0 {
+                        miniStat(label: highestLabel(),
+                                 value: axisLabel(for: highest.period) + " · "
+                                    + Money.formatCompact(highest.total))
+                    }
+                }
             }
         }
     }
 
-    /// Partido en su propia vista: el comprobador de tipos de Swift se rinde
-    /// con un `HStack` que mezcla ternarios de color, concatenaciones de
-    /// cadena y vistas condicionales en la misma expresión.
-    private func headlineRow(title: String, total: Double, delta: Double?, isUp: Bool) -> some View {
-        // El periodo, pequeño, encima del monto; el delta a la derecha, a la
-        // altura del monto (`2f`).
-        HStack(alignment: .lastTextBaseline, spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(palette.secondaryLabel)
-
-                Text(Money.format(total))
-                    .font(.system(size: 28, weight: .bold))
-                    .tracking(-0.8)
-                    .foregroundStyle(palette.label)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-            }
-
-            Spacer(minLength: 8)
-
-            if let delta {
-                deltaBadge(delta, isUp: isUp)
-            }
+    private func miniStat(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundStyle(palette.secondaryLabel)
+            Text(value)
+                .font(.system(size: 15, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(palette.label)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
-        .padding(.bottom, 4)
     }
 
     private func deltaBadge(_ delta: Double, isUp: Bool) -> some View {
-        let tint: Color = isUp ? palette.negative : palette.positive
-
-        return HStack(spacing: 2) {
+        HStack(spacing: 4) {
             Image(systemName: isUp ? "arrow.up" : "arrow.down")
-                .font(.system(size: 12, weight: .bold))
-            Text(Money.format(abs(delta)))
-                .font(.system(size: 13.5, weight: .semibold))
+                .font(.system(size: 11, weight: .bold))
+            Text(Money.formatCompact(abs(delta)))
+                .font(.system(size: 12.5, weight: .semibold))
+                .monospacedDigit()
         }
-        .foregroundStyle(tint)
-    }
-
-    private func secondaryLine(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 13))
-            .foregroundStyle(palette.secondaryLabel)
-            .fixedSize(horizontal: false, vertical: true)
+        .foregroundStyle(isUp ? palette.expenseText : palette.income)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(isUp ? palette.expenseSoft : palette.incomeSoft,
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func periodTitle(_ period: Period) -> String {
         let date = period.interval.start
         switch granularity {
         case .dia:
-            return TodayView.dayLabel(for: date)
+            return MovementDay.label(for: date)
         case .semana:
             return "Semana del " + date.formatted(.dateTime.day().month(.abbreviated)
-                .locale(Locale(identifier: "es_PE")))
+                .locale(Locale(identifier: "es_ES")))
         case .mes, .rango:
             return Period.spanishMonthName(for: date)
         case .anio:
@@ -263,23 +296,36 @@ struct HistoryView: View {
         }
     }
 
+    /// «agosto», «la semana pasada».
     private func previousLabel() -> String {
         switch granularity {
         case .dia:    return "el día anterior"
         case .semana: return "la semana pasada"
-        case .mes:    return "el mes pasado"
+        case .mes:
+            let reference = periods.last?.previous.reference ?? Date()
+            return Period.spanishMonthName(for: reference).lowercased()
         case .anio:   return "el año pasado"
         case .rango:  return "el periodo anterior"
         }
     }
 
+    /// «Promedio 7 meses».
     private func averageLabel() -> String {
         switch granularity {
-        case .dia:    return "Promedio diario de los últimos \(bucketCount) días"
-        case .semana: return "Promedio semanal de las últimas \(bucketCount) semanas"
-        case .mes:    return "Promedio mensual de los últimos \(bucketCount) meses"
-        case .anio:   return "Promedio anual de los últimos \(bucketCount) años"
+        case .dia:    return "Promedio \(bucketCount) días"
+        case .semana: return "Promedio \(bucketCount) semanas"
+        case .mes:    return "Promedio \(bucketCount) meses"
+        case .anio:   return "Promedio \(bucketCount) años"
         case .rango:  return "Promedio del rango"
+        }
+    }
+
+    private func highestLabel() -> String {
+        switch granularity {
+        case .dia:    return "Día más alto"
+        case .semana: return "Semana más alta"
+        case .mes, .rango: return "Mes más alto"
+        case .anio:   return "Año más alto"
         }
     }
 
@@ -289,34 +335,34 @@ struct HistoryView: View {
         let changes = Array(rhythm.categoryChanges.prefix(5))
 
         return VStack(spacing: 8) {
-            ShellSectionHeader(title: "Qué cambió vs. " + periodTitle(previous).lowercased())
+            ShellSectionHeader(title: "Qué cambió frente a " + periodTitle(previous).lowercased())
 
             MovementCard {
                 ForEach(Array(changes.enumerated()), id: \.element.id) { index, change in
                     let isUp = Money.cents(change.delta) > 0
 
-                    HStack(spacing: 12) {
+                    HStack(spacing: 11) {
                         MovementIcon(icon: CategoryStyle.icon(for: change.category),
                                      color: CategoryStyle.color(for: change.category, accent: accent.color),
-                                     size: 38)
+                                     size: 30)
 
                         Text(change.category)
-                            .font(.system(size: 15.5, weight: .semibold))
+                            .font(.system(size: 14.5))
                             .foregroundStyle(palette.label)
                             .lineLimit(1)
 
                         Spacer(minLength: 8)
 
-                        HStack(spacing: 3) {
-                            Image(systemName: isUp ? "arrow.up" : "arrow.down")
-                                .font(.system(size: 11, weight: .bold))
-                            Text(Money.format(abs(change.delta)))
-                                .font(.system(size: 15, weight: .semibold))
-                        }
-                        .foregroundStyle(isUp ? palette.negative : palette.positive)
+                        // «+212» en naranja, «−64» en verde: subir el gasto es
+                        // lo que hay que mirar.
+                        Text((isUp ? "+" : "−") + Money.formatCompact(abs(change.delta))
+                                .replacingOccurrences(of: "S/ ", with: ""))
+                            .font(.system(size: 14, weight: .semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(isUp ? palette.expenseText : palette.income)
                     }
                     .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
+                    .padding(.vertical, 13)
 
                     if index < changes.count - 1 { MovementSeparator() }
                 }

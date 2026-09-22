@@ -332,7 +332,7 @@ struct GmailBanksView: View {
 
     private func formatted(_ date: Date) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM"
         var text = f.string(from: date)
         let cal = Calendar.current

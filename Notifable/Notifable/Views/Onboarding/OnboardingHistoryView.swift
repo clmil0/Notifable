@@ -268,7 +268,7 @@ struct OnboardingHistoryView: View {
 
     private var rangeLabel: String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM yyyy"
         return "Desde el \(f.string(from: rangeStartDate)) hasta hoy."
     }

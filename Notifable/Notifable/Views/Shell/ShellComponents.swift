@@ -25,12 +25,12 @@ struct ShellSectionHeader: View {
                     .foregroundStyle(palette.secondaryLabel)
             }
         }
-        .padding(.horizontal, 6)
+        .padding(.horizontal, 2)
         .padding(.bottom, 8)
     }
 }
 
-/// La tarjeta del rediseño: superficie opaca, radio 22 y hairline de 0.5.
+/// La tarjeta del rediseño: superficie opaca, radio 20 y hairline de 0.5.
 struct ShellCard<Content: View>: View {
     var padding: CGFloat = 14
     @ViewBuilder var content: Content
@@ -42,9 +42,9 @@ struct ShellCard<Content: View>: View {
         content
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(palette.hairline, lineWidth: 0.5)
             )
     }
@@ -125,14 +125,17 @@ struct PaceBar: View {
 
 /// Segmento de píldoras: «Gastos / Ingresos», «Este mes / Todo el historial»,
 /// «Día · Semana · Mes · Año».
+///
+/// La opción elegida va en el gris de selección (`1b`); `tint` la pinta de un
+/// color cuando el color dice algo —el naranja del gasto en Análisis—.
 struct ShellSegment<Item: Hashable>: View {
     let items: [Item]
     @Binding var selection: Item
+    var tint: Color?
     let label: (Item) -> String
 
     @Environment(\.colorScheme) private var scheme
     private var palette: Palette { Palette(scheme) }
-    private var accent: AppThemeColor { .current }
 
     var body: some View {
         HStack(spacing: 4) {
@@ -142,13 +145,13 @@ struct ShellSegment<Item: Hashable>: View {
                     withAnimation(.easeInOut(duration: 0.22)) { selection = item }
                 } label: {
                     Text(label(item))
-                        .font(.system(size: 13.5, weight: selection == item ? .semibold : .regular))
-                        .foregroundStyle(selection == item ? Color.white : palette.secondaryLabel)
+                        .font(.system(size: 13, weight: selection == item ? .semibold : .regular))
+                        .foregroundStyle(selection == item ? selectedText : palette.secondaryLabel)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 34)
+                        .frame(height: 32)
                         .background {
                             if selection == item {
-                                Capsule().fill(accent.color)
+                                Capsule().fill(tint ?? palette.selectedFill)
                             }
                         }
                         .contentShape(Capsule())
@@ -159,6 +162,11 @@ struct ShellSegment<Item: Hashable>: View {
         .padding(4)
         .background(palette.surface, in: Capsule())
         .overlay(Capsule().stroke(palette.hairline, lineWidth: 0.5))
+    }
+
+    /// Sobre el naranja, el fondo oscuro de la app; sobre el gris, el texto.
+    private var selectedText: Color {
+        tint == nil ? palette.label : Palette(.dark).background
     }
 }
 
@@ -175,8 +183,8 @@ struct ShellTitle: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title)
-                .font(.system(size: 30, weight: .bold))
-                .tracking(-0.6)
+                .font(.system(size: 32, weight: .bold))
+                .tracking(-0.8)
                 .foregroundStyle(palette.label)
 
             if let subtitle {
@@ -186,9 +194,9 @@ struct ShellTitle: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 6)
-        .padding(.top, 8)
-        .padding(.bottom, 16)
+        .padding(.horizontal, 2)
+        .padding(.top, 2)
+        .padding(.bottom, 14)
     }
 }
 

@@ -1,7 +1,10 @@
 import SwiftUI
 import SwiftData
 
-/// Resumen › Balance (`2b`, `3b`, `3c`): el mes en números fríos.
+/// Balance (`2b`, `3b`, `3c`): el mes en números fríos.
+///
+/// **Sin entrada desde el dashboard único** (`1b`), por ahora: vuelve cuando
+/// se rediseñe el presupuesto.
 ///
 /// Sólo existe cuando hay un presupuesto definido (`3d`). Sin presupuesto, lo
 /// único que tendría que decir —ingresos y cuánto queda— ya vive en la línea

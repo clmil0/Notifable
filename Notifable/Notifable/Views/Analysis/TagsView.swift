@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 
-/// Análisis › Etiquetas, en el sitio que dejó `Presupuestos`.
+/// Etiquetas, la hermana de Categorías.
 ///
 /// La regla de lectura, que es lo que decide toda la forma de esta pantalla:
 /// **una etiqueta no es una porción del total**. Un gasto puede llevar dos, así
@@ -78,7 +78,7 @@ struct TagsView: View {
                           tint: palette.tertiaryLabel)
                     .padding(.horizontal, 2)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ShellMetrics.sideInset)
             .padding(.top, ShellMetrics.contentTopInset)
             .padding(.bottom, ShellMetrics.contentBottomInset)
         }

@@ -37,9 +37,13 @@ struct AccountBadge: Equatable {
 
 // MARK: - Carrusel (`1b`)
 
-/// Resumen › Movimientos: las cuentas tuyas como tarjetas, para filtrar la
+/// Historial › Movimientos: las cuentas tuyas como tarjetas, para filtrar la
 /// lista por una. «Todas» va primero y «Editar» queda fijo al borde derecho,
 /// siempre a mano aunque haya diez cuentas.
+///
+/// Tarjetas de sólo texto (`1b`): nombre con sus últimos dígitos y cuántos
+/// movimientos tiene. La elegida se rellena del gris de selección, no del
+/// color del tema: el tema decora, no marca estado.
 struct AccountCarousel: View {
     let accounts: [DetectedAccount]
     let name: (DetectedAccount) -> String
@@ -55,7 +59,7 @@ struct AccountCarousel: View {
     private var palette: Palette { Palette(scheme) }
     private var accent: AppThemeColor { .current }
 
-    private static let cardWidth: CGFloat = 110
+    private static let cardWidth: CGFloat = 132
     private static let editWidth: CGFloat = 52
 
     var body: some View {
@@ -63,35 +67,32 @@ struct AccountCarousel: View {
             HStack(spacing: 10) {
                 card(selected: selection == nil, label: "Todas las cuentas") {
                     selection = nil
-                } content: { isOn in
-                    allStack(isOn: isOn)
-                    title("Todas", isOn: isOn)
-                    line("\(total) mov.", isOn: isOn)
+                } content: {
+                    title("Todas")
+                    line(total == 1 ? "1 movimiento" : "\(total) movimientos")
                 }
 
                 ForEach(accounts) { account in
                     let isOn = selection == account.key
                     card(selected: isOn, label: name(account)) {
                         selection = isOn ? nil : account.key
-                    } content: { isOn in
-                        AccountLogo(institution: account.institution ?? account.via)
-                        title(name(account), isOn: isOn)
-                        line(detail(account), isOn: isOn)
+                    } content: {
+                        title(account.digits.map { name(account) + " ••" + $0 } ?? name(account))
+                        line(detail(account))
                     }
                 }
             }
             // Todas las tarjetas del alto de la más alta.
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.leading, 16)
-            .padding(.trailing, 16 + Self.editWidth + 14)
+            .padding(.leading, ShellMetrics.sideInset)
+            .padding(.trailing, ShellMetrics.sideInset + Self.editWidth + 14)
         }
         .overlay(alignment: .trailing) { editTile }
     }
 
     private func detail(_ account: DetectedAccount) -> String {
         let count = counts[account.key] ?? 0
-        if let digits = account.digits { return "•••• \(digits) · \(count)" }
-        return "\(count) mov."
+        return count == 1 ? "1 movimiento" : "\(count) movimientos"
     }
 
     // MARK: Piezas
@@ -99,53 +100,42 @@ struct AccountCarousel: View {
     private func card<Content: View>(selected: Bool,
                                      label: String,
                                      action: @escaping () -> Void,
-                                     @ViewBuilder content: @escaping (Bool) -> Content) -> some View {
+                                     @ViewBuilder content: () -> Content) -> some View {
         Button {
             withAnimation(.easeInOut(duration: 0.2)) { action() }
         } label: {
-            VStack(alignment: .leading, spacing: 8) {
-                content(selected)
+            VStack(alignment: .leading, spacing: 7) {
+                content()
             }
-            .frame(width: Self.cardWidth - 24, alignment: .leading)
+            .frame(width: Self.cardWidth - 26, alignment: .leading)
             .frame(maxHeight: .infinity, alignment: .topLeading)
-            .padding(12)
-            .background(selected ? accent.softFill(scheme) : palette.surface,
-                        in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .padding(.horizontal, 13)
+            .padding(.vertical, 11)
+            .background(selected ? palette.selectedFill : palette.surface,
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .stroke(selected ? accent.color : palette.hairline, lineWidth: selected ? 1.5 : 0.5)
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(palette.hairline, lineWidth: 0.5)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
-    /// Dos cuadrados montados: «todas las cuentas» sin elegir el logo de una.
-    private func allStack(isOn: Bool) -> some View {
-        let ink = isOn ? accent.color : palette.label
-        return HStack(spacing: -9) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(ink.opacity(isOn ? 0.30 : 0.10))
-                .frame(width: 26, height: 26)
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(ink.opacity(isOn ? 0.16 : 0.06))
-                .frame(width: 26, height: 26)
-        }
-    }
-
-    private func title(_ text: String, isOn: Bool) -> some View {
+    private func title(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(isOn ? accent.onSurface(scheme) : palette.label)
+            .font(.system(size: 13.5, weight: .semibold))
+            .foregroundStyle(palette.label)
             .lineLimit(1)
     }
 
-    private func line(_ text: String, isOn: Bool) -> some View {
+    private func line(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 11.5))
-            .foregroundStyle(isOn ? accent.onSurface(scheme) : palette.secondaryLabel)
+            .monospacedDigit()
+            .foregroundStyle(palette.secondaryLabel)
             .lineLimit(1)
     }
 
@@ -163,84 +153,19 @@ struct AccountCarousel: View {
                     .foregroundStyle(accent.onSurface(scheme))
                     .frame(width: Self.editWidth)
                     .frame(maxHeight: .infinity)
-                    .background(palette.background, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(palette.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .strokeBorder(palette.secondaryLabel.opacity(0.45),
                                           style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     )
-                    .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Editar tus cuentas")
-            .padding(.trailing, 16)
+            .padding(.trailing, ShellMetrics.sideInset)
             .background(palette.background)
         }
-    }
-}
-
-// MARK: - Traslados
-
-/// Un traslado ya resuelto para dibujar: de qué cuenta a cuál. Si el gasto y
-/// el ingreso del mismo movimiento llegaron los dos (Plin de BBVA → Yape
-/// recibido), es **una** fila; si sólo llegó una mitad, la otra se nombra con
-/// lo que se sepa (la billetera de destino o el nombre del destinatario).
-struct TransferEntry: Identifiable {
-    let id: UUID
-    let from: AccountBadge
-    let to: AccountBadge
-    let amount: Double
-    let currency: String
-    let date: Date
-    let expense: Expense?
-    let income: Income?
-
-    /// Toca alguna de estas cuentas (para el filtro del carrusel).
-    let keys: Set<String>
-}
-
-struct TransferRowView: View {
-    let entry: TransferEntry
-    var onTap: () -> Void = {}
-
-    @Environment(\.colorScheme) private var scheme
-    private var palette: Palette { Palette(scheme) }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            ZStack(alignment: .topLeading) {
-                AccountLogo(institution: entry.from.institution, size: 30)
-                    .overlay(Circle().stroke(palette.surface, lineWidth: 1.5))
-                AccountLogo(institution: entry.to.institution, size: 30)
-                    .overlay(Circle().stroke(palette.surface, lineWidth: 1.5))
-                    .offset(x: 14, y: 12)
-            }
-            .frame(width: 44, height: 44, alignment: .topLeading)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.from.name + " → " + entry.to.name)
-                    .font(.system(size: 16.5, weight: .semibold))
-                    .foregroundStyle(palette.label)
-                    .lineLimit(1)
-
-                Text(TodayView.dayLabel(for: entry.date) + " · entre tus cuentas")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(palette.secondaryLabel)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 8)
-
-            // Sin signo: no entra ni sale nada de lo tuyo.
-            Text(Money.format(entry.amount, currency: entry.currency))
-                .font(.system(size: 16.5, weight: .semibold))
-                .foregroundStyle(palette.secondaryLabel)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
-        .accessibilityElement(children: .combine)
     }
 }
 

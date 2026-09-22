@@ -89,7 +89,7 @@ struct SettingsStatus {
             return "hace \(Int(elapsed / 60)) min"
         }
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         if Period.calendar.isDateInToday(lastSync) {
             f.dateFormat = "'Hoy,' H:mm"
         } else if Period.calendar.isDateInYesterday(lastSync) {

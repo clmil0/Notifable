@@ -35,6 +35,9 @@ struct TrackableScrollView<Content: View>: View {
                     content()
                 }
             }
+            // Sin barra de desplazamiento: con el header y el FAB flotando,
+            // la barra del sistema se veía enorme y tapaba el borde derecho.
+            .scrollIndicators(.hidden)
             .onChange(of: scrollToTopTrigger) { _, _ in
                 withAnimation {
                     proxy.scrollTo("top", anchor: .top)

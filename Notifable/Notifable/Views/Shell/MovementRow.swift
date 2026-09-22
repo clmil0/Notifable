@@ -86,6 +86,9 @@ enum MovementStyle {
 /// tras una pulsación larga es lo que llenó la bandeja de Pendientes.
 struct MovementRow: View {
     let expense: Expense
+    /// La hora junto al subtítulo («Supermercado  16:49»): en Movimientos,
+    /// donde la cabecera ya dice el día.
+    var showsTime = false
     var onTap: () -> Void = {}
     var onAssignCategory: () -> Void = {}
 
@@ -127,12 +130,13 @@ struct MovementRow: View {
     private var content: some View {
         HStack(spacing: 12) {
             MovementIcon(icon: MovementStyle.icon(for: expense),
-                         color: MovementStyle.color(for: expense, accent: accent.color, scheme: scheme))
+                         color: MovementStyle.color(for: expense, accent: accent.color, scheme: scheme),
+                         size: 40)
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(expense.isReversal ? "Anulación de compra" : Accounting.displayName(expense.merchant))
-                        .font(.system(size: 16.5, weight: .semibold))
+                        .font(.system(size: 15.5, weight: .semibold))
                         .strikethrough(expense.isVoided)
                         .foregroundStyle(expense.isVoided ? palette.secondaryLabel : palette.label)
                         .lineLimit(1)
@@ -154,7 +158,10 @@ struct MovementRow: View {
                         assignRow(showsSource: false)
                     }
                 } else {
-                    subtitleLine
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        subtitleLine
+                        if showsTime { TimeLabel(date: expense.date) }
+                    }
                 }
 
                 if let debtNote {
@@ -168,12 +175,13 @@ struct MovementRow: View {
             Spacer(minLength: 8)
 
             Text(amountText)
-                .font(.system(size: 16.5, weight: .semibold))
+                .font(.system(size: 15.5, weight: .semibold))
+                .monospacedDigit()
                 .strikethrough(expense.isVoided)
                 .foregroundStyle(expense.countsAsSpending ? palette.label : palette.secondaryLabel)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.vertical, 13)
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
         .contextMenu {
@@ -310,6 +318,7 @@ struct MovementRow: View {
 /// Fila de ingreso, con el mismo esqueleto que la de gasto.
 struct IncomeRow: View {
     let income: Income
+    var showsTime = false
     var onTap: () -> Void = {}
 
     @Environment(\.modelContext) private var modelContext
@@ -323,29 +332,33 @@ struct IncomeRow: View {
         let (color, icon) = IncomeStyle.iconAndColor(for: income, accent: accent.incomeFillColor)
 
         HStack(spacing: 12) {
-            MovementIcon(icon: icon, color: color)
+            MovementIcon(icon: icon, color: color, size: 40)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(income.title ?? income.source)
-                    .font(.system(size: 16.5, weight: .semibold))
+                    .font(.system(size: 15.5, weight: .semibold))
                     .foregroundStyle(palette.label)
                     .lineLimit(1)
 
-                Text(income.isTransfer ? MovementStyle.transferNote : income.source)
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(palette.secondaryLabel)
-                    .lineLimit(1)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(income.isTransfer ? MovementStyle.transferNote : income.source)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(palette.secondaryLabel)
+                        .lineLimit(1)
+                    if showsTime { TimeLabel(date: income.date) }
+                }
             }
 
             Spacer(minLength: 8)
 
             // Un traslado no es ingreso: sin «+» y sin el color de ingreso.
             Text((income.isTransfer ? "" : "+") + Money.format(income.amount, currency: income.currency))
-                .font(.system(size: 16.5, weight: .semibold))
+                .font(.system(size: 15.5, weight: .semibold))
+                .monospacedDigit()
                 .foregroundStyle(income.isTransfer ? palette.secondaryLabel : accent.incomeColor(scheme))
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.vertical, 13)
         .contentShape(Rectangle())
         .onTapGesture(perform: onTap)
         .contextMenu {
@@ -362,7 +375,7 @@ struct IncomeRow: View {
             }
         }
         // Desde la hoja se puede ir a la deuda (`ActivityFocus`): se cierra
-        // para que Hoy la muestre.
+        // para que se abra su detalle.
         .onReceive(NotificationCenter.default.publisher(for: ActivityFocus.notification)) { _ in
             showsDestino = false
         }
@@ -387,8 +400,8 @@ struct IncomeRow: View {
     }
 }
 
-/// La tarjeta que agrupa las filas de un día: radio 22, superficie con
-/// hairline y separadores internos sangrados 70 pt —el ancho del ícono más su
+/// La tarjeta que agrupa las filas de un día: radio 20, superficie con
+/// hairline y separadores internos sangrados 66 pt —el ancho del ícono más su
 /// margen—, para que la línea arranque bajo el texto y no bajo el ícono.
 struct MovementCard<Content: View>: View {
     @ViewBuilder var content: Content
@@ -398,9 +411,9 @@ struct MovementCard<Content: View>: View {
 
     var body: some View {
         VStack(spacing: 0) { content }
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(palette.hairline, lineWidth: 0.5)
             )
     }
@@ -413,6 +426,52 @@ struct MovementSeparator: View {
         Rectangle()
             .fill(Palette(scheme).separator)
             .frame(height: 0.5)
-            .padding(.leading, 70)
+            .padding(.leading, 66)
+    }
+}
+
+/// Cómo se nombra un día en las cabeceras de las listas.
+enum MovementDay {
+    /// «Hoy», «Ayer», y para el resto el día de la semana con su fecha.
+    static func label(for day: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(day) { return "Hoy" }
+        if calendar.isDateInYesterday(day) { return "Ayer" }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "es_ES")
+        formatter.dateFormat = calendar.isDate(day, equalTo: Date(), toGranularity: .year)
+            ? "EEEE d 'de' MMMM"
+            : "EEEE d 'de' MMMM, yyyy"
+        return formatter.string(from: day).capitalizedFirst
+    }
+
+    /// «Hoy», «Ayer», «21 de setiembre»: la cabecera corta de Movimientos
+    /// (`1b`), donde la hora ya va en cada fila.
+    static func shortLabel(for day: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(day) { return "Hoy" }
+        if calendar.isDateInYesterday(day) { return "Ayer" }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "es_ES")
+        formatter.dateFormat = calendar.isDate(day, equalTo: Date(), toGranularity: .year)
+            ? "d 'de' MMMM"
+            : "d 'de' MMMM, yyyy"
+        return formatter.string(from: day)
+    }
+}
+
+/// «16:49», en gris y con cifras tabulares, al lado del subtítulo de una fila.
+private struct TimeLabel: View {
+    let date: Date
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        Text(date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute().locale(Locale(identifier: "es_ES"))))
+            .font(.system(size: 12.5))
+            .monospacedDigit()
+            .foregroundStyle(Palette(scheme).secondaryLabel)
+            .fixedSize()
     }
 }

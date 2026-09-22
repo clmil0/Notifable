@@ -154,7 +154,7 @@ struct DayScrubber: View {
 
     private func accessibilityLabel(for day: PeriodTotals.DayTotal) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d 'de' MMMM"
         return f.string(from: day.date) + ", " + Money.format(day.total)
     }

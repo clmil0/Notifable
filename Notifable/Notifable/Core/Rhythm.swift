@@ -195,7 +195,7 @@ struct Rhythm {
         case .month:
             return group(elapsedDays, by: .month) { start in
                 let f = DateFormatter()
-                f.locale = Locale(identifier: "es_PE")
+                f.locale = Locale(identifier: "es_ES")
                 f.dateFormat = "MMM"
                 return f.string(from: start).capitalizedFirst
             }

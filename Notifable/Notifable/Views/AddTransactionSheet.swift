@@ -404,7 +404,7 @@ struct AddTransactionSheet: View {
         if isSameDay(draft.date, Date()) { return "Hoy" }
         if isSameDay(draft.date, yesterday) { return "Ayer" }
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM"
         return f.string(from: draft.date).replacingOccurrences(of: ".", with: "")
     }
@@ -915,7 +915,7 @@ struct AddTransactionSheet: View {
     /// «Hoy, 17 set», «Ayer, 16 set», o el día con su fecha.
     private var dateLabel: String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM"
         let day = f.string(from: draft.date).replacingOccurrences(of: ".", with: "")
         if isSameDay(draft.date, Date()) { return "Hoy, " + day }
@@ -1150,7 +1150,7 @@ struct AddTransactionSheet: View {
 
     private func debtSubtitle(_ debt: Expense) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM"
         return "Por cobrar del " + f.string(from: debt.date) + " · "
             + Money.format(debt.amount, currency: debt.currency) + " original"

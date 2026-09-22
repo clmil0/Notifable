@@ -313,7 +313,7 @@ private struct DictationCardView: View {
     private var subtitle: String {
         let what = isIncome ? "Ingreso" : movement.category
         let calendar = Calendar.current
-        let when = calendar.isDateInToday(movement.date) ? nil : TodayView.dayLabel(for: movement.date)
+        let when = calendar.isDateInToday(movement.date) ? nil : MovementDay.label(for: movement.date)
         return ([what, movement.source ?? "Por voz", when].compactMap { $0 }).joined(separator: " · ")
     }
 

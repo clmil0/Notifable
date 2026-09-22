@@ -1,19 +1,21 @@
 import SwiftUI
 import SwiftData
 
-/// Análisis › Categorías (`2d`), la sub-vista por defecto de la pestaña.
+/// Categorías (`1b`), a la que se entra desde su tarjeta del dashboard.
 ///
 /// Gráfico y lista **fusionados**. Antes vivían en pantallas distintas: el
 /// donut arriba de la pestaña Ritmo y la lista dentro de Categorías, así que
 /// para saber qué porción era cuál había que cambiar de pestaña y recordar el
 /// color. Ahora la leyenda hace de resumen y la lista, de detalle.
 ///
-/// Y con ellas el **límite**: `Presupuestos` era una sub-vista aparte que
-/// repetía la misma lista de categorías con otra forma, así que para saber
-/// "cuánto llevo en Comida y cuánto me queda" había que mirar en dos sitios y
-/// recordar una de las dos cifras. Ahora la categoría que tiene límite lleva
-/// su barra debajo de la fila; la proyección y la edición siguen estando a un
-/// toque, en el detalle de la categoría.
+/// Y con ellas el **límite**: la categoría que tiene uno lleva, entre el nombre
+/// y el monto, una barrita con lo que le queda. Sólo eso, y sin cambiar el
+/// alto de la fila: la proyección y la edición siguen a un toque, en el
+/// detalle de la categoría.
+///
+/// Los colores del donut no son los de cada categoría sino la rampa naranja
+/// del gasto: la porción más grande, la más clara. Los íconos de la lista sí
+/// conservan su color, y el punto a su izquierda empata la fila con su porción.
 struct CategoriesOverviewView: View {
     @Binding var scrollToTopTrigger: Bool
     let progress: ScrollProgress
@@ -34,39 +36,50 @@ struct CategoriesOverviewView: View {
     private var rate: Double { rates.usdToPenRate }
     private var month: Period { Period(granularity: .mes, reference: Date()) }
 
-    private var totals: PeriodTotals {
-        Accounting.totals(expenses: expenses, incomes: incomes, period: month, usdToPen: rate)
+    private func totals(_ snapshots: [ExpenseSnapshot]) -> PeriodTotals {
+        Accounting.totals(expenses: snapshots, incomes: incomes.map(\.accountingSnapshot),
+                          period: month, usdToPen: rate)
     }
 
     private func slices(_ totals: PeriodTotals) -> [CategoryDonut.Slice] {
-        totals.byCategory.map { category in
+        totals.byCategory.enumerated().map { index, category in
             CategoryDonut.Slice(category: category.category,
                                 total: category.total,
-                                color: CategoryStyle.color(for: category.category, accent: accent.color))
+                                // Pasadas las seis, van juntas en «Otras» y en gris.
+                                color: index < 6 ? CategoryDonut.rampColor(at: index) : palette.tertiaryLabel)
         }
     }
 
     var body: some View {
-        let totals = self.totals
+        // Los totales y los límites leen el mismo historial: se convierte una
+        // sola vez por dibujado, no una por cada uno.
+        let snapshots = expenses.map(\.accountingSnapshot)
+        let totals = self.totals(snapshots)
         let slices = self.slices(totals)
-        let rows = self.rows(totals)
+        let rows = self.rows(totals, snapshots: snapshots)
 
         TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
-            VStack(spacing: 18) {
+            VStack(spacing: 0) {
+                ShellTitle(title: "Categorías", subtitle: monthSubtitle)
+
                 if rows.isEmpty {
                     ShellEmptyState(icon: "square.grid.2x2",
                                     title: "Sin gastos este mes",
                                     message: "Cuando registres el primero verás aquí en qué se va tu dinero.")
                 } else {
                     chartCard(totals: totals, slices: slices)
-                    categoryList(rows: rows, spent: totals.spent)
+                        .padding(.bottom, 24)
+                    listHeader(spent: totals.spent)
+                    categoryList(rows: rows, slices: slices)
+                        .padding(.bottom, 14)
                     newCategoryRow
+                        .padding(.bottom, 24)
                     topMerchants(totals: totals)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ShellMetrics.sideInset)
             .padding(.top, ShellMetrics.contentTopInset)
-            .padding(.bottom, ShellMetrics.contentBottomInset)
+            .padding(.bottom, 40)
         }
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             geometry.contentOffset.y + geometry.contentInsets.top
@@ -92,8 +105,14 @@ struct CategoriesOverviewView: View {
             DonutLegend(slices: slices, total: totals.spent)
                 .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 16)
+        .padding(.horizontal, 2)
+        .padding(.top, 14)
+    }
+
+    /// «setiembre 2026».
+    private var monthSubtitle: String {
+        Period.spanishMonthName(for: Date()).lowercased() + " "
+            + String(Period.calendar.component(.year, from: Date()))
     }
 
     // MARK: - Filas
@@ -101,8 +120,7 @@ struct CategoriesOverviewView: View {
     /// Una fila por categoría con gasto este mes **más** las que sólo tienen
     /// límite: un límite que no se ha tocado en todo el mes es justo el que hay
     /// que ver, y si dependiera del gasto sería invisible hasta gastarlo.
-    private func rows(_ totals: PeriodTotals) -> [Row] {
-        let snapshots = expenses.map(\.accountingSnapshot)
+    private func rows(_ totals: PeriodTotals, snapshots: [ExpenseSnapshot]) -> [Row] {
         let today = Date()
 
         func status(_ name: String) -> CategoryLimitStatus {
@@ -131,119 +149,95 @@ struct CategoriesOverviewView: View {
 
     // MARK: - Lista
 
-    private func categoryList(rows: [Row], spent: Double) -> some View {
-        MovementCard {
-            monthTotalRow(spent: spent)
-            MovementSeparator()
+    /// «Gasto por categoría» con el total del mes debajo: antes era la
+    /// primera fila de la lista, y competía con las categorías por el ojo.
+    private func listHeader(spent: Double) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Gasto por categoría")
+                .font(.system(size: 15.5, weight: .semibold))
+                .foregroundStyle(palette.label)
+            Text(Money.format(spent))
+                .font(.system(size: 12.5))
+                .monospacedDigit()
+                .foregroundStyle(palette.secondaryLabel)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 2)
+        .padding(.bottom, 10)
+    }
 
+    private func categoryList(rows: [Row], slices: [CategoryDonut.Slice]) -> some View {
+        let dots = Dictionary(uniqueKeysWithValues: slices.map { ($0.category, $0.color) })
+
+        return MovementCard {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 Button {
                     selectedCategory = CategoryRef(name: row.category)
                 } label: {
-                    categoryRow(row, of: spent)
+                    categoryRow(row, dot: dots[row.category])
                 }
                 .buttonStyle(.plain)
 
-                if index < rows.count - 1 { MovementSeparator() }
+                if index < rows.count - 1 {
+                    Rectangle()
+                        .fill(palette.separator)
+                        .frame(height: 0.5)
+                        .padding(.leading, 14)
+                }
             }
         }
     }
 
-    /// Encabeza la lista con el total del mes. Antes vivía dentro del donut,
-    /// pero con el anillo más grueso ya no cabía legible.
-    private func monthTotalRow(spent: Double) -> some View {
-        HStack {
-            Text(Period.spanishMonthName(for: Date()))
-                .font(.system(size: 16.5, weight: .bold))
+    private func categoryRow(_ row: Row, dot: Color?) -> some View {
+        HStack(spacing: 11) {
+            Circle()
+                .fill(dot ?? palette.track)
+                .frame(width: 7, height: 7)
+
+            MovementIcon(icon: CategoryStyle.icon(for: row.category),
+                         color: CategoryStyle.color(for: row.category, accent: accent.color),
+                         size: 32)
+
+            Text(row.category)
+                .font(.system(size: 15))
                 .foregroundStyle(palette.label)
+                .lineLimit(1)
 
             Spacer(minLength: 8)
 
-            Text(Money.format(spent))
-                .font(.system(size: 16.5, weight: .bold))
-                .foregroundStyle(palette.label)
+            if row.status.hasLimit { limitBadge(row.status) }
+
+            Text(Money.format(row.total))
+                .font(.system(size: 14.5, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(Money.cents(row.total) > 0 ? palette.label : palette.tertiaryLabel)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    private func categoryRow(_ row: Row, of total: Double) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                MovementIcon(icon: CategoryStyle.icon(for: row.category),
-                             color: CategoryStyle.color(for: row.category, accent: accent.color))
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(row.category)
-                        .font(.system(size: 16.5, weight: .semibold))
-                        .foregroundStyle(palette.label)
-                        .lineLimit(1)
-
-                    Text(subtitle(of: row, total: total))
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(palette.secondaryLabel)
-                }
-
-                Spacer(minLength: 8)
-
-                Text(Money.format(row.total))
-                    .font(.system(size: 16.5, weight: .semibold))
-                    .foregroundStyle(palette.label)
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, row.status.hasLimit ? 9 : 12)
-
-            if row.status.hasLimit { limitStrip(row.status) }
-        }
+        .padding(14)
         .contentShape(Rectangle())
     }
 
-    /// La barra sólo aparece si hay límite. Su marca vertical es el ritmo —qué
-    /// fracción del ciclo va transcurrida—, así que "voy por la mitad" se lee
-    /// sin hacer ninguna cuenta: relleno por delante de la marca es ir rápido.
-    private func limitStrip(_ status: CategoryLimitStatus) -> some View {
+    /// Sólo lo pendiente —«S/ 120 libres» o «S/ 40 pasado»— sobre una barrita
+    /// del ancho de la palabra. Cabe en el alto del ícono, así que la fila con
+    /// límite mide lo mismo que la que no lo tiene.
+    private func limitBadge(_ status: CategoryLimitStatus) -> some View {
         let tint = status.level.color(palette)
 
-        return VStack(alignment: .leading, spacing: 5) {
+        return VStack(alignment: .trailing, spacing: 3) {
+            Text(status.shortLabel)
+                .font(.system(size: 10.5, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(tint)
+                .lineLimit(1)
+
             LimitBar(fraction: status.fraction,
                      paceFraction: status.elapsedFraction,
                      color: tint,
-                     height: 5)
-
-            HStack(spacing: 6) {
-                Text(status.longLabel)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(tint)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-
-                Spacer(minLength: 0)
-
-                Text(status.daysLeftLabel)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(palette.secondaryLabel)
-                    .fixedSize()
-            }
+                     height: 3)
+                .frame(width: 56)
         }
-        .padding(.horizontal, 14)
-        .padding(.bottom, 12)
-    }
-
-    /// "18% · 4 movimientos", y en la categoría que sólo tiene límite, el
-    /// hecho de que no se haya gastado nada — un "0% · 0 movimientos" obliga a
-    /// leer dos cifras para enterarse de lo mismo.
-    private func subtitle(of row: Row, total: Double) -> String {
-        guard Money.cents(row.total) > 0 else { return "Sin gastos este mes" }
-        return Money.formatPercent(row.total, of: total) + " · " + movementCount(of: row.category)
-    }
-
-    private func movementCount(of category: String) -> String {
-        let range = month.interval
-        let count = expenses.filter {
-            $0.category == category && $0.date >= range.start && $0.date < range.end
-        }.count
-        return count == 1 ? "1 movimiento" : "\(count) movimientos"
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(status.longLabel)
     }
 
     /// Crear categoría vive **al final de la lista**, no en un modo de edición
@@ -253,12 +247,12 @@ struct CategoriesOverviewView: View {
             creatingCategory = true
         } label: {
             MovementCard {
-                HStack(spacing: 12) {
-                    MovementIcon(icon: "plus", color: accent.color)
+                HStack(spacing: 11) {
+                    MovementIcon(icon: "plus", color: accent.color, size: 32)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Nueva categoría")
-                            .font(.system(size: 16.5, weight: .semibold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(palette.label)
                         Text("Nombre, color y límite")
                             .font(.system(size: 12.5))
@@ -267,8 +261,7 @@ struct CategoriesOverviewView: View {
 
                     Spacer()
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 12)
+                .padding(14)
             }
         }
         .buttonStyle(.plain)
@@ -301,7 +294,8 @@ struct CategoriesOverviewView: View {
                             Spacer(minLength: 8)
 
                             Text(Money.format(merchant.total))
-                                .font(.system(size: 15.5, weight: .semibold))
+                                .font(.system(size: 14.5, weight: .semibold))
+                                .monospacedDigit()
                                 .foregroundStyle(palette.label)
                         }
                         .padding(.horizontal, 14)

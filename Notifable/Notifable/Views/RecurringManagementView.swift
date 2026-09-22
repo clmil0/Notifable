@@ -331,7 +331,7 @@ struct RecurringManagementView: View {
             parts.append("automático")
         } else if let next = rule.nextOccurrence {
             let f = DateFormatter()
-            f.locale = Locale(identifier: "es_PE")
+            f.locale = Locale(identifier: "es_ES")
             f.dateFormat = "d MMM"
             parts.append("próximo " + f.string(from: next))
         }

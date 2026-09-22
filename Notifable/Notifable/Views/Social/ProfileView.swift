@@ -66,7 +66,7 @@ struct ProfileView: View {
 
                 previewSection(shared: shared, totals: totals)
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ShellMetrics.sideInset)
             .padding(.top, ShellMetrics.contentTopInset)
             .padding(.bottom, ShellMetrics.contentBottomInset)
         }

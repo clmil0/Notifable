@@ -22,7 +22,7 @@ struct RangeSyncView: View {
     /// Dice exactamente qué va a pasar antes de tocar el botón.
     private var explanation: String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM"
         let range = f.string(from: startDate) + " – " + f.string(from: endDate)
         var text = "Se revisa " + range + " completo. Los gastos que ya tienes no se duplican; sólo se añade lo que falte."

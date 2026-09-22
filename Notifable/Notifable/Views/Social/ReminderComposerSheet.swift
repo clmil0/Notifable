@@ -144,7 +144,7 @@ struct ReminderComposerSheet: View {
                                 .font(.system(size: 16, weight: .semibold))
                                 .foregroundStyle(palette.label)
                                 .lineLimit(1)
-                            Text(debt.date.formatted(.dateTime.day().month(.abbreviated))
+                            Text(debt.date.formatted(.dateTime.day().month(.abbreviated).locale(Locale(identifier: "es_ES")))
                                  + " · " + Money.format(total, currency: currency))
                                 .font(.system(size: 12.5))
                                 .foregroundStyle(palette.secondaryLabel)
@@ -247,7 +247,7 @@ struct ReminderComposerSheet: View {
                         .font(.system(size: 15.5, weight: .semibold))
                         .foregroundStyle(palette.label)
                         .lineLimit(1)
-                    Text(expense.date.formatted(.dateTime.day().month(.abbreviated)))
+                    Text(expense.date.formatted(.dateTime.day().month(.abbreviated).locale(Locale(identifier: "es_ES"))))
                         .font(.system(size: 12))
                         .foregroundStyle(palette.secondaryLabel)
                 }

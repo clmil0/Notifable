@@ -28,13 +28,18 @@ struct Palette {
 
     private var dark: Bool { scheme == .dark }
 
-    /// Fondo de pantalla.
-    var background: Color { dark ? Color.black : Color.white }
+    /// Fondo de pantalla. En oscuro, el negro azulado del dashboard (`1b`):
+    /// no es el negro puro de OLED, y por eso las tarjetas se despegan de él
+    /// por tono sin necesitar sombra.
+    var background: Color {
+        dark ? Color(red: 0.043, green: 0.055, blue: 0.078)   // #0B0E14
+             : Color.white
+    }
 
     /// Superficie de tarjeta **neutra**, sin tinte. Para lo que se pinta
     /// encima de una tarjeta ya tintada o necesita el gris de siempre.
     var neutralSurface: Color {
-        dark ? Color(red: 0.110, green: 0.110, blue: 0.118)   // #1C1C1E
+        dark ? Color(red: 0.086, green: 0.098, blue: 0.133)   // #161922
              : Color(red: 0.969, green: 0.969, blue: 0.976)   // #F7F7F9
     }
 
@@ -48,15 +53,22 @@ struct Palette {
 
     /// Superficie elevada (sheets, menús).
     var surfaceElevated: Color {
-        dark ? Color(red: 0.173, green: 0.173, blue: 0.180)   // #2C2C2E
+        dark ? Color(red: 0.118, green: 0.133, blue: 0.176)   // #1E222D
              : Color.white
+    }
+
+    /// Relleno del elemento elegido dentro de un control oscuro (la opción
+    /// activa de «Semana · Mes», la tarjeta «Todas» del carrusel).
+    var selectedFill: Color {
+        dark ? Color(red: 0.137, green: 0.157, blue: 0.220)   // #232838
+             : Color(red: 0.898, green: 0.906, blue: 0.925)
     }
 
     /// Borde de 0.5 pt que separa la tarjeta del fondo. Sigue siendo el
     /// hairline gris, con apenas un toque del tema: nunca un borde del color
     /// del acento.
     var hairline: Color {
-        guard intense else { return dark ? Color.white.opacity(0.12) : Color.black.opacity(0.10) }
+        guard intense else { return dark ? Color.white.opacity(0.07) : Color.black.opacity(0.10) }
         let base: Color = dark ? .white : .black
         return base.mixed(with: accent.color, amount: 0.30, scheme: scheme)
             .opacity(dark ? 0.14 : 0.11)
@@ -64,30 +76,68 @@ struct Palette {
 
     /// Separador interno de listas.
     var separator: Color {
-        dark ? Color.white.opacity(0.12) : Color.black.opacity(0.10)
+        dark ? Color.white.opacity(0.06) : Color.black.opacity(0.10)
     }
 
-    var label: Color { dark ? .white : .black }
+    var label: Color {
+        dark ? Color(red: 0.929, green: 0.941, blue: 0.957)   // #EDF0F4
+             : .black
+    }
 
     /// Texto secundario legible: #AEAEB2 sobre #1C1C1E = 6.1:1;
     /// #6C6C70 sobre #F7F7F9 = 5.4:1. (Antes: 3.1:1 y 3.6:1.)
     var secondaryLabel: Color {
-        dark ? Color(red: 0.682, green: 0.682, blue: 0.698)   // #AEAEB2
+        dark ? Color(red: 0.604, green: 0.639, blue: 0.698)   // #9AA3B2
              : Color(red: 0.424, green: 0.424, blue: 0.439)   // #6C6C70
     }
 
     /// Terciario, sólo para marcas de tiempo y placeholders.
     var tertiaryLabel: Color {
-        dark ? Color(red: 0.557, green: 0.557, blue: 0.576)
+        dark ? Color(red: 0.541, green: 0.576, blue: 0.639)   // #8A93A3
              : Color(red: 0.557, green: 0.557, blue: 0.576)
     }
 
     /// Relleno de barras de progreso y pistas de gráficos.
     var track: Color {
-        dark ? Color.white.opacity(0.13) : Color(red: 0.890, green: 0.890, blue: 0.909)
+        dark ? Color(red: 0.165, green: 0.196, blue: 0.259)   // #2A3242
+             : Color(red: 0.890, green: 0.890, blue: 0.909)
     }
 
-    var positive: Color { dark ? Color(red: 0.188, green: 0.820, blue: 0.345) : Color(red: 0.114, green: 0.498, blue: 0.235) }
+    /// Barras del periodo anterior en los gráficos comparativos.
+    var comparison: Color {
+        dark ? Color(red: 0.227, green: 0.263, blue: 0.337)   // #3A4356
+             : Color(red: 0.788, green: 0.804, blue: 0.839)
+    }
+
+    // MARK: Gasto e ingreso
+
+    /// El naranja del gasto (`1b`). **Fijo, no sigue al tema**: el tema sólo
+    /// decora (chip de cuenta, selección), y el gasto tiene que leerse igual
+    /// en los dieciséis.
+    var expense: Color { Color(red: 1.0, green: 0.341, blue: 0.133) }         // #FF5722
+
+    /// El naranja de arriba del degradado de barras y del FAB.
+    var expenseLight: Color { Color(red: 1.0, green: 0.439, blue: 0.263) }    // #FF7043
+
+    /// Naranja para **texto** de gasto sobre la superficie: el #FF5722 puro
+    /// vibra en letra pequeña sobre el fondo oscuro, y en claro no llega a AA.
+    var expenseText: Color {
+        dark ? Color(red: 1.0, green: 0.541, blue: 0.357)                     // #FF8A5B
+             : Color(red: 0.749, green: 0.212, blue: 0.047)                   // #BF360C
+    }
+
+    /// Fondo del chip de delta de gasto.
+    var expenseSoft: Color { expense.opacity(dark ? 0.16 : 0.12) }
+
+    /// El verde del ingreso. Fijo, igual que el naranja.
+    var income: Color {
+        dark ? Color(red: 0.063, green: 0.725, blue: 0.506)                   // #10B981
+             : Color(red: 0.020, green: 0.588, blue: 0.412)                   // #059669
+    }
+
+    var incomeSoft: Color { income.opacity(dark ? 0.16 : 0.12) }
+
+    var positive: Color { income }
     var negative: Color { dark ? Color(red: 1.0, green: 0.412, blue: 0.380) : Color(red: 0.659, green: 0.118, blue: 0.082) }
     var warning: Color { dark ? Color(red: 1.0, green: 0.624, blue: 0.039) : Color(red: 0.702, green: 0.416, blue: 0.0) }
 }
@@ -266,20 +316,12 @@ extension AppThemeColor {
         }
     }
 
-    /// El pastel "crudo" (o verde) de siempre, sin ajustar por contraste: para
-    /// el relleno de un ícono o de un chip, donde ya hay un glifo o texto
-    /// blanco encima resolviendo el contraste por su cuenta.
-    var incomeFillColor: Color { isDuotone ? secondaryColor : .green }
+    /// El verde del ingreso, para rellenar un ícono o un chip. Ya no sigue al
+    /// tema (`1b`): gasto naranja e ingreso verde en los dieciséis.
+    var incomeFillColor: Color { Palette(.dark).income }
 
-    /// Para texto o un ícono suelto directamente sobre la superficie —el
-    /// monto en Actividad Reciente, el botón "Ingreso"—: en claro, la
-    /// variante de más contraste del mismo tono (`secondaryOnSurface`). El
-    /// pastel crudo como texto sobre blanco casi no se lee; en oscuro sí
-    /// contrasta bien sobre el fondo negro, así que ahí se queda igual.
-    func incomeColor(_ scheme: ColorScheme) -> Color {
-        guard isDuotone else { return .green }
-        return scheme == .light ? secondaryOnSurface(scheme) : secondaryColor
-    }
+    /// El verde del ingreso para texto o un ícono suelto sobre la superficie.
+    func incomeColor(_ scheme: ColorScheme) -> Color { Palette(scheme).income }
 
     func secondarySoftFill(_ scheme: ColorScheme) -> Color {
         guard isDuotone else { return softFill(scheme) }

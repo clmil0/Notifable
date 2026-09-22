@@ -223,7 +223,7 @@ struct BulkClassifyView: View {
     /// «4 movimientos · 12–17 set», o la fecha en «Por fecha».
     private func detail(_ row: Row) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM"
         let dates = row.expenses.map(\.date).sorted()
         guard let first = dates.first, let last = dates.last else { return "" }

@@ -39,7 +39,7 @@ struct AssignCategoryContext: Equatable, Identifiable {
         AssignCategoryContext(
             merchant: expense.merchant,
             title: Accounting.displayName(expense.merchant),
-            subtitle: expense.date.formatted(.dateTime.day().month(.abbreviated).hour().minute()),
+            subtitle: expense.date.formatted(.dateTime.day().month(.abbreviated).hour().minute().locale(Locale(identifier: "es_ES"))),
             amount: expense.amount,
             currency: expense.currency,
             current: expense.category == Accounting.unclassified ? nil : expense.category

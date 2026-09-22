@@ -6,17 +6,12 @@ struct ContentView: View {
     @Query private var recurringRules: [RecurringExpense]
     @AppStorage("remindRecurring") private var remindRecurring = true
     @State private var didResolveRecurring = false
-    @State private var selectedTab: AppTab = .summary
+    /// Lo que se apiló sobre el dashboard. Casi siempre una sola pantalla: las
+    /// hermanas (Movimientos ↔ Análisis) se alternan dentro de ella.
+    @State private var path: [AppSection] = []
 
-    // Sub-vista activa de cada pestaña. Una por pestaña, no una global: al
-    // volver a Análisis se espera encontrarlo como se dejó, pero tocar el
-    // ícono de la pestaña ya activa devuelve a la sub-vista por defecto.
-    @State private var summarySub: SummarySubtab = .today
-    @State private var analysisSub: AnalysisSubtab = .categories
-    @State private var socialSub: SocialSubtab = .social
-
-    /// El desplazamiento de la pestaña visible, en una clase observable para
-    /// no invalidar este cuerpo en cada fotograma (ver `ScrollProgress`).
+    /// El desplazamiento del dashboard, en una clase observable para no
+    /// invalidar este cuerpo en cada fotograma (ver `ScrollProgress`).
     @State private var scrollProgress = ScrollProgress()
     @AppStorage("appAccentColor") private var appAccentColor = AppThemeColor.blue.rawValue
     @AppStorage(AppThemeColor.intenseTintKey) private var intenseThemeTint = false
@@ -25,13 +20,6 @@ struct ContentView: View {
     var themeColor: Color { accent.color }
     @State private var showSettings = false
 
-    /// Red de seguridad de la cadena de vinculación: normalmente la presenta
-    /// `SettingsView`, pero si la app se cerró a medias —o el token llegó ya
-    /// fuera de Ajustes— la pregunta sigue pendiente y hay que hacerla igual.
-    /// Sólo con Ajustes cerrado: dos `fullScreenCover` a la vez no se pueden.
-    /// El tema tiene tres estados; el botón de la cabecera alterna entre claro
-    /// y oscuro sobre el que se esté viendo, y "Automático" se elige en Ajustes.
-    @AppStorage(AppAppearance.storageKey) private var appearanceRaw = AppAppearance.dark.rawValue
     @Environment(\.colorScheme) private var systemScheme
     @State private var selectedTransactionType: TransactionType? = nil
     @State private var showsDictation = false
@@ -43,14 +31,11 @@ struct ContentView: View {
     @State private var pendingLink: AppDeepLink?
     @State private var showSplash = true
     @StateObject private var appLock = AppLock.shared
-    @State private var tabWidth: CGFloat = 0
-    @State private var scrollToTopTrigger: Bool = false
-    /// Un movimiento que Resumen › Hoy debe mostrar y resaltar
-    /// (`ActivityFocus`).
-    @State private var focusRequest: ActivityFocus.Request?
-    @State private var themeButtonCenter: CGPoint = CGPoint(x: UIScreen.main.bounds.width - 80, y: 60)
-    
-    
+    /// El movimiento al que pidió ir una hoja (`ActivityFocus`): se abre su
+    /// detalle en cuanto las hojas de encima terminan de bajar.
+    @State private var focusedExpense: Expense?
+    @State private var focusedIncome: Income?
+
     /// Aplica las reglas con `autoConfirm` y programa el aviso de las que
     /// esperan confirmación. Una vez por sesión.
     private func resolveRecurring() {
@@ -109,34 +94,29 @@ struct ContentView: View {
         case .quick(let id):
             presentAdd(.gasto, source: nil, quickID: id)
         // Los enlaces `agrupay://` de los widgets y de Siri siguen siendo los
-        // mismos; lo que cambia es dónde aterrizan. `categories` y `rhythm` ya
-        // no son pestañas: ahora son sub-vistas de Análisis.
+        // mismos; lo que cambia es dónde aterrizan: ya no hay pestañas, así
+        // que cada uno abre su pantalla sobre el dashboard.
         case .summary:
             selectedTransactionType = nil
-            summarySub = .today
-            selectedTab = .summary
+            path = []
         case .categories:
-            selectedTransactionType = nil
-            analysisSub = .categories
-            selectedTab = .analysis
+            open(.categories)
         case .pending:
-            selectedTransactionType = nil
-            analysisSub = .pending
-            selectedTab = .analysis
+            open(.pending)
         case .rhythm:
-            selectedTransactionType = nil
-            analysisSub = .history
-            selectedTab = .analysis
+            open(.analysis)
         case .friends:
-            selectedTransactionType = nil
-            socialSub = .social
-            selectedTab = .social
+            open(.social)
         case .friendInvite(let code):
-            selectedTransactionType = nil
             FriendInviteRouter.shared.pendingCode = code
-            socialSub = .social
-            selectedTab = .social
+            open(.social)
         }
+    }
+
+    /// Deja una sola pantalla sobre el dashboard: la pedida.
+    private func open(_ section: AppSection) {
+        selectedTransactionType = nil
+        path = [section]
     }
 
     /// Si ya había un formulario abierto se cierra primero: cambiar el
@@ -157,53 +137,46 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            // El chrome **flota** sobre el contenido; ya no lo empuja hacia
-            // abajo. Por eso es un `ZStack` y no un `VStack`: el monto grande
-            // de Resumen pasa por debajo de los botones circulares al hacer
-            // scroll, que es lo que permite que el header sea transparente.
-            ZStack(alignment: .top) {
-                tabContent
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            NavigationStack(path: $path) {
+                ZStack(alignment: .bottom) {
+                    DashboardScreen(progress: scrollProgress,
+                                    onOpen: { path.append($0) },
+                                    onSettings: { showSettings = true })
 
-                header
+                    // Degradado al pie: sin él las tarjetas se leen a través
+                    // del FAB y de «Dictar». Llega hasta el borde físico de la
+                    // pantalla —la franja del indicador de inicio incluida—:
+                    // si se quedaba en el área segura, las tarjetas volvían a
+                    // verse nítidas debajo y se notaba el corte.
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        LinearGradient(stops: [.init(color: Palette(systemScheme).background.opacity(0), location: 0),
+                                               .init(color: Palette(systemScheme).background.opacity(0.85), location: 0.45),
+                                               .init(color: Palette(systemScheme).background, location: 0.75)],
+                                       startPoint: .top, endPoint: .bottom)
+                            .frame(height: 170)
+                    }
+                    .ignoresSafeArea(edges: .bottom)
+                    .allowsHitTesting(false)
 
-                // Degradado al pie: las píldoras son de vidrio y sin él las
-                // filas se leen a través de ellas. Sube hasta 150 pt y no
-                // intercepta toques.
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    LinearGradient(colors: [Palette(systemScheme).background.opacity(0),
-                                            Palette(systemScheme).background],
-                                   startPoint: .top, endPoint: .bottom)
-                        .frame(height: 150)
-                        .allowsHitTesting(false)
+                    HStack(alignment: .bottom) {
+                        ShellDictateButton(isDictating: showsDictation) { showsDictation = true }
+                            .padding(.bottom, 4)
+                        Spacer()
+                        ShellFAB { presentAdd(.ingreso, source: nil, quickID: nil) }
+                    }
+                    .padding(.horizontal, ShellMetrics.sideInset)
+                    .padding(.bottom, 4)
                 }
-                .ignoresSafeArea(edges: .bottom)
-
-                VStack(spacing: 0) {
-                    Spacer(minLength: 0)
-                    ShellBottomBar(selection: tabSelection,
-                                   progress: scrollProgress,
-                                   isDictating: showsDictation,
-                                   badge: { tab in
-                                       let requests = FriendsManager.shared.incomingRequests.count
-                                           + PaymentReminders.shared.inbox.count
-                                       return tab == .social && requests > 0 ? requests : nil
-                                   },
-                                   onReselect: reselect,
-                                   // Directo al formulario, en ingreso; a gasto
-                                   // se cambia dentro, en la cápsula del medio.
-                                   onAdd: { presentAdd(.ingreso, source: nil, quickID: nil) },
-                                   onDictate: { showsDictation = true })
-                        .padding(.bottom, 4)
+                .background(Palette(systemScheme).background.ignoresSafeArea())
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: AppSection.self) { section in
+                    DrillScreen(entry: section)
                 }
             }
-            .background(Color(.systemBackground).ignoresSafeArea())
+            .background(Palette(systemScheme).background.ignoresSafeArea())
             .ignoresSafeArea(.keyboard)
             .onAppear(perform: resolveRecurring)
-            .onChange(of: selectedTab) { _, tab in
-                Diagnostics.shared.log("Pestaña: \(tab)")
-            }
             .onChange(of: appLock.isLocked) { _, locked in
                 // Ajustes y las hojas se presentan en la capa de modales de
                 // iOS, por encima de este `ZStack`: si quedaran abiertas, la
@@ -244,10 +217,10 @@ struct ContentView: View {
             .onChange(of: appLock.isLocked) { _, _ in applyPendingLinkIfReady() }
             .onReceive(NotificationCenter.default.publisher(for: ActivityFocus.notification)) { note in
                 guard let request = ActivityFocus.request(from: note) else { return }
-                focusRequest = request
-                selectedTab = .summary
-                summarySub = .today
+                Task { await focus(on: request) }
             }
+            .sheet(item: $focusedExpense) { ExpenseDetailsView(expense: $0) }
+            .sheet(item: $focusedIncome) { IncomeDetailsView(income: $0) }
             .onChange(of: showSplash) { _, _ in applyPendingLinkIfReady() }
             
             // Blindaje instantáneo: montado siempre, sin `.task` ni
@@ -307,106 +280,18 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Contenido de la pestaña
+    // MARK: - Ir a un movimiento
 
-    /// Cada pestaña resuelve su sub-vista. Las diez viven en su propio
-    /// archivo y comparten el mismo esqueleto: `TrackableScrollView`, el hueco
-    /// del header flotante arriba y el de las píldoras abajo.
-    @ViewBuilder
-    private var tabContent: some View {
-        switch selectedTab {
-        case .summary:
-            switch summarySub {
-            case .today:
-                TodayScreen(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress,
-                            focus: $focusRequest)
-            case .movements:
-                MovementsView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
-            case .balance:
-                BalanceView(scrollToTopTrigger: $scrollToTopTrigger,
-                            progress: scrollProgress,
-                            onAddIncome: { presentAdd(.ingreso, source: nil, quickID: nil) })
-            }
-
-        case .analysis:
-            switch analysisSub {
-            case .pending:
-                PendingView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
-            case .categories:
-                CategoriesOverviewView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
-            case .tags:
-                TagsView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
-            case .history:
-                HistoryView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
-            }
-
-        case .social:
-            switch socialSub {
-            case .social:
-                SocialHubView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
-            case .profile:
-                ProfileView(scrollToTopTrigger: $scrollToTopTrigger, progress: scrollProgress)
-            }
-        }
-    }
-
-    // MARK: - Header flotante
-
-    /// Ajustes y tema a la izquierda —fijos en las tres pestañas—, y a la
-    /// derecha la píldora de sub-navegación de la pestaña activa.
-    ///
-    /// Vive en `ShellHeaderBar`, no aquí: es quien lee el desplazamiento, y
-    /// esa lectura no puede quedarse en este cuerpo.
-    private var header: some View {
-        ShellHeaderBar(tab: selectedTab,
-                       progress: scrollProgress,
-                       summarySub: $summarySub,
-                       analysisSub: $analysisSub,
-                       socialSub: $socialSub,
-                       onSettings: { showSettings = true },
-                       onTheme: toggleTheme,
-                       onMeasureThemeButton: { themeButtonCenter = $0 })
-    }
-
-    // MARK: - Acciones del chrome
-
-    /// Tocar la pestaña ya activa: primero sube al tope, y si ya está arriba
-    /// vuelve a su sub-vista por defecto.
-    /// La barra inferior escribe aquí y no en `selectedTab` directo: entrar a
-    /// Análisis desde la barra abre siempre Categorías. Los enlaces profundos
-    /// (Pendientes, Historial) cambian `selectedTab` por su cuenta y conservan
-    /// la sub-vista que eligen.
-    private var tabSelection: Binding<AppTab> {
-        Binding(
-            get: { selectedTab },
-            set: { tab in
-                if tab == .analysis, selectedTab != .analysis {
-                    analysisSub = .categories
-                }
-                selectedTab = tab
-            }
-        )
-    }
-
-    private func reselect(_ tab: AppTab) {
-        let atTop = scrollProgress.offset < 12
-        guard atTop else {
-            scrollToTopTrigger.toggle()
-            return
-        }
-
-        withAnimation(.easeInOut(duration: 0.26)) {
-            switch tab {
-            case .summary:  summarySub = .today
-            case .analysis: analysisSub = .categories
-            case .social:   socialSub = .social
-            }
-        }
-    }
-
-    private func toggleTheme() {
-        ThemeAnimator.animateThemeChange(from: themeButtonCenter) {
-            appearanceRaw = (systemScheme == .dark ? AppAppearance.light : .dark).rawValue
+    /// Espera a que bajen las hojas que pidieron ir (se cierran solas al
+    /// recibir el aviso) y abre el detalle del movimiento.
+    @MainActor
+    private func focus(on request: ActivityFocus.Request) async {
+        try? await Task.sleep(for: .milliseconds(650))
+        let id = request.id
+        if let expense = try? modelContext.fetch(FetchDescriptor<Expense>(predicate: #Predicate { $0.id == id })).first {
+            focusedExpense = expense
+        } else if let income = try? modelContext.fetch(FetchDescriptor<Income>(predicate: #Predicate { $0.id == id })).first {
+            focusedIncome = income
         }
     }
 }

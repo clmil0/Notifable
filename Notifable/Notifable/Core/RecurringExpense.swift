@@ -176,7 +176,7 @@ final class RecurringExpense {
             return "Cada mes, día \(dayOfMonth)"
         case .yearly:
             let f = DateFormatter()
-            f.locale = Locale(identifier: "es_PE")
+            f.locale = Locale(identifier: "es_ES")
             f.dateFormat = "d 'de' MMMM"
             return "Cada año, " + f.string(from: startDate)
         }

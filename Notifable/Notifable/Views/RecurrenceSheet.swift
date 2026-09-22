@@ -417,7 +417,7 @@ struct RecurrenceSheet: View {
 
     private func shortMonth(_ date: Date) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "MMM"
         return f.string(from: date).replacingOccurrences(of: ".", with: "").lowercased()
     }

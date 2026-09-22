@@ -1,11 +1,11 @@
 import SwiftUI
 import SwiftData
 
-/// Análisis › Pendientes (`2c`): los comercios que la app no supo clasificar.
+/// Pendientes (`2c`): los comercios que la app no supo clasificar.
 ///
-/// El ícono de esta sub-vista **sólo existe en la píldora mientras quedan
-/// pendientes** (`3d`). Al llegar a cero desaparece: un destino permanente que
-/// casi siempre dice «nada pendiente» es ruido con badge.
+/// Su tarjeta en el dashboard **sólo existe mientras quedan pendientes**
+/// (`3d`); al llegar a cero, Etiquetas ocupa su sitio: un destino permanente
+/// que casi siempre dice «nada pendiente» es ruido.
 ///
 /// La sugerencia va **dentro del grupo**, no como banner aparte. Antes vivía
 /// arriba, en una tarjeta propia, y había que acordarse de a qué comercio se
@@ -139,7 +139,7 @@ struct PendingView: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, ShellMetrics.sideInset)
             .padding(.top, ShellMetrics.contentTopInset)
             .padding(.bottom, selected.isEmpty ? ShellMetrics.contentBottomInset
                                                : ShellMetrics.contentBottomInset + 60)
@@ -375,8 +375,8 @@ struct PendingView: View {
                 checkmark(isOn ? .on : .off, size: 20)
                     .frame(width: 24)
 
-                Text(expense.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute())
-                        .capitalized(with: Locale(identifier: "es_PE")))
+                Text(expense.date.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated).hour().minute().locale(Locale(identifier: "es_ES")))
+                        .capitalized(with: Locale(identifier: "es_ES")))
                     .font(.system(size: 14))
                     .foregroundStyle(palette.label)
                     .lineLimit(1)

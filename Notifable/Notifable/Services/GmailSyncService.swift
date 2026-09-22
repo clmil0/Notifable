@@ -786,7 +786,7 @@ class GmailSyncService: ObservableObject {
                         iso.timeZone = TimeZone.current
                         iso.formatOptions = [.withInternetDateTime]
                         let display = DateFormatter()
-                        display.locale = Locale(identifier: "es_PE")
+                        display.locale = Locale(identifier: "es_ES")
                         display.dateFormat = "EEEE d 'de' MMMM, yyyy HH:mm"
                         fechaDebug = "\(display.string(from: parsedDate))  (\(iso.string(from: parsedDate)))"
                         if abs(parsedDate.timeIntervalSinceNow) < 5 {

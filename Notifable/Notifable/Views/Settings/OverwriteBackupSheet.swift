@@ -144,7 +144,7 @@ struct OverwriteBackupSheet: View {
     /// (servidor anterior a v5) sólo se sabe la última fecha.
     private var periodText: String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateStyle = .long
         f.timeStyle = .none
         switch (header.createdAt, header.updatedAt) {

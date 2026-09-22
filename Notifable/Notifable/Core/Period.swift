@@ -73,7 +73,7 @@ struct Period: Equatable, Hashable {
     static let calendar: Calendar = {
         var c = Calendar(identifier: .gregorian)
         c.firstWeekday = 2
-        c.locale = Locale(identifier: "es_PE")
+        c.locale = Locale(identifier: "es_ES")
         c.timeZone = .current
         return c
     }()
@@ -249,7 +249,7 @@ struct Period: Equatable, Hashable {
     var title: String {
         let cal = Period.calendar
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.calendar = cal
 
         switch granularity {
@@ -285,7 +285,7 @@ struct Period: Equatable, Hashable {
     /// siempre en español, así que el mes no puede depender de eso.
     static func spanishMonthName(for date: Date, abbreviated: Bool = false) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.calendar = Period.calendar
         f.dateFormat = abbreviated ? "MMM" : "MMMM"
         return f.string(from: date).capitalizedFirst
@@ -296,7 +296,7 @@ struct Period: Equatable, Hashable {
         switch granularity {
         case .mes:
             let f = DateFormatter()
-            f.locale = Locale(identifier: "es_PE")
+            f.locale = Locale(identifier: "es_ES")
             f.dateFormat = "MMM yyyy"
             return f.string(from: reference).capitalizedFirst
         default:

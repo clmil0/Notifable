@@ -112,8 +112,8 @@ struct TagChip: View {
 ///
 /// Crear y asignar son el mismo gesto —nadie crea una etiqueta para no
 /// ponerla—, así que el campo de texto de arriba hace las dos cosas y no hay
-/// ningún modo "gestionar etiquetas" aquí dentro: eso vive en Análisis ›
-/// Etiquetas, que es donde se renombra, se fusiona y se borra.
+/// ningún modo "gestionar etiquetas" aquí dentro: eso vive en
+/// Categorías › Etiquetas, que es donde se renombra, se fusiona y se borra.
 struct TagPickerSheet: View {
 
     let selected: [String]

@@ -109,7 +109,7 @@ struct IncomeDetailsView: View {
     /// «1 set · Transferencia».
     private var subtitle: String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM"
         return f.string(from: income.date).replacingOccurrences(of: ".", with: "") + " · " + income.source
     }
@@ -197,7 +197,7 @@ struct IncomeDetailsView: View {
     /// «1 set 2026, 09:12».
     private var fullDate: String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM yyyy, HH:mm"
         return f.string(from: income.date).replacingOccurrences(of: ".", with: "")
     }
@@ -418,8 +418,8 @@ struct IncomeDestinoSheet: View {
             .foregroundStyle(palette.secondaryLabel)
     }
 
-    /// Lleva a la deuda en Resumen › Hoy: se cierran estas hojas,
-    /// cambia al día del movimiento si hace falta y lo resalta.
+    /// Lleva a la deuda: se cierran estas hojas y se abre su detalle
+    /// (`ActivityFocus`).
     private func linkedDebtRow(_ debt: Expense) -> some View {
         let color = CategoryStyle.color(for: debt.category, accent: accent.color)
         return Button {
@@ -439,7 +439,7 @@ struct IncomeDestinoSheet: View {
                         .foregroundStyle(palette.label)
                         .lineLimit(1)
                     Text(Money.format(debt.amount, currency: debt.currency) + " · "
-                         + debt.date.formatted(.dateTime.day().month()) + " · Ver en Resumen")
+                         + debt.date.formatted(.dateTime.day().month().locale(Locale(identifier: "es_ES"))) + " · Ver detalle")
                         .font(.footnote)
                         .foregroundStyle(palette.secondaryLabel)
                         .lineLimit(1)

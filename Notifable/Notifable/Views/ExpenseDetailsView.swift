@@ -196,7 +196,7 @@ struct ExpenseDetailsView: View {
     private var subtitle: String {
         let calendar = Period.calendar
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM"
         let day = f.string(from: expense.date).replacingOccurrences(of: ".", with: "")
         let prefix = calendar.isDateInToday(expense.date) ? "Hoy, "

@@ -395,14 +395,14 @@ struct PendingConfirmationView: View {
 
     private func longDate(_ date: Date) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "EEEE d"
         return f.string(from: date).capitalizedFirst
     }
 
     private func shortDate(_ date: Date) -> String {
         let f = DateFormatter()
-        f.locale = Locale(identifier: "es_PE")
+        f.locale = Locale(identifier: "es_ES")
         f.dateFormat = "d MMM"
         return f.string(from: date).replacingOccurrences(of: ".", with: "")
     }
