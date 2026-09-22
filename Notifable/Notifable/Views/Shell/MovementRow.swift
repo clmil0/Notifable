@@ -45,6 +45,7 @@ struct MovementIcon: View {
 enum MovementStyle {
 
     static func icon(for expense: Expense) -> String {
+        if expense.isReversal || expense.isVoided { return "arrow.uturn.backward" }
         if expense.merchant.hasPrefix("PLIN - ") { return "plin_icon" }
         if expense.merchant.hasPrefix("YAPE - ") { return "yape_icon" }
         if expense.merchant.hasPrefix("BBVA - ") { return "bbva_icon" }
@@ -53,6 +54,7 @@ enum MovementStyle {
     }
 
     static func color(for expense: Expense, accent: Color, scheme: ColorScheme) -> Color {
+        if expense.isReversal || expense.isVoided { return Palette(scheme).warning }
         if expense.merchant.hasPrefix("PLIN - ") { return Color(red: 0, green: 0.7, blue: 0.9) }
         if expense.merchant.hasPrefix("YAPE - ") { return Color(red: 0.5, green: 0, blue: 0.5) }
         if expense.merchant.hasPrefix("BBVA - ") { return Color(red: 0.0, green: 0.27, blue: 0.51) }
@@ -93,9 +95,9 @@ struct MovementRow: View {
     private var palette: Palette { Palette(scheme) }
     private var accent: AppThemeColor { .current }
 
-    /// Un traslado no se clasifica: no es gasto.
+    /// Un traslado o una anulación no se clasifican: no son gasto.
     private var isUnclassified: Bool {
-        expense.category == Accounting.unclassified && !expense.isTransfer
+        expense.category == Accounting.unclassified && expense.countsAsSpending
     }
 
     /// Un gasto marcado «por cobrar», o con abonos ya recibidos. La fila no
@@ -110,16 +112,29 @@ struct MovementRow: View {
         return "Por cobrar · falta " + Money.format(outstanding, currency: expense.currency)
     }
 
+    /// Un gasto recién borrado —el aviso de anulación al elegir la compra—
+    /// puede volver a dibujarse un fotograma antes de que `@Query` lo saque de
+    /// la lista. Leer cualquier propiedad suya ahí es un error fatal de
+    /// SwiftData.
     var body: some View {
+        if expense.isDeleted || expense.modelContext == nil {
+            EmptyView()
+        } else {
+            content
+        }
+    }
+
+    private var content: some View {
         HStack(spacing: 12) {
             MovementIcon(icon: MovementStyle.icon(for: expense),
                          color: MovementStyle.color(for: expense, accent: accent.color, scheme: scheme))
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(Accounting.displayName(expense.merchant))
+                    Text(expense.isReversal ? "Anulación de compra" : Accounting.displayName(expense.merchant))
                         .font(.system(size: 16.5, weight: .semibold))
-                        .foregroundStyle(palette.label)
+                        .strikethrough(expense.isVoided)
+                        .foregroundStyle(expense.isVoided ? palette.secondaryLabel : palette.label)
                         .lineLimit(1)
 
                     if expense.isSubscription {
@@ -154,7 +169,8 @@ struct MovementRow: View {
 
             Text(amountText)
                 .font(.system(size: 16.5, weight: .semibold))
-                .foregroundStyle(expense.isTransfer ? palette.secondaryLabel : palette.label)
+                .strikethrough(expense.isVoided)
+                .foregroundStyle(expense.countsAsSpending ? palette.label : palette.secondaryLabel)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -237,7 +253,7 @@ struct MovementRow: View {
     /// sin punto.
     @ViewBuilder
     private var subtitleLine: some View {
-        if let tag = expense.tags.first {
+        if let tag = expense.tags.first, expense.countsAsSpending {
             HStack(spacing: 5) {
                 Text(expense.category + " ·")
                     .foregroundStyle(palette.secondaryLabel)
@@ -267,6 +283,11 @@ struct MovementRow: View {
     }
 
     private var subtitle: String {
+        if expense.isReversal {
+            let card = expense.cardLastDigits.map { " · •••• " + $0 } ?? ""
+            return "Toca para elegir cuál" + card
+        }
+        if expense.isVoided { return "Anulada por el banco" }
         if expense.isTransfer { return MovementStyle.transferNote }
         if let source = MovementStyle.source(for: expense) {
             return expense.category + " · " + source
@@ -280,8 +301,9 @@ struct MovementRow: View {
         let paid = Accounting.paid(of: expense)
         let outstanding = Accounting.outstanding(of: expense)
         let displayed = (expense.isDebt || Money.cents(paid) > 0) ? outstanding : expense.amount
-        // Un traslado no resta: el dinero sigue siendo tuyo.
-        return (expense.isTransfer ? "" : "–") + Money.format(displayed, currency: expense.currency)
+        // Un traslado no resta: el dinero sigue siendo tuyo. Un aviso de
+        // anulación tampoco: no es un gasto.
+        return (expense.isTransfer || expense.isReversal ? "" : "–") + Money.format(displayed, currency: expense.currency)
     }
 }
 

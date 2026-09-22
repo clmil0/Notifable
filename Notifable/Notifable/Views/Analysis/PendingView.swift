@@ -49,7 +49,7 @@ struct PendingView: View {
 
     private var unclassified: [Expense] {
         // Un traslado entre tus cuentas no se clasifica: no es gasto.
-        let all = expenses.filter { $0.category == Accounting.unclassified && !$0.isTransfer }
+        let all = expenses.filter { $0.category == Accounting.unclassified && $0.countsAsSpending }
         guard scope == .month else { return all }
         let range = month.interval
         return all.filter { $0.date >= range.start && $0.date < range.end }
@@ -90,7 +90,7 @@ struct PendingView: View {
         let visible = Array(groups.prefix(visibleCount))
         let total = Money.sum(groups) { $0.total }
         let movementCount = groups.reduce(0) { $0 + $1.expenses.count }
-        let hasAnyPending = expenses.contains { $0.category == Accounting.unclassified && !$0.isTransfer }
+        let hasAnyPending = expenses.contains { $0.category == Accounting.unclassified && $0.countsAsSpending }
 
         TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 0) {

@@ -36,6 +36,12 @@ struct ExpenseEdit: Codable, Equatable {
     var isDebt: Bool?
     var debtSettled: Bool?
     var cardLastDigits: String?
+    /// El usuario eligió esta compra como la que anuló el banco. El aviso de
+    /// anulación se borra; sin esto, releer el correo la devolvería viva.
+    var isVoided: Bool?
+    /// El aviso de anulación que se borró al elegir esta compra. «Deshacer»
+    /// lo vuelve a crear con esto: el aviso ya no existe en la base.
+    var voidedBy: ReversalNotice?
     /// Soles por dólar con que se registró el gasto la primera vez. No es una
     /// edición del usuario sino un dato que el correo no trae: al releerlo en
     /// otro teléfono el gasto nacería con el tipo de cambio de ese día y los
@@ -51,7 +57,7 @@ struct ExpenseEdit: Codable, Equatable {
     var isUserEdit: Bool {
         category != nil || tags != nil || merchant != nil || amount != nil || occurredAt != nil
             || notes != nil || isSubscription != nil || isDebt != nil || debtSettled != nil
-            || cardLastDigits != nil
+            || cardLastDigits != nil || isVoided != nil
     }
 
     /// Lo nuevo pisa a lo viejo campo por campo: dos ediciones distintas del
@@ -71,6 +77,8 @@ struct ExpenseEdit: Codable, Equatable {
                     isDebt: newer.isDebt ?? isDebt,
                     debtSettled: newer.debtSettled ?? debtSettled,
                     cardLastDigits: newer.cardLastDigits ?? cardLastDigits,
+                    isVoided: newer.isVoided ?? isVoided,
+                    voidedBy: newer.voidedBy ?? voidedBy,
                     // Al revés que el resto: gana el **primero**. El tipo de
                     // cambio que vale es el del día del gasto, no el de una
                     // relectura posterior en otro teléfono.
@@ -80,13 +88,15 @@ struct ExpenseEdit: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case markKey, category, tags, merchant, amount, occurredAt, notes
-        case isSubscription, isDebt, debtSettled, cardLastDigits, fxRate, updatedAt
+        case isSubscription, isDebt, debtSettled, cardLastDigits, isVoided, voidedBy, fxRate, updatedAt
     }
 
     init(markKey: String, category: String? = nil, tags: [String]? = nil, merchant: String? = nil,
          amount: Double? = nil, occurredAt: Date? = nil, notes: String? = nil,
          isSubscription: Bool? = nil, isDebt: Bool? = nil, debtSettled: Bool? = nil,
-         cardLastDigits: String? = nil, fxRate: Double? = nil, updatedAt: Date = Date()) {
+         cardLastDigits: String? = nil, isVoided: Bool? = nil, voidedBy: ReversalNotice? = nil,
+         fxRate: Double? = nil,
+         updatedAt: Date = Date()) {
         self.markKey = markKey
         self.category = category
         self.tags = tags
@@ -98,6 +108,8 @@ struct ExpenseEdit: Codable, Equatable {
         self.isDebt = isDebt
         self.debtSettled = debtSettled
         self.cardLastDigits = cardLastDigits
+        self.isVoided = isVoided
+        self.voidedBy = voidedBy
         self.fxRate = fxRate
         self.updatedAt = updatedAt
     }
@@ -125,6 +137,8 @@ struct ExpenseEdit: Codable, Equatable {
         isDebt = try c.decodeIfPresent(Bool.self, forKey: .isDebt)
         debtSettled = try c.decodeIfPresent(Bool.self, forKey: .debtSettled)
         cardLastDigits = try c.decodeIfPresent(String.self, forKey: .cardLastDigits)
+        isVoided = try c.decodeIfPresent(Bool.self, forKey: .isVoided)
+        voidedBy = try? c.decodeIfPresent(ReversalNotice.self, forKey: .voidedBy)
         fxRate = (try? c.decodeIfPresent(RateCoded.self, forKey: .fxRate))??.wrappedValue
         updatedAt = (try? c.decode(Date.self, forKey: .updatedAt)) ?? Date()
     }
@@ -142,6 +156,8 @@ struct ExpenseEdit: Codable, Equatable {
         try c.encodeIfPresent(isDebt, forKey: .isDebt)
         try c.encodeIfPresent(debtSettled, forKey: .debtSettled)
         try c.encodeIfPresent(cardLastDigits, forKey: .cardLastDigits)
+        try c.encodeIfPresent(isVoided, forKey: .isVoided)
+        try c.encodeIfPresent(voidedBy, forKey: .voidedBy)
         try c.encodeIfPresent(fxRate.map { RateCoded(wrappedValue: $0) }, forKey: .fxRate)
         try c.encode(updatedAt, forKey: .updatedAt)
     }
@@ -182,6 +198,7 @@ enum ExpenseEditStore {
                        isDebt: Bool? = nil,
                        debtSettled: Bool? = nil,
                        cardLastDigits: String? = nil,
+                       isVoided: Bool? = nil,
                        defaults: UserDefaults = .standard) {
         guard expense.emailID != nil else { return }
         let edit = ExpenseEdit(markKey: TransactionKey.key(for: expense),
@@ -189,7 +206,8 @@ enum ExpenseEditStore {
                                occurredAt: occurredAt, notes: notes,
                                isSubscription: isSubscription, isDebt: isDebt,
                                debtSettled: debtSettled,
-                               cardLastDigits: cardLastDigits)
+                               cardLastDigits: cardLastDigits,
+                               isVoided: isVoided)
         guard !edit.isEmpty else { return }
         save(edit, defaults: defaults)
     }
@@ -345,6 +363,9 @@ enum ExpenseEditStore {
             }
             if let value = edit.cardLastDigits, expense.cardLastDigits != value {
                 expense.cardLastDigits = value; touched = true
+            }
+            if let value = edit.isVoided, expense.isVoided != value {
+                expense.isVoided = value; touched = true
             }
             if let value = edit.fxRate, expense.currency != "PEN", expense.fxRateAtCapture != value {
                 expense.fxRateAtCapture = value; touched = true

@@ -384,3 +384,83 @@ extension MoneyAccountsTests {
         #expect(catalog.accounts["o:bbva:8156"].map(prefs.name(for:)) == "BBVA Crédito")
     }
 }
+
+// MARK: - Anulaciones BBVA (correos reales del 21/09/2026)
+
+extension MoneyAccountsTests {
+
+    /// «Has realizado un consumo con tu tarjeta BBVA», sin el HTML.
+    static func bbvaVendingEmail(time: String) -> String {
+        """
+        Hola, JOSEPH   Has realizado el siguiente consumo:     Comercio: VEND OPTION LIFE     \
+        Monto: 2.00   Moneda: PEN     Fecha: 21/09/2026   Hora: \(time)       \
+        Este se cargará a tu tarjeta terminada en *8156   Si no hiciste esta operaci&oacute;n, \
+        te recomendamos apagar tu tarjeta
+        """
+    }
+
+    /// «La compra con tu tarjeta BBVA ha sido anulada», sin el HTML (las
+    /// entidades en mayúscula, como &Oacute;, quedan sin traducir).
+    static let bbvaReversalEmail = """
+        Hola, JOSEPH  Te informamos que tu compra  ha sido anulada.      DETALLES DE OPERACI&Oacute;N \
+        Comercio  REVERSO TOTAL  Monto  2.00  Moneda  PEN  Fecha  21/09/2026  Hora  14:25:04  \
+        &Uacute;ltimos digitos de tarjeta  *8156     Te recordamos que este consumo  no se cargar&aacute; \
+        a tu tarjeta.
+        """
+
+    @Test("La anulación se lee como aviso, no como gasto")
+    func anulacionEsAviso() throws {
+        let reversal = try #require(BBVAParser().parse(cleanText: Self.bbvaReversalEmail))
+        #expect(reversal.isReversal)
+        #expect(reversal.merchant == "ANULACIÓN - REVERSO TOTAL")
+        #expect(Money.cents(reversal.amount) == 200)
+        #expect(reversal.cardLastDigits == "8156")
+        #expect(reversal.date == Self.day(2026, 9, 21, hour: 14, minute: 25).addingTimeInterval(4))
+        #expect(!reversal.countsAsSpending)
+        #expect(Money.isZero(Accounting.netCost(of: reversal.accountingSnapshot)))
+
+        // El consumo normal sigue siendo un gasto.
+        let purchase = try #require(BBVAParser().parse(cleanText: Self.bbvaVendingEmail(time: "14:24:40")))
+        #expect(!purchase.isReversal)
+        #expect(purchase.merchant == "VEND OPTION LIFE")
+    }
+
+    @Test("Dos compras iguales: se sugiere la anterior al aviso, no la que vino después")
+    func sugiereLaAnterior() throws {
+        let parser = BBVAParser()
+        let first = try #require(parser.parse(cleanText: Self.bbvaVendingEmail(time: "14:24:40")))
+        let second = try #require(parser.parse(cleanText: Self.bbvaVendingEmail(time: "14:25:32")))
+        let reversal = try #require(parser.parse(cleanText: Self.bbvaReversalEmail))
+
+        let result = ReversalMatcher.candidates(for: ReversalMatcher.charge(reversal),
+                                                among: [second, first].map(ReversalMatcher.charge))
+        #expect(result.suggested == first.id)
+        #expect(result.ordered == [first.id, second.id], "las dos son candidatas; la sugerida va primero")
+    }
+
+    @Test("Candidatas: mismo monto y moneda, ±7 días, y la misma tarjeta si ambas la dicen")
+    func ventanaYTarjeta() {
+        let t = Self.day(2026, 9, 21, hour: 14)
+        let reversal = ReversalMatcher.Charge(id: UUID(), cents: 200, currency: "PEN", date: t, digits: "8156")
+        let later = ReversalMatcher.Charge(id: UUID(), cents: 200, currency: "PEN",
+                                           date: t.addingTimeInterval(6 * 86_400), digits: "8156")
+        let tooOld = ReversalMatcher.Charge(id: UUID(), cents: 200, currency: "PEN",
+                                            date: t.addingTimeInterval(-8 * 86_400), digits: "8156")
+        let otherCard = ReversalMatcher.Charge(id: UUID(), cents: 200, currency: "PEN", date: t, digits: "2368")
+        let otherAmount = ReversalMatcher.Charge(id: UUID(), cents: 250, currency: "PEN", date: t, digits: "8156")
+        let result = ReversalMatcher.candidates(for: reversal, among: [later, tooOld, otherCard, otherAmount])
+        #expect(result.ordered == [later.id], "7 días después sí; 8 antes, otra tarjeta u otro monto no")
+        #expect(result.suggested == nil, "ninguna es anterior al aviso: se elige a mano")
+    }
+
+    @Test("Una compra anulada no suma")
+    func anuladaNoSuma() {
+        let period = Period(granularity: .mes, reference: Self.day(2026, 9, 21))
+        let expenses = [
+            ExpenseSnapshot(amount: 2, date: Self.day(2026, 9, 21), merchant: "VEND OPTION LIFE", isVoided: true),
+            ExpenseSnapshot(amount: 2, date: Self.day(2026, 9, 21), merchant: "VEND OPTION LIFE")
+        ]
+        let totals = Accounting.totals(expenses: expenses, incomes: [], period: period, usdToPen: 3.7)
+        #expect(Money.cents(totals.spent) == 200)
+    }
+}

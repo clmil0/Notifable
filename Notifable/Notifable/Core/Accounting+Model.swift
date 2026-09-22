@@ -29,7 +29,8 @@ extension Expense {
             fxRateAtCapture: fxRateAtCapture,
             paymentsInOwnCurrency: paymentsInOwnCurrency,
             hasForeignPayments: hasForeignPayments,
-            isTransfer: isTransfer
+            isTransfer: isTransfer,
+            isVoided: isVoided || isReversal
         )
     }
 

@@ -11,6 +11,7 @@ struct BBVAParser: BankEmailParser {
     }
     
     func parse(cleanText: String) -> Expense? {
+        if let expense = parseReversal(cleanText) { return expense }
         if let expense = parseATMWithdrawal(cleanText) { return expense }
         if let expense = parseCardlessWithdrawal(cleanText) { return expense }
         if let expense = parsePlinSent(cleanText) { return expense }
@@ -413,5 +414,41 @@ struct BBVAParser: BankEmailParser {
               let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)),
               let range = Range(match.range(at: 1), in: text) else { return nil }
         return String(text[range])
+    }
+
+    // MARK: - Anulaciones
+
+    /// «La compra con tu tarjeta BBVA ha sido anulada»: Comercio REVERSO
+    /// TOTAL, Monto, Moneda, Fecha, Hora y «Últimos dígitos de tarjeta
+    /// *8156». Sin dos puntos tras cada rótulo, al revés que el consumo.
+    ///
+    /// No es un gasto: sale como aviso (`isReversal`) para que el usuario
+    /// elija qué compra se anuló (`ReversalMatcher`).
+    private func parseReversal(_ cleanText: String) -> Expense? {
+        guard cleanText.contains("ha sido anulada"),
+              let amountText = Self.capture("Monto:?\\s*(?:S/\\.?\\s*)?([0-9][0-9.,]*)", in: cleanText),
+              let amount = Double(amountText.replacingOccurrences(of: ",", with: "")) else { return nil }
+
+        let currencyCode = Self.capture("Moneda:?\\s*([A-Z]{3})", in: cleanText)
+        let currency = currencyCode == "USD" ? "USD" : "PEN"
+        let label = Self.capture("Comercio:?\\s*(.*?)\\s+Monto", in: cleanText)?
+            .trimmingCharacters(in: .whitespaces)
+        let card = Self.capture("tarjeta:?\\s*\\*?\\s*([0-9]{4})", in: cleanText)
+
+        var date = Date()
+        if let day = Self.capture("Fecha:?\\s*([0-9]{2}/[0-9]{2}/[0-9]{4})", in: cleanText) {
+            let time = Self.capture("Hora:?\\s*([0-9]{2}:[0-9]{2}(?::[0-9]{2})?)", in: cleanText) ?? "00:00"
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.dateFormat = time.count > 5 ? "dd/MM/yyyy HH:mm:ss" : "dd/MM/yyyy HH:mm"
+            date = formatter.date(from: day + " " + time) ?? date
+        }
+
+        let expense = Expense(amount: amount,
+                              merchant: ReversalMatcher.merchantPrefix + (label?.isEmpty == false ? label! : "Compra"),
+                              date: date, category: "Sin Clasificar", currency: currency,
+                              cardLastDigits: card)
+        expense.isReversal = true
+        return expense
     }
 }

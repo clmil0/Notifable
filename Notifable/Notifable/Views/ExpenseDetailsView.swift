@@ -45,11 +45,25 @@ struct ExpenseDetailsView: View {
         expense.isDebt || expense.debtSettled || !(expense.payments ?? []).isEmpty
     }
 
+    /// Un aviso de anulación no tiene ficha: tocarlo es elegir qué compra se
+    /// anuló.
     var body: some View {
+        if expense.isDeleted || expense.modelContext == nil {
+            // Borrado mientras la hoja se cierra (el aviso ya resuelto).
+            Color.clear
+        } else if expense.isReversal {
+            ReversalResolveView(reversal: expense)
+        } else {
+            details
+        }
+    }
+
+    private var details: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
                     header
+                    if expense.isVoided { voidedBanner }
                     foreignPaymentsWarning
                     properties
 
@@ -210,6 +224,32 @@ struct ExpenseDetailsView: View {
     }
 
     // MARK: - Propiedades
+
+    /// Compra anulada por el banco: no cuenta. Si se eligió por error, se
+    /// deshace aquí.
+    private var voidedBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.uturn.backward.circle.fill")
+                .foregroundStyle(palette.warning)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Anulada por el banco")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.label)
+                Text("No cuenta en tus gastos.")
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+            Spacer(minLength: 8)
+            Button("Deshacer") {
+                ReversalMatcher.restore(expense, in: modelContext)
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(accent.onSurface(colorScheme))
+        }
+        .padding(14)
+        .background(palette.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .padding(.horizontal, 16)
+    }
 
     private var properties: some View {
         VStack(spacing: 0) {

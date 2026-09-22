@@ -251,16 +251,30 @@ struct AddTransactionSheet: View {
         let amountColor: Color = isInvalid ? palette.negative
             : (draft.amountText.isEmpty ? palette.tertiaryLabel : palette.label)
 
+        let font = Font.system(size: amountFontSize, weight: .bold, design: .rounded)
+
         return HStack(alignment: .firstTextBaseline, spacing: 10) {
-            TextField("0", text: amountBinding)
-                .font(.system(size: 64, weight: .bold, design: .rounded))
-                .foregroundStyle(amountColor)
-                .keyboardType(.decimalPad)
-                .focused($focused, equals: .amount)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                .fixedSize(horizontal: true, vertical: false)
-                .accessibilityLabel(amountLabel)
+            // El ancho lo da un `Text` invisible con lo escrito, y el campo se
+            // monta encima. Antes el campo medía lo que el «0» de ejemplo y
+            // `minimumScaleFactor` encogía el número al escribir para que
+            // cupiera ahí: el 0 se veía grande y el 42.5, pequeño.
+            ZStack(alignment: .leading) {
+                Text(draft.amountText.isEmpty ? "0" : draft.amountText)
+                    .font(font)
+                    .lineLimit(1)
+                    .padding(.trailing, 4)      // sitio para el cursor
+                    .hidden()
+
+                TextField("0", text: amountBinding)
+                    .font(font)
+                    .foregroundStyle(amountColor)
+                    .keyboardType(.decimalPad)
+                    .focused($focused, equals: .amount)
+                    .lineLimit(1)
+                    .accessibilityLabel(amountLabel)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            .animation(.easeOut(duration: 0.15), value: amountFontSize)
 
             Text(draft.currency == "USD" ? "US$" : "S/")
                 .font(.system(size: 30, weight: .medium, design: .rounded))
@@ -274,6 +288,15 @@ struct AddTransactionSheet: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(amountLabel)
         .accessibilityValue(Money.format(draft.amount, currency: draft.currency))
+    }
+
+    /// 64 pt hasta seis caracteres («1234.5»); desde ahí baja de a poco para
+    /// que un monto largo («123456789.99») siga cabiendo con su moneda. Es el
+    /// mismo tamaño para el número y para el `Text` que le da el ancho, así
+    /// que nunca se reescala a medias.
+    private var amountFontSize: CGFloat {
+        let count = max(draft.amountText.count, 1)
+        return count <= 6 ? 64 : max(38, 64 - CGFloat(count - 6) * 5)
     }
 
     /// Sólo hay dos monedas: un segmentado de 26 pt en vez del `Picker` de rueda

@@ -51,6 +51,12 @@ final class Expense {
     /// recalcula desde `AccountBook`, así que no hace falta anotarlo en
     /// `ExpenseEditStore` para que sobreviva a releer el correo.
     var isTransfer: Bool = false
+    /// Aviso de que el banco **anuló** una compra («La compra con tu tarjeta
+    /// ha sido anulada»). No es un gasto: espera a que el usuario elija qué
+    /// compra se anuló (`ReversalMatcher`) y entonces se borra.
+    var isReversal: Bool = false
+    /// Compra anulada por el banco: se ve tachada y no suma en ningún total.
+    var isVoided: Bool = false
 
     /// Soles por 1 USD el día del movimiento.
     ///

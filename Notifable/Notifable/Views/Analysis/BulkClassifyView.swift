@@ -30,7 +30,7 @@ struct BulkClassifyView: View {
     // MARK: - Datos
 
     private var unclassified: [Expense] {
-        let all = expenses.filter { $0.category == Accounting.unclassified && !$0.isTransfer }
+        let all = expenses.filter { $0.category == Accounting.unclassified && $0.countsAsSpending }
         guard onlyThisMonth else { return all }
         let range = Period(granularity: .mes, reference: Date()).interval
         return all.filter { $0.date >= range.start && $0.date < range.end }

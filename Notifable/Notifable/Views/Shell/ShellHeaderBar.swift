@@ -57,12 +57,13 @@ struct ShellHeaderBar: View {
         let end = month.end
         let unclassifiedName = Accounting.unclassified
         _unclassified = Query(filter: #Predicate<Expense> {
-            $0.category == unclassifiedName && !$0.isTransfer && $0.date >= start && $0.date < end
+            $0.category == unclassifiedName && !$0.isTransfer && !$0.isVoided && !$0.isReversal
+                && $0.date >= start && $0.date < end
         })
 
-        // Los traslados entre tus cuentas no se clasifican: no cuentan aquí.
+        // Ni los traslados ni las anulaciones se clasifican: no cuentan aquí.
         var anyDescriptor = FetchDescriptor<Expense>(predicate: #Predicate<Expense> {
-            $0.category == unclassifiedName && !$0.isTransfer
+            $0.category == unclassifiedName && !$0.isTransfer && !$0.isVoided && !$0.isReversal
         })
         anyDescriptor.fetchLimit = 1
         _anyUnclassified = Query(anyDescriptor)

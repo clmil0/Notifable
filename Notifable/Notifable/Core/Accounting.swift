@@ -26,6 +26,9 @@ struct ExpenseSnapshot {
     /// Dinero que va a una cuenta tuya (`TransferDetector`): no es gasto. No
     /// suma en ningún total ni en ningún corte.
     var isTransfer: Bool
+    /// Compra anulada por el banco, o el propio aviso de anulación: no es un
+    /// gasto. Cuenta cero igual que un traslado.
+    var isVoided: Bool
 
     init(amount: Double,
          currency: String = "PEN",
@@ -37,7 +40,8 @@ struct ExpenseSnapshot {
          fxRateAtCapture: Double? = nil,
          paymentsInOwnCurrency: Double = 0,
          hasForeignPayments: Bool = false,
-         isTransfer: Bool = false) {
+         isTransfer: Bool = false,
+         isVoided: Bool = false) {
         self.amount = amount
         self.currency = currency
         self.date = date
@@ -49,6 +53,7 @@ struct ExpenseSnapshot {
         self.paymentsInOwnCurrency = paymentsInOwnCurrency
         self.hasForeignPayments = hasForeignPayments
         self.isTransfer = isTransfer
+        self.isVoided = isVoided
     }
 }
 
@@ -242,7 +247,9 @@ enum Accounting {
         // Intervalo semiabierto [start, end) — ACCOUNTING.md §1. Los traslados
         // entre tus cuentas no entran: ni gasto, ni ingreso, ni categoría
         // (ver `TransferDetector`).
-        let periodExpenses = expenses.filter { !$0.isTransfer && $0.date >= interval.start && $0.date < interval.end }
+        let periodExpenses = expenses.filter {
+            !$0.isTransfer && !$0.isVoided && $0.date >= interval.start && $0.date < interval.end
+        }
         let periodIncomes = incomes.filter { !$0.isTransfer && $0.date >= interval.start && $0.date < interval.end }
 
         let cal = Period.calendar
@@ -375,7 +382,7 @@ enum Accounting {
     /// cualquier suma que pase por aquí —límites, etiquetas, detalle de
     /// categoría—, no sólo `totals`.
     static func netCost(of expense: ExpenseSnapshot) -> Double {
-        guard !expense.isTransfer else { return 0 }
+        guard !expense.isTransfer, !expense.isVoided else { return 0 }
         return Money.clampedToZero(Money.subtract(expense.amount, expense.paymentsInOwnCurrency))
     }
 
