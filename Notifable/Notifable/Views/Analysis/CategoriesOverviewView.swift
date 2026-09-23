@@ -13,9 +13,8 @@ import SwiftData
 /// alto de la fila: la proyección y la edición siguen a un toque, en el
 /// detalle de la categoría.
 ///
-/// Los colores del donut no son los de cada categoría sino la rampa naranja
-/// del gasto: la porción más grande, la más clara. Los íconos de la lista sí
-/// conservan su color, y el punto a su izquierda empata la fila con su porción.
+/// Cada porción del donut lleva el color de su categoría, el mismo de su ícono
+/// en la lista; el punto a su izquierda empata la fila con su porción.
 struct CategoriesOverviewView: View {
     @Binding var scrollToTopTrigger: Bool
     let progress: ScrollProgress
@@ -45,8 +44,7 @@ struct CategoriesOverviewView: View {
         totals.byCategory.enumerated().map { index, category in
             CategoryDonut.Slice(category: category.category,
                                 total: category.total,
-                                // Pasadas las seis, van juntas en «Otras» y en gris.
-                                color: index < 6 ? CategoryDonut.rampColor(at: index) : palette.tertiaryLabel)
+                                color: CategoryStyle.color(for: category.category, accent: accent.color))
         }
     }
 
@@ -167,7 +165,12 @@ struct CategoriesOverviewView: View {
     }
 
     private func categoryList(rows: [Row], slices: [CategoryDonut.Slice]) -> some View {
-        let dots = Dictionary(uniqueKeysWithValues: slices.map { ($0.category, $0.color) })
+        // Las que el donut junta en «Otras» llevan su gris, no su color.
+        let max = CategoryDonut.maxEntries
+        let shown = slices.count > max ? max - 1 : slices.count
+        let dots = Dictionary(uniqueKeysWithValues: slices.enumerated().map { index, slice in
+            (slice.category, index < shown ? slice.color : palette.tertiaryLabel)
+        })
 
         return MovementCard {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in

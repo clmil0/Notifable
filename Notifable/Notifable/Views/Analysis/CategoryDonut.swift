@@ -16,9 +16,9 @@ struct CategoryDonut: View {
     }
 
     let slices: [Slice]
-    /// Igual que en `DonutLegend`: a partir de aquí el resto se junta en una
-    /// sola porción gris, para que el anillo se lea de un vistazo.
-    var maxSlices: Int = 6
+    /// Igual que en `DonutLegend`: como mucho cinco porciones; con más
+    /// categorías, la quinta es «Otras» en gris con el resto.
+    var maxSlices: Int = CategoryDonut.maxEntries
 
     var lineWidth: CGFloat = 26
     var size: CGFloat = 136
@@ -28,11 +28,11 @@ struct CategoryDonut: View {
 
     private var total: Double { Money.sum(slices) { $0.total } }
 
-    /// Las primeras `maxSlices` y, si sobran, «Otras» con el resto.
+    /// Todas si caben; si no, las primeras y «Otras» con el resto.
     private var visibleSlices: [Slice] {
         guard slices.count > maxSlices else { return slices }
-        let rest = slices.dropFirst(maxSlices)
-        return Array(slices.prefix(maxSlices)) + [
+        let rest = slices.dropFirst(maxSlices - 1)
+        return Array(slices.prefix(maxSlices - 1)) + [
             Slice(category: "Otras",
                   total: Money.sum(Array(rest)) { $0.total },
                   color: palette.tertiaryLabel)
@@ -78,22 +78,23 @@ struct CategoryDonut: View {
 struct DonutLegend: View {
     let slices: [CategoryDonut.Slice]
     let total: Double
-    /// A partir de aquí el resto se agrupa en «Otras N».
-    var maxRows: Int = 6
+    /// Filas como mucho, «Otras N» incluida.
+    var maxRows: Int = CategoryDonut.maxEntries
 
     @Environment(\.colorScheme) private var scheme
     private var palette: Palette { Palette(scheme) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(slices.prefix(maxRows)) { slice in
+            let shown = slices.count > maxRows ? maxRows - 1 : slices.count
+            ForEach(slices.prefix(shown)) { slice in
                 row(color: slice.color,
                     name: slice.category,
                     percent: Money.formatPercent(slice.total, of: total))
             }
 
             if slices.count > maxRows {
-                let rest = slices.dropFirst(maxRows)
+                let rest = slices.dropFirst(shown)
                 let restTotal = Money.sum(Array(rest)) { $0.total }
                 row(color: palette.tertiaryLabel,
                     name: "Otras \(rest.count)",
@@ -125,19 +126,6 @@ struct DonutLegend: View {
 }
 
 extension CategoryDonut {
-    /// La rampa del gasto (`1b`): del ámbar al óxido, siempre en el naranja
-    /// del gasto sea cual sea el tema. La porción más grande va en el tono
-    /// más claro, y el punto de cada fila de la lista usa el mismo.
-    static let expenseRamp: [Color] = [
-        Color(red: 1.000, green: 0.690, blue: 0.227),   // #FFB03A
-        Color(red: 1.000, green: 0.541, blue: 0.239),   // #FF8A3D
-        Color(red: 1.000, green: 0.341, blue: 0.133),   // #FF5722
-        Color(red: 0.902, green: 0.290, blue: 0.098),   // #E64A19
-        Color(red: 0.757, green: 0.267, blue: 0.102),   // #C1441A
-        Color(red: 0.541, green: 0.227, blue: 0.125),   // #8A3A20
-    ]
-
-    static func rampColor(at index: Int) -> Color {
-        expenseRamp[min(index, expenseRamp.count - 1)]
-    }
+    /// Porciones del anillo y filas de la leyenda, «Otras» incluida.
+    static let maxEntries = 5
 }

@@ -54,7 +54,7 @@ enum AppThemeColor: String, CaseIterable, Identifiable {
         // ícono y el splash.
         case .blue: return AppBrand.accent
         case .green: return .green
-        case .orange: return .orange
+        case .orange: return Color(red: 1.0, green: 0.62, blue: 0.04)
         case .red: return .red
         case .charcoal:
             return Color(UIColor { traits in

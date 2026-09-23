@@ -865,11 +865,6 @@ class GmailSyncService: ObservableObject {
                 if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
                     let bodyText = self.extractFullText(from: json)
                     
-                    // DEBUG: Guardar el texto si es de BBVA
-                    if bodyText.lowercased().contains("pago autom") {
-                        try? bodyText.write(to: URL(fileURLWithPath: "/Users/josephmt/Downloads/bbva_body.txt"), atomically: true, encoding: .utf8)
-                    }
-                    
                     let receivedAt = (json["internalDate"] as? String)
                         .flatMap(Double.init)
                         .map { Date(timeIntervalSince1970: $0 / 1000) }

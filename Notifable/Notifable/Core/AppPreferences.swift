@@ -68,6 +68,7 @@ enum AppPreferences {
         // Preferencias de vista que sí son una elección duradera
         .init(key: DictationStyle.storageKey, kind: .string, note: "Animación del dictado por voz"),
         .init(key: "categoriesSegment", kind: .string, note: "Pestaña por defecto en Categorías"),
+        .init(key: DashboardStatsSettings.key, kind: .string, note: "Stats del dashboard y su orden"),
         // Las etiquetas del usuario, en un solo JSON. Las que lleva cada gasto
         // viajan con el gasto (`ManualTransactionBackup`) o con su edición
         // (`ExpenseEdit`); esto es sólo la lista y su color.

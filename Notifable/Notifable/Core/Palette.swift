@@ -111,28 +111,36 @@ struct Palette {
 
     // MARK: Gasto e ingreso
 
-    /// El naranja del gasto (`1b`). **Fijo, no sigue al tema**: el tema sólo
-    /// decora (chip de cuenta, selección), y el gasto tiene que leerse igual
-    /// en los dieciséis.
-    var expense: Color { Color(red: 1.0, green: 0.341, blue: 0.133) }         // #FF5722
+    /// El color del gasto ahora sigue al tema.
+    var expense: Color { accent.color }
 
-    /// El naranja de arriba del degradado de barras y del FAB.
-    var expenseLight: Color { Color(red: 1.0, green: 0.439, blue: 0.263) }    // #FF7043
+    /// Un punto más claro que el gasto, del mismo tono.
+    var expenseLight: Color { accent.color.shiftedHSL(lightness: 0.10, scheme: scheme) }
 
-    /// Naranja para **texto** de gasto sobre la superficie: el #FF5722 puro
-    /// vibra en letra pequeña sobre el fondo oscuro, y en claro no llega a AA.
-    var expenseText: Color {
-        dark ? Color(red: 1.0, green: 0.541, blue: 0.357)                     // #FF8A5B
-             : Color(red: 0.749, green: 0.212, blue: 0.047)                   // #BF360C
+    /// Texto en el segundo acento, sólo en los temas de dos colores (`nil` en
+    /// los demás, que se quedan con su gris). Títulos de las tiras, el
+    /// monto sobre la barra elegida, el «vs. mes pasado» y las flechas del
+    /// resumen.
+    var duoText: Color? {
+        accent.isDuotone ? accent.secondaryOnSurface(scheme) : nil
     }
 
-    /// Fondo del chip de delta de gasto.
-    var expenseSoft: Color { expense.opacity(dark ? 0.16 : 0.12) }
+    /// Color para texto de gasto sobre la superficie con contraste verificado.
+    var expenseText: Color { accent.onSurface(scheme) }
 
-    /// El verde del ingreso. Fijo, igual que el naranja.
+    /// Fondo del chip de delta de gasto.
+    var expenseSoft: Color { accent.color.opacity(dark ? 0.16 : 0.12) }
+
+    /// El ingreso. En los temas de dos colores es el segundo acento —el gasto
+    /// ya es el primero—, así ingreso, Neto positivo y deltas a la baja
+    /// llevan los dos colores del tema. En los de un color, el verde de
+    /// siempre: un segundo tono derivado se confundiría con el gasto.
     var income: Color {
-        dark ? Color(red: 0.063, green: 0.725, blue: 0.506)                   // #10B981
-             : Color(red: 0.020, green: 0.588, blue: 0.412)                   // #059669
+        if accent.isDuotone {
+            return dark ? accent.secondaryColor : accent.secondaryOnSurface(scheme)
+        }
+        return dark ? Color(red: 0.063, green: 0.725, blue: 0.506)            // #10B981
+                    : Color(red: 0.020, green: 0.588, blue: 0.412)            // #059669
     }
 
     var incomeSoft: Color { income.opacity(dark ? 0.16 : 0.12) }
@@ -316,12 +324,12 @@ extension AppThemeColor {
         }
     }
 
-    /// El verde del ingreso, para rellenar un ícono o un chip. Ya no sigue al
-    /// tema (`1b`): gasto naranja e ingreso verde en los dieciséis.
-    var incomeFillColor: Color { Palette(.dark).income }
+    /// El color del ingreso, para rellenar un ícono o un chip: el segundo
+    /// acento en los temas de dos colores, el verde en los demás.
+    var incomeFillColor: Color { Palette(.dark, accent: self).income }
 
-    /// El verde del ingreso para texto o un ícono suelto sobre la superficie.
-    func incomeColor(_ scheme: ColorScheme) -> Color { Palette(scheme).income }
+    /// El color del ingreso para texto o un ícono suelto sobre la superficie.
+    func incomeColor(_ scheme: ColorScheme) -> Color { Palette(scheme, accent: self).income }
 
     func secondarySoftFill(_ scheme: ColorScheme) -> Color {
         guard isDuotone else { return softFill(scheme) }

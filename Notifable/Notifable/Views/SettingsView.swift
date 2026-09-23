@@ -45,6 +45,7 @@ struct SettingsView: View {
     // Igual que los avisos: se lee aquí para que la fila de la raíz refleje el
     // valor sin tener que volver a entrar.
     @AppStorage(AppLock.enabledKey) private var lockEnabled = false
+    @AppStorage(DashboardStatsSettings.key) private var statsRaw = DashboardStatsSettings.defaultValue
 
     @State private var query = ""
 
@@ -192,6 +193,11 @@ struct SettingsView: View {
                 AppearanceSettingsView()
             }
             SettingsSeparator()
+            SettingsRow(title: "Estadísticas", icon: "chart.xyaxis.line",
+                        tint: .indigo, value: statsValue) {
+                StatsSettingsView()
+            }
+            SettingsSeparator()
             SettingsRow(title: "Notificaciones", icon: "bell.fill",
                         tint: .red, value: notificationsValue) {
                 NotificationSettingsView()
@@ -232,6 +238,12 @@ struct SettingsView: View {
             parts.append(quickExpenses.count == 1 ? "1 atajo" : "\(quickExpenses.count) atajos")
         }
         return parts.isEmpty ? "Ninguno" : parts.joined(separator: " · ")
+    }
+
+    /// «5 de 7».
+    private var statsValue: String {
+        let count = DashboardStatsSettings.decode(statsRaw).count
+        return count == 0 ? "Ninguna" : "\(count) de \(DashboardStat.allCases.count)"
     }
 
     private var lockValue: String {
@@ -320,6 +332,7 @@ struct SettingsView: View {
         case "gmail":         GmailBanksView()
         case "range":         RangeSyncView()
         case "appearance":    AppearanceSettingsView()
+        case "stats":         StatsSettingsView()
         case "notifications": NotificationSettingsView()
         case "lock":          AppLockSettingsView()
         case "diagnostics":   DiagnosticsView()

@@ -45,10 +45,10 @@ struct MovementsView: View {
     /// clasifica.
     enum Kind: Hashable { case gastos, ingresos, porCobrar }
 
-    /// Gastos marcados por cobrar a los que aún les falta algo. Se lee una
+    /// Si hay algo por cobrar. Se lee una
     /// vez por dibujado (`body`), no en cada sitio que lo necesita.
-    private var debts: [Expense] {
-        expenses.filter { $0.isDebt && !$0.isTransfer && Money.cents(Accounting.outstanding(of: $0)) > 0 }
+    private var hasDebts: Bool {
+        expenses.contains { $0.isDebt && !$0.isTransfer && Money.cents(Accounting.outstanding(of: $0)) > 0 }
     }
 
     /// Se cargan de 20 en 20, y con botón: la carga automática al llegar al
@@ -67,21 +67,29 @@ struct MovementsView: View {
     ///   era volver a ordenar el historial entero en cada pasada del cuerpo.
     ///
     /// Los traslados entre tus cuentas no están: no son gasto ni ingreso.
-    private func source(debts: [Expense]) -> [TransactionItem] {
+    private func getSource() -> [TransactionItem] {
         switch kind {
-        case .ingresos:  return incomes.filter { !$0.isTransfer }.map { TransactionItem.income($0) }
-        case .porCobrar: return debts.map { TransactionItem.expense($0) }
-        case .gastos:    return expenses.filter { !$0.isTransfer }.map { TransactionItem.expense($0) }
+        case .ingresos:
+            return incomes.compactMap { $0.isTransfer ? nil : .income($0) }
+        case .porCobrar:
+            return expenses.compactMap { e in
+                (e.isDebt && !e.isTransfer && Money.cents(Accounting.outstanding(of: e)) > 0) ? .expense(e) : nil
+            }
+        case .gastos:
+            return expenses.compactMap { $0.isTransfer ? nil : .expense($0) }
         }
     }
 
-    private func items(from source: [TransactionItem], catalog: AccountCatalog) -> [TransactionItem] {
-        var result = source
-        if let account = filter.selection {
-            result = result.filter { AccountFilter.keys(of: $0, catalog: catalog).contains(account) }
+    private func filterItems(_ source: [TransactionItem], catalog: AccountCatalog) -> [TransactionItem] {
+        let isSearchEmpty = searchText.isEmpty
+        let selection = filter.selection
+        if selection == nil && isSearchEmpty { return source }
+        
+        return source.filter { item in
+            if let sel = selection, !AccountFilter.keys(of: item, catalog: catalog).contains(sel) { return false }
+            if !isSearchEmpty && !item.matches(searchText) { return false }
+            return true
         }
-        guard !searchText.isEmpty else { return result }
-        return result.filter { $0.matches(searchText) }
     }
 
     /// Movimientos de la lista actual por cuenta, para las tarjetas del
@@ -109,12 +117,11 @@ struct MovementsView: View {
     var body: some View {
         let catalog = self.catalog
         let carousel = accountBook.preferences.carousel(from: catalog)
-        let debts = self.debts
-        let source = self.source(debts: debts)
-        let items = self.items(from: source, catalog: catalog)
+        let hasDebts = self.hasDebts
+        let source = self.getSource()
+        let items = self.filterItems(source, catalog: catalog)
         let visible = Array(items.prefix(visibleCount))
         let buckets = groups(from: visible)
-        let hasDebts = !debts.isEmpty
 
         TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 0) {
@@ -150,7 +157,8 @@ struct MovementsView: View {
                 // cobrar: un filtro que siempre dice «nada» es ruido.
                 ShellSegment(items: hasDebts ? [Kind.gastos, .ingresos, .porCobrar]
                                              : [Kind.gastos, .ingresos],
-                             selection: $kind) { kind in
+                             selection: $kind,
+                             tint: Palette(scheme).expense) { kind in
                     switch kind {
                     case .gastos:    return "Gastos"
                     case .ingresos:  return "Ingresos"
@@ -193,8 +201,8 @@ struct MovementsView: View {
         .onAppear(perform: rebuildCatalog)
         .onChange(of: expenses.count) { _, _ in rebuildCatalog() }
         .onChange(of: incomes.count) { _, _ in rebuildCatalog() }
-        .onChange(of: debts.isEmpty) { _, empty in
-            if empty, kind == .porCobrar { kind = .gastos }
+        .onChange(of: hasDebts) { _, has in
+            if !has, kind == .porCobrar { kind = .gastos }
         }
         // Ir a un movimiento desde una hoja: se cierra lo que haya encima y
         // la app abre su detalle.

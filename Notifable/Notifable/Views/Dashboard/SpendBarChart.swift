@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// El gráfico del dashboard (`1b`): una barra por periodo, en el naranja del
-/// gasto, sin comparar contra nada.
+/// El gráfico del dashboard (`1b`): una barra por periodo, del color del
+/// gasto (acento 1, liso), sin comparar contra nada. El monto de la barra
+/// elegida va en el acento 2 en los temas de dos colores.
 ///
 /// «Semana» son los últimos siete días, uno por barra, terminando hoy. «Mes»
 /// son las últimas seis semanas contando la actual, una por barra: treinta
@@ -51,10 +52,7 @@ struct SpendBarChart: View {
                 Color.clear.frame(height: Self.barArea)
 
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(Money.cents(column.total) > 0
-                          ? AnyShapeStyle(LinearGradient(colors: [palette.expenseLight, palette.expense],
-                                                         startPoint: .top, endPoint: .bottom))
-                          : AnyShapeStyle(palette.track))
+                    .fill(Money.cents(column.total) > 0 ? palette.expense : palette.track)
                     .frame(height: height(column.total))
                     .overlay(
                         RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -67,7 +65,7 @@ struct SpendBarChart: View {
                     Text(Money.formatCompact(column.total))
                         .font(.system(size: 14, weight: .bold))
                         .monospacedDigit()
-                        .foregroundStyle(palette.expense)
+                        .foregroundStyle(palette.duoText ?? palette.expense)
                         .fixedSize()
                         .offset(y: -Self.labelRoom + max(0, Self.barArea - height(column.total)) - 4)
                         .transition(.opacity)

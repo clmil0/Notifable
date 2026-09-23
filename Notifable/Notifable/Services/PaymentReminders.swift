@@ -166,7 +166,7 @@ final class PaymentReminders {
 
     /// Se pide sólo con el permiso ya concedido: `registerForRemoteNotifications`
     /// sin permiso devuelve un token que no sirve para avisos visibles.
-    static func registerForPushIfAllowed() {
+    nonisolated static func registerForPushIfAllowed() {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             guard settings.authorizationStatus == .authorized
                     || settings.authorizationStatus == .provisional else { return }

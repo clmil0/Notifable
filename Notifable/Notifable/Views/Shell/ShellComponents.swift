@@ -164,9 +164,13 @@ struct ShellSegment<Item: Hashable>: View {
         .overlay(Capsule().stroke(palette.hairline, lineWidth: 0.5))
     }
 
-    /// Sobre el naranja, el fondo oscuro de la app; sobre el gris, el texto.
+    /// Sobre el gris, el texto. Sobre un acento, oscuro si el acento es claro
+    /// (pasteles, naranja) y blanco si es oscuro (azul, carbón, morado).
     private var selectedText: Color {
-        tint == nil ? palette.label : Palette(.dark).background
+        guard let tint else { return palette.label }
+        let (r, g, b) = tint.rgb(scheme)
+        let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        return luminance > 0.55 ? Palette(.dark).background : .white
     }
 }
 

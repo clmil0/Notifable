@@ -35,14 +35,16 @@ struct AccountBadge: Equatable {
     let institution: Institution?
 }
 
-// MARK: - Carrusel (`1b`)
+// MARK: - Carrusel (`2c`)
 
 /// Historial › Movimientos: las cuentas tuyas como tarjetas, para filtrar la
 /// lista por una. «Todas» va primero y «Editar» queda fijo al borde derecho,
 /// siempre a mano aunque haya diez cuentas.
 ///
-/// Tarjetas de sólo texto (`1b`): nombre con sus últimos dígitos y cuántos
-/// movimientos tiene. La elegida se rellena del gris de selección, no del
+/// Tarjetas neutras con la proporción de una tarjeta física (`2c`, 128 × 81,
+/// casi 1.586 : 1): el logo y los últimos dígitos arriba, el nombre y cuántos
+/// movimientos abajo. El banco sólo se nota como un brillo de su color en la
+/// esquina; la elegida se rellena del gris de selección y lleva un aro, no el
 /// color del tema: el tema decora, no marca estado.
 struct AccountCarousel: View {
     let accounts: [DetectedAccount]
@@ -59,69 +61,120 @@ struct AccountCarousel: View {
     private var palette: Palette { Palette(scheme) }
     private var accent: AppThemeColor { .current }
 
-    private static let cardWidth: CGFloat = 132
+    private static let cardSize = CGSize(width: 128, height: 81)
+    private static let radius: CGFloat = 11
     private static let editWidth: CGFloat = 52
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 10) {
-                card(selected: selection == nil, label: "Todas las cuentas") {
+                card(selected: selection == nil, glow: nil, label: "Todas las cuentas") {
                     selection = nil
-                } content: {
+                } top: {
+                    stackedCards
+                    Spacer(minLength: 4)
+                    digits(accounts.count == 1 ? "1 cuenta" : "\(accounts.count) cuentas")
+                } bottom: {
                     title("Todas")
-                    line(total == 1 ? "1 movimiento" : "\(total) movimientos")
+                    line(movements(total))
                 }
 
                 ForEach(accounts) { account in
                     let isOn = selection == account.key
-                    card(selected: isOn, label: name(account)) {
+                    let institution = account.institution ?? account.via
+                    card(selected: isOn, glow: institution?.brandColor, label: name(account)) {
                         selection = isOn ? nil : account.key
-                    } content: {
-                        title(account.digits.map { name(account) + " ••" + $0 } ?? name(account))
-                        line(detail(account))
+                    } top: {
+                        AccountLogo(institution: institution, size: 20)
+                        Spacer(minLength: 4)
+                        if let last = account.digits {
+                            digits("••" + last)
+                        }
+                    } bottom: {
+                        title(name(account))
+                        line(movements(counts[account.key] ?? 0))
                     }
                 }
             }
-            // Todas las tarjetas del alto de la más alta.
-            .fixedSize(horizontal: false, vertical: true)
             .padding(.leading, ShellMetrics.sideInset)
             .padding(.trailing, ShellMetrics.sideInset + Self.editWidth + 14)
         }
         .overlay(alignment: .trailing) { editTile }
     }
 
-    private func detail(_ account: DetectedAccount) -> String {
-        let count = counts[account.key] ?? 0
-        return count == 1 ? "1 movimiento" : "\(count) movimientos"
+    private func movements(_ count: Int) -> String {
+        count == 1 ? "1 movimiento" : "\(count) movimientos"
     }
 
     // MARK: Piezas
 
-    private func card<Content: View>(selected: Bool,
-                                     label: String,
-                                     action: @escaping () -> Void,
-                                     @ViewBuilder content: () -> Content) -> some View {
-        Button {
+    private func card<Top: View, Bottom: View>(selected: Bool,
+                                               glow: Color?,
+                                               label: String,
+                                               action: @escaping () -> Void,
+                                               @ViewBuilder top: () -> Top,
+                                               @ViewBuilder bottom: () -> Bottom) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Self.radius, style: .continuous)
+
+        return Button {
             withAnimation(.easeInOut(duration: 0.2)) { action() }
         } label: {
-            VStack(alignment: .leading, spacing: 7) {
-                content()
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 0) { top() }
+                    .frame(height: 20)
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 3) { bottom() }
             }
-            .frame(width: Self.cardWidth - 26, alignment: .leading)
-            .frame(maxHeight: .infinity, alignment: .topLeading)
-            .padding(.horizontal, 13)
-            .padding(.vertical, 11)
-            .background(selected ? palette.selectedFill : palette.surface,
-                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(palette.hairline, lineWidth: 0.5)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 11)
+            .padding(.vertical, 9)
+            .frame(width: Self.cardSize.width, height: Self.cardSize.height, alignment: .topLeading)
+            .background(alignment: .topTrailing) {
+                if let glow { brandGlow(glow) }
+            }
+            .background(selected ? palette.selectedFill : palette.surface)
+            .clipShape(shape)
+            .overlay(shape.stroke(palette.hairline, lineWidth: 0.5))
+            .overlay {
+                if selected { shape.strokeBorder(palette.label, lineWidth: 1.5) }
+            }
+            .contentShape(shape)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    /// El color del banco como un brillo que asoma por la esquina.
+    private func brandGlow(_ color: Color) -> some View {
+        let strength = scheme == .dark ? 0.5 : 0.28
+        return Circle()
+            .fill(RadialGradient(colors: [color.opacity(strength), color.opacity(0)],
+                                 center: .center, startRadius: 0, endRadius: 60))
+            .frame(width: 120, height: 120)
+            .offset(x: 34, y: -44)
+            .allowsHitTesting(false)
+    }
+
+    /// El ícono de «Todas»: dos tarjetas encimadas.
+    private var stackedCards: some View {
+        HStack(spacing: -8) {
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(palette.comparison)
+                .frame(width: 14, height: 20)
+            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                .fill(palette.track)
+                .frame(width: 14, height: 20)
+                .overlay(RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .stroke(palette.surface, lineWidth: 1))
+        }
+    }
+
+    private func digits(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .tracking(1)
+            .foregroundStyle(palette.secondaryLabel)
+            .lineLimit(1)
     }
 
     private func title(_ text: String) -> some View {
@@ -133,7 +186,7 @@ struct AccountCarousel: View {
 
     private func line(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11.5))
+            .font(.system(size: 11))
             .monospacedDigit()
             .foregroundStyle(palette.secondaryLabel)
             .lineLimit(1)
@@ -142,7 +195,9 @@ struct AccountCarousel: View {
     /// Fijo al borde, sobre un degradado que funde las tarjetas que pasan por
     /// debajo.
     private var editTile: some View {
-        HStack(spacing: 0) {
+        let shape = RoundedRectangle(cornerRadius: Self.radius, style: .continuous)
+
+        return HStack(spacing: 0) {
             LinearGradient(colors: [palette.background.opacity(0), palette.background],
                            startPoint: .leading, endPoint: .trailing)
                 .frame(width: 30)
@@ -151,20 +206,34 @@ struct AccountCarousel: View {
                 Text("Editar")
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(accent.onSurface(scheme))
-                    .frame(width: Self.editWidth)
-                    .frame(maxHeight: .infinity)
-                    .background(palette.background, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(palette.secondaryLabel.opacity(0.45),
-                                          style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .frame(width: Self.editWidth, height: Self.cardSize.height)
+                    .background(palette.background, in: shape)
+                    .overlay(shape.strokeBorder(palette.secondaryLabel.opacity(0.45),
+                                                style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                    .contentShape(shape)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Editar tus cuentas")
             .padding(.trailing, ShellMetrics.sideInset)
             .background(palette.background)
+        }
+        .frame(height: Self.cardSize.height)
+    }
+}
+
+private extension Institution {
+    /// El color de la marca, sólo para el brillo de su tarjeta en el carrusel
+    /// (`2c`): la tarjeta es neutra y el banco se reconoce por el logo.
+    var brandColor: Color? {
+        switch self {
+        case .bbva:       return Color(red: 0.078, green: 0.392, blue: 0.647)   // #1464A5
+        case .bcp:        return Color(red: 1.000, green: 0.471, blue: 0.000)   // #FF7800
+        case .interbank:  return Color(red: 0.059, green: 0.639, blue: 0.333)   // #0FA355
+        case .yape:       return Color(red: 0.557, green: 0.169, blue: 0.639)   // #8E2BA3
+        case .plin:       return Color(red: 0.000, green: 0.733, blue: 0.827)   // #00BBD3
+        case .scotiabank: return Color(red: 0.925, green: 0.067, blue: 0.102)   // #EC111A
+        case .efectivo:   return Color(red: 0.063, green: 0.725, blue: 0.506)   // #10B981
+        case .tarjeta:    return nil
         }
     }
 }

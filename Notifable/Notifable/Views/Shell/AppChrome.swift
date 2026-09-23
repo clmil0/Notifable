@@ -21,7 +21,7 @@ enum ShellMetrics {
     static let circleButton: CGFloat = 38
     static let pillCorner: CGFloat = 999
 
-    /// A partir de aquí el header se apoya en un blur y dibuja su hairline.
+    /// Desplazamiento con el que el degradado de arriba ya se ve entero.
     static let blurThreshold: CGFloat = 24
 }
 
@@ -43,7 +43,7 @@ struct ShellCircleButton: View {
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(tint ?? palette.secondaryLabel)
                 .frame(width: ShellMetrics.circleButton, height: ShellMetrics.circleButton)
-                .background(palette.surface, in: Circle())
+                .background(.ultraThinMaterial, in: Circle())
                 .overlay(Circle().stroke(palette.hairline, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
@@ -99,7 +99,7 @@ struct SubtabPill<Tab: AppSubtab>: View {
             }
         }
         .padding(3)
-        .background(palette.surface, in: Capsule())
+        .background(.ultraThinMaterial, in: Capsule())
         .overlay(Capsule().stroke(palette.hairline, lineWidth: 0.5))
     }
 
@@ -108,31 +108,42 @@ struct SubtabPill<Tab: AppSubtab>: View {
 
 // MARK: - Fondo del header
 
-/// Transparente arriba del scroll; con fondo y hairline en cuanto el
-/// contenido pasa por debajo. Lee el desplazamiento aquí dentro para que sólo
-/// el fondo se redibuje por fotograma (ver `ScrollProgress`).
+/// El mismo degradado que el pie del dashboard, pero arriba: el contenido se
+/// desvanece bajo la barra de estado y el header en lugar de cortarse.
+/// Aparece al empezar a desplazarse, para no velar la primera fila en
+/// reposo. Lee el desplazamiento aquí dentro para que sólo el fondo se
+/// redibuje por fotograma (ver `ScrollProgress`).
 ///
-/// El fondo es el color de la pantalla, opaco, **no un material**: un
+/// Es un degradado del color de la pantalla, **no un material**: un
 /// `.ultraThinMaterial` vuelve a desenfocar lo que pasa por debajo en cada
 /// fotograma del scroll, y era lo que hacía que las pantallas se sintieran
-/// pesadas al deslizar. Con el fondo oscuro del diseño el blur apenas se veía.
+/// pesadas al deslizar.
 struct ShellHeaderBackground: View {
     let progress: ScrollProgress
 
     @Environment(\.colorScheme) private var scheme
     private var palette: Palette { Palette(scheme) }
 
-    private var showsBackground: Bool { progress.offset > ShellMetrics.blurThreshold }
+    /// Cuánto se alarga el degradado por debajo del header.
+    private static let fadeBelow: CGFloat = 36
+
+    private var opacity: Double {
+        min(max(progress.offset / ShellMetrics.blurThreshold, 0), 1)
+    }
 
     var body: some View {
-        palette.background
-            .opacity(showsBackground ? 1 : 0)
-            .overlay(alignment: .bottom) {
-                Rectangle().fill(palette.hairline).frame(height: 0.5)
-                    .opacity(showsBackground ? 1 : 0)
+        Color.clear
+            .overlay {
+                LinearGradient(stops: [.init(color: palette.background, location: 0),
+                                       .init(color: palette.background, location: 0.3),
+                                       .init(color: palette.background.opacity(0.85), location: 0.6),
+                                       .init(color: palette.background.opacity(0), location: 1)],
+                               startPoint: .top, endPoint: .bottom)
+                    .padding(.bottom, -Self.fadeBelow)
+                    .opacity(opacity)
             }
             .ignoresSafeArea(edges: .top)
-            .animation(.easeInOut(duration: 0.2), value: showsBackground)
+            .allowsHitTesting(false)
     }
 }
 
@@ -176,18 +187,13 @@ struct ShellFAB: View {
                 .font(.system(size: 26, weight: .semibold))
                 .foregroundStyle(Color.white)
                 .frame(width: 62, height: 62)
-                .background(
-                    LinearGradient(colors: [palette.expenseLight, palette.expense],
-                                   startPoint: .top, endPoint: .bottom),
-                    in: Circle()
-                )
+                .background(palette.expense, in: Circle())
                 // Un halo pintado, no `.shadow`: la sombra se recalcula en cada
                 // fotograma mientras el contenido se desliza por debajo.
                 .background(
                     RadialGradient(colors: [palette.expense.opacity(0.38), palette.expense.opacity(0)],
                                    center: .center, startRadius: 24, endRadius: 52)
                         .frame(width: 110, height: 110)
-                        .offset(y: 8)
                 )
         }
         .buttonStyle(.plain)

@@ -1,86 +1,42 @@
 # AgruPay (anteriormente Notifable)
 
-AgruPay es una aplicación nativa de iOS diseñada para automatizar la gestión y el registro de tus gastos personales. En lugar de ingresar manualmente cada compra, AgruPay se conecta a tu correo electrónico, lee los recibos de transacciones bancarias, y los clasifica automáticamente de forma inteligente.
+AgruPay es un gestor financiero personal y social nativo para iOS, diseñado para automatizar y simplificar el seguimiento de tus finanzas. A diferencia de las apps tradicionales, AgruPay no requiere que ingreses manualmente cada compra: se conecta a tu correo electrónico, extrae de forma segura los recibos bancarios y los clasifica de manera inteligente. Además, incorpora herramientas sociales para registrar y cobrar deudas entre amigos.
 
 ## 🚀 Características Principales
 
-- **Sincronización Automática con Gmail**: Extrae de forma segura los comprobantes y notificaciones de pago enviados a tu correo.
-- **Soporte Multibanco**: Cuenta con parsers (lectores modulares) de correos para los principales bancos y billeteras del Perú:
-  - Yape
-  - Plin (BBVA, Interbank, Scotiabank)
-  - BBVA
-  - BCP
-  - Interbank
-  - Scotiabank
-- **Clasificación Inteligente de Gastos**:
-  - **Bandeja de Entrada**: Todo gasto nuevo va a una "Bandeja Sin Clasificar".
-  - **Mis Categorías**: Una vez que le asignas una categoría a un comercio (ej. "Metro" -> "Supermercado"), AgruPay recordará esta regla y clasificará todas las compras futuras (y pasadas) de forma automática.
-- **Resumen y Analítica (Dashboard)**:
-  - Gráficos interactivos de Dona para ver en qué gastas.
-  - Filtros dinámicos por tiempo (Hoy, Semana, Mes, Rango Personalizado).
-  - Listado de comercios "Top" donde más gastaste.
-  - Conversión automática de monedas y totales calculados.
-- **Modo Claro / Oscuro**: Interfaz altamente pulida, con colores dinámicos, glassmorphism, microanimaciones e íconos adaptativos según el tema del sistema.
-- **Gestión de Datos Modular**:
-  - Borrado selectivo de configuraciones/reglas sin perder tu historial.
-  - Borrado selectivo de correos cacheados para volver a importarlos limpiamente.
+### 🧠 Automatización e Inteligencia
+- **Sincronización con Gmail**: Extrae silenciosa y automáticamente los comprobantes de tus compras y transferencias.
+- **Soporte Multibanco Peruano**: Parsers optimizados para Yape, Plin, BCP, BBVA, Interbank y Scotiabank.
+- **Detección de Suscripciones**: Identifica pagos recurrentes y los agrupa en la sección "Comprometido este mes", estimando qué día te cobrarán y cuánto.
+- **Aprendizaje de Categorías (Merchant Rules)**: AgruPay recuerda cómo clasificas tus comercios. Si marcas "Wong" como "Supermercado", la app auto-categorizará todas tus compras pasadas y futuras.
+
+### 📊 Análisis y Control
+- **Dashboard Dinámico**: Carrusel superior de tus cuentas, barra de ritmo de gasto, e indicadores de saldo.
+- **Historial Interactivo**: Visualiza el comportamiento de tu dinero agrupado por Día, Semana, Mes o Año mediante gráficas de barras tocables.
+- **Comparativas Inteligentes**: Descubre exactamente qué categorías hicieron que gastes más o menos que el mes pasado, todo en lenguaje natural.
+
+### 🎙️ Ingreso Manual Optimizado
+- **Dictado por Voz Inteligente**: Si pagaste en efectivo, toca el micrófono y simplemente di "Pagué quince soles en el menú". AgruPay reconocerá el monto, la nota y la categoría con una hermosa animación orgánica.
+- **Ingreso Rápido**: Teclado numérico in-app con funciones de calculadora para registrar lo que no pasa por el banco.
+
+### 🤝 AgruPay Social
+- **Deudas entre Amigos (Por cobrar)**: Separa fácilmente la cuenta, anota quién te debe y mantén un balance exacto con cada contacto.
+- **Recordatorios Push**: Gracias a la integración con Supabase, envíale a tus amigos un recordatorio de pago directamente como notificación a su pantalla de bloqueo.
+- **Sincronización en Tiempo Real**: Todo tu círculo social actualizado al instante.
+
+### 🎨 Diseño Premium y Personalización
+- **Temas de Color Flexibles**: Desde acentos vibrantes hasta temas pastel de dos colores (Duotone). Toda la aplicación (gráficos, botones, alertas) se adapta a tu estilo.
+- **Tipografías a Medida**: Personaliza el diseño de la fuente (System, Rounded, Serif) y su tamaño de manera independiente del sistema iOS.
+- **Glassmorphism**: Efectos visuales de desenfoque (`ultraThinMaterial`) donde los botones flotan elegantemente sobre el contenido.
 
 ---
 
-## 🗄️ Estructura de Base de Datos Interna
+## 🗄️ Arquitectura y Tecnologías
 
-AgruPay utiliza dos tecnologías principales para almacenar datos localmente y garantizar la privacidad (todo sucede en tu dispositivo). 
+AgruPay es una aplicación moderna que aprovecha lo último del ecosistema de desarrollo de Apple:
 
-1. **SwiftData (`Expense`)**: Almacena el historial y los detalles de cada gasto individual.
-2. **UserDefaults / AppStorage**: Almacena de forma rápida las configuraciones, reglas de categorización de comercios y los IDs de los correos procesados (para no volver a importar duplicados).
-
-A continuación se muestra el diagrama de la arquitectura de la base de datos interna:
-
-```mermaid
-erDiagram
-    %% Modelos Core Data (SwiftData)
-    EXPENSE {
-        UUID id PK "Identificador único"
-        Double amount "Monto de la transacción"
-        String merchant "Nombre del comercio / destinatario"
-        Date date "Fecha y hora de la transacción"
-        String category "Categoría (ej: Comida, Transporte)"
-        String notes "Notas opcionales"
-        Bool isSubscription "Indicador de cargo recurrente"
-        String currency "Moneda (PEN, USD)"
-    }
-
-    %% Configuración Local (UserDefaults)
-    USER_DEFAULTS {
-        Data merchantCategories "Diccionario JSON: [Comercio: Categoría]"
-        Array processedEmailIDs "IDs de correos ya extraídos (Evita duplicados)"
-        Date lastSyncDate "Fecha del último Sync (Rate limit de 1 min)"
-        Bool isDarkMode "Preferencias de Apariencia"
-        Bool syncBBVA "Permisos de Sync BBVA"
-        Bool syncBCP "Permisos de Sync BCP"
-        Bool syncYape "Permisos de Sync Yape"
-        Bool syncInterbank "Permisos de Sync Interbank"
-        Bool syncScotiabank "Permisos de Sync Scotiabank"
-    }
-
-    %% Relación conceptual
-    USER_DEFAULTS ||--o{ EXPENSE : "1. asigna categoría (vía merchantCategories)"
-    USER_DEFAULTS ||--o{ EXPENSE : "2. previene duplicados (vía processedEmailIDs)"
-```
-
-### ¿Cómo funciona la relación?
-- Cuando se descarga un nuevo gasto del correo, el `GmailSyncService` busca en **`merchantCategories`** (UserDefaults) para ver si ya habías clasificado antes a ese comercio. Si es así, se le asigna la categoría guardada directamente al **`EXPENSE`**. Si no, va como "Sin Clasificar".
-- Cada vez que se lee un correo exitosamente, su ID de Google se guarda en **`processedEmailIDs`** (UserDefaults). Esto asegura que la base de datos **`EXPENSE`** jamás tenga gastos repetidos, incluso si fuerzas múltiples sincronizaciones seguidas.
-
----
-
-## 🛠️ Tecnologías Utilizadas
-
-- **SwiftUI**: Framework moderno para la creación de todas las vistas, gestos, e interacciones responsivas de la aplicación.
-- **SwiftData**: Base de datos de alto rendimiento optimizada para Apple, que permite persistencia local y consultas con `@Query`.
-- **Google Sign-In & Gmail API**: Para la autenticación OAuth 2.0 nativa y lectura segura en "solo-lectura" (Read-Only) de los metadatos y cuerpo de los correos del usuario.
-- **Regex (Expresiones Regulares)**: Los *Parsers* emplean reglas Regex avanzadas para limpiar, extraer montos, extraer fechas exactas y descubrir el comercio, incluso procesando correos en formato Quoted-Printable.
-
----
-
-*(Nota: La función "Social" para compartir y dividir gastos con amigos se encuentra en desarrollo y se incluirá en una futura actualización).*
+- **SwiftUI & Concurrencia**: Interfaces completamente declarativas, animaciones nativas y uso extensivo de `async/await` y `@MainActor` bajo Swift 6.
+- **SwiftData**: Persistencia de datos ultrarrápida, consultada en tiempo real por las vistas mediante el macro `@Query`.
+- **Supabase**: Backend moderno y serverless para manejar el flujo social, los perfiles de usuario y las notificaciones Push de manera remota.
+- **Google Sign-In y Gmail API**: OAuth 2.0 para un acceso seguro (Read-Only) a los recibos, garantizando total privacidad local.
+- **Procesamiento de Lenguaje y Regex**: Extracción quirúrgica de montos, nombres de comercios y fechas a partir del código HTML de las entidades financieras.

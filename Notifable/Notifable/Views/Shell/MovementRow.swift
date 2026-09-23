@@ -87,7 +87,8 @@ enum MovementStyle {
 struct MovementRow: View {
     let expense: Expense
     /// La hora junto al subtítulo («Supermercado  16:49»): en Movimientos,
-    /// donde la cabecera ya dice el día.
+    /// donde la cabecera ya dice el día. Con hora, el subtítulo no lleva el
+    /// origen: categoría y hora, nada más.
     var showsTime = false
     var onTap: () -> Void = {}
     var onAssignCategory: () -> Void = {}
@@ -148,7 +149,13 @@ struct MovementRow: View {
                     }
                 }
 
-                if isUnclassified {
+                if isUnclassified && showsTime {
+                    // Movimientos: el chip y la hora, como el resto de filas.
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        assignRow(showsSource: false)
+                        TimeLabel(date: expense.date)
+                    }
+                } else if isUnclassified {
                     // `ViewThatFits`: con un comercio de nombre corto entran
                     // el chip y el origen; con uno largo, el origen se retira
                     // entero en vez de quedarse en unos puntos suspensivos que
@@ -297,7 +304,8 @@ struct MovementRow: View {
         }
         if expense.isVoided { return "Anulada por el banco" }
         if expense.isTransfer { return MovementStyle.transferNote }
-        if let source = MovementStyle.source(for: expense) {
+        // En Movimientos, «Categoría  16:49»: el origen ya lo dice el ícono.
+        if !showsTime, let source = MovementStyle.source(for: expense) {
             return expense.category + " · " + source
         }
         return expense.category

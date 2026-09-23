@@ -67,11 +67,18 @@ struct HistoryView: View {
     }
 
     var body: some View {
-        let snapshots = (expenses: expenses.map(\.accountingSnapshot),
-                         incomes: incomes.map(\.accountingSnapshot))
         let periods = self.periods
-        let series = periods.map { (period: $0, total: totals(for: $0, snapshots).spent) }
         let current = periods.last ?? Period(granularity: granularity, reference: Date())
+        let windowStart = min(periods.first?.interval.start ?? Date.distantPast, current.previous.interval.start)
+        let windowEnd = current.interval.end
+        
+        let relevantExpenses = expenses.filter { $0.date >= windowStart && $0.date < windowEnd }
+        let relevantIncomes = incomes.filter { $0.date >= windowStart && $0.date < windowEnd }
+
+        let snapshots = (expenses: relevantExpenses.map(\.accountingSnapshot),
+                         incomes: relevantIncomes.map(\.accountingSnapshot))
+        
+        let series = periods.map { (period: $0, total: totals(for: $0, snapshots).spent) }
         let currentTotals = totals(for: current, snapshots)
         let previousTotals = totals(for: current.previous, snapshots)
         let rhythm = Rhythm(period: current, current: currentTotals, previous: previousTotals)
@@ -95,7 +102,7 @@ struct HistoryView: View {
                         .padding(.bottom, 22)
                 }
 
-                let subscriptions = detectedSubscriptions(in: current)
+                let subscriptions = detectedSubscriptions(in: current, source: relevantExpenses)
                 if !subscriptions.isEmpty {
                     subscriptionsSection(subscriptions)
                 }
@@ -372,11 +379,11 @@ struct HistoryView: View {
 
     // MARK: - Suscripciones
 
-    private func detectedSubscriptions(in period: Period) -> [DetectedSubscription] {
+    private func detectedSubscriptions(in period: Period, source: [Expense]) -> [DetectedSubscription] {
         let calendar = Period.calendar
         let range = period.interval
         var grouped: [String: [Expense]] = [:]
-        for expense in expenses
+        for expense in source
         where expense.isSubscription && expense.date >= range.start && expense.date < range.end {
             grouped[expense.merchant, default: []].append(expense)
         }

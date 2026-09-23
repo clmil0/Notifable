@@ -56,16 +56,29 @@ struct PendingView: View {
     }
 
     private var groups: [Group] {
+        let calendar = Period.calendar
         var grouped: [String: [Expense]] = [:]
-        for expense in unclassified { grouped[expense.merchant, default: []].append(expense) }
+        for expense in unclassified {
+            let startOfMonth = calendar.dateInterval(of: .month, for: expense.date)?.start ?? expense.date
+            let key = expense.merchant + "|" + "\(startOfMonth.timeIntervalSince1970)"
+            grouped[key, default: []].append(expense)
+        }
 
-        return grouped.map { merchant, items in
-            Group(merchant: merchant,
-                  expenses: items.sorted { $0.date > $1.date },
-                  total: Money.sum(items) { Accounting.netCostInPEN($0, fallbackRate: rate) })
+        return grouped.map { key, items in
+            let components = key.components(separatedBy: "|")
+            let merchant = components[0]
+            let timeInterval = components.count > 1 ? TimeInterval(components[1]) ?? 0 : 0
+            let monthStart = Date(timeIntervalSince1970: timeInterval)
+            
+            return Group(merchant: merchant,
+                         monthStart: monthStart,
+                         expenses: items.sorted { $0.date > $1.date },
+                         total: Money.sum(items) { Accounting.netCostInPEN($0, fallbackRate: rate) })
         }
         .sorted {
-            $0.mostRecent == $1.mostRecent ? $0.merchant < $1.merchant : $0.mostRecent > $1.mostRecent
+            $0.monthStart == $1.monthStart 
+                ? ($0.mostRecent == $1.mostRecent ? $0.merchant < $1.merchant : $0.mostRecent > $1.mostRecent)
+                : $0.monthStart > $1.monthStart
         }
     }
 
@@ -107,8 +120,9 @@ struct PendingView: View {
                     // El segmento se queda aunque el mes esté al día: la
                     // pestaña existe por lo pendiente de meses anteriores, y
                     // sin él no habría forma de llegar a verlo.
-                    ShellSegment(items: [Scope.month, .all], selection: $scope) {
-                        $0 == .month ? "Este mes" : "Todo el historial"
+                    let totalAllCount = expenses.filter { $0.category == Accounting.unclassified && $0.countsAsSpending }.count
+                    ShellSegment(items: [Scope.month, .all], selection: $scope, tint: accent.color) {
+                        $0 == .month ? "Este mes" : "Todo el historial (\(totalAllCount))"
                     }
                     .padding(.bottom, 14)
 
@@ -127,7 +141,15 @@ struct PendingView: View {
                             .padding(.bottom, 10)
 
                         VStack(spacing: 10) {
-                            ForEach(visible) { group in
+                            ForEach(Array(visible.enumerated()), id: \.element.id) { index, group in
+                                let isFirstOfMonth = index == 0 || visible[index - 1].monthStart != group.monthStart
+                                if isFirstOfMonth {
+                                    let monthName = Period.spanishMonthName(for: group.monthStart)
+                                    let year = Period.calendar.component(.year, from: group.monthStart)
+                                    ShellSectionHeader(title: "\(monthName) \(year)")
+                                        .padding(.top, index == 0 ? 0 : 16)
+                                        .padding(.horizontal, 4)
+                                }
                                 groupCard(group)
                             }
                         }
@@ -297,6 +319,11 @@ struct PendingView: View {
                         HStack(spacing: 12) {
                             checkmark(state, size: 24)
 
+                            if let sample = group.expenses.first {
+                                let look = sourceLook(sample)
+                                MovementIcon(icon: look.icon, color: look.color, size: 36)
+                            }
+
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(Accounting.displayName(group.merchant))
                                     .font(.system(size: 16, weight: .semibold))
@@ -416,8 +443,21 @@ struct PendingView: View {
     private func countLabel(_ group: Group, picked: Int) -> String {
         let count = group.expenses.count
         let base = count == 1 ? "1 movimiento" : "\(count) movimientos"
-        guard picked > 0, picked < count else { return base }
+        let source = group.expenses.first.flatMap(MovementStyle.source(for:))
+        guard picked > 0, picked < count else { return source.map { $0 + " · " + base } ?? base }
         return "\(picked) de \(count) elegidos"
+    }
+
+    /// De dónde salió el dinero, que es lo único que distingue a un yapeo de
+    /// un plin o de una compra con tarjeta: todavía no tienen categoría, así
+    /// que el ícono de categoría sería el mismo cajón para todos.
+    private func sourceLook(_ expense: Expense) -> (icon: String, color: Color) {
+        let icon = MovementStyle.icon(for: expense)
+        if icon == CategoryStyle.icon(for: Accounting.unclassified) {
+            let hasCard = !(expense.cardLastDigits ?? "").isEmpty
+            return (hasCard ? "creditcard.fill" : "questionmark", palette.secondaryLabel)
+        }
+        return (icon, MovementStyle.color(for: expense, accent: accent.color, scheme: scheme))
     }
 
     private func suggestionRow(group: Group, hint: CategorySuggestion) -> some View {
@@ -531,9 +571,10 @@ struct PendingView: View {
 
     struct Group: Identifiable {
         let merchant: String
+        let monthStart: Date
         let expenses: [Expense]
         let total: Double
-        var id: String { merchant }
+        var id: String { merchant + "-" + monthStart.description }
         var mostRecent: Date { expenses.first?.date ?? .distantPast }
     }
 
