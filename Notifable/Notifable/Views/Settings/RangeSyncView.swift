@@ -52,6 +52,20 @@ struct RangeSyncView: View {
                     Text(explanation)
                 }
 
+                if let error = gmailSync.lastSyncError {
+                    Section {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                } else if let summary = gmailSync.lastRunSummary {
+                    Section {
+                        Label(summary, systemImage: "checkmark.circle")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Section {
                     Button {
                         gmailSync.modelContext = modelContext

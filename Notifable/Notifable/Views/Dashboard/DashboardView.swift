@@ -27,8 +27,10 @@ struct DashboardView: View {
     /// El mes mostrado y el anterior, nada más.
     @Query private var expenses: [Expense]
     @Query private var incomes: [Income]
-    /// Sólo si existe algo sin clasificar, de cualquier fecha.
-    @Query private var anyUnclassified: [Expense]
+    /// Todo lo que falta clasificar, de cualquier fecha y cuenta: lo mismo
+    /// que cuenta Pendientes, para que las cifras de la tarjeta y las de la
+    /// pantalla coincidan. Son pocos (se van vaciando).
+    @Query private var unclassified: [Expense]
     /// Lo marcado por cobrar: poco, y lo que dice la tarjeta de Amigos.
     @Query private var debtExpenses: [Expense]
 
@@ -47,7 +49,6 @@ struct DashboardView: View {
     /// catálogo y no en cada dibujado.
     @State private var limitStatuses: [CategoryLimitStatus] = []
     /// Comercios sin categoría de antes del mes mostrado.
-    @State private var earlierPending = 0
     @State private var chartMode: SpendBarChart.Mode = .week
     @State private var selectedColumn: Int?
     @State private var openStat: StatDetail?
@@ -77,11 +78,9 @@ struct DashboardView: View {
                          sort: \Income.date, order: .reverse)
 
         let unclassifiedName = Accounting.unclassified
-        var anyDescriptor = FetchDescriptor<Expense>(predicate: #Predicate<Expense> {
+        _unclassified = Query(filter: #Predicate<Expense> {
             $0.category == unclassifiedName && !$0.isTransfer && !$0.isVoided && !$0.isReversal
         })
-        anyDescriptor.fetchLimit = 1
-        _anyUnclassified = Query(anyDescriptor)
         _debtExpenses = Query(filter: #Predicate<Expense> { $0.isDebt && !$0.isTransfer })
     }
 
@@ -134,7 +133,7 @@ struct DashboardView: View {
     }
 
     /// Lo que depende del mes mostrado y necesita el historial entero: los
-    /// límites (un ciclo anual va más allá del mes) y lo pendiente de antes.
+    /// límites (un ciclo anual va más allá del mes).
     private func loadMonthExtras(_ all: [Expense]? = nil) {
         let all = all ?? ((try? modelContext.fetch(FetchDescriptor<Expense>())) ?? [])
         let snapshots = all.map(\.accountingSnapshot)
@@ -143,11 +142,6 @@ struct DashboardView: View {
             .filter { $0.hasLimit && $0.category != Accounting.unclassified }
             .map { CategoryLimits.status(category: $0.category, budget: $0,
                                          expenses: snapshots, on: day, usdToPen: rate) }
-
-        let monthStart = month.interval.start
-        earlierPending = Set(all.filter {
-            $0.category == Accounting.unclassified && $0.countsAsSpending && $0.date < monthStart
-        }.map(\.merchant)).count
     }
 
     // MARK: - Cuerpo
@@ -916,7 +910,7 @@ struct DashboardView: View {
         let range = month.interval
         let movementCount = expenses.filter { !$0.isTransfer && $0.date >= range.start && $0.date < range.end }.count
             + incomes.filter { !$0.isTransfer && $0.date >= range.start && $0.date < range.end }.count
-        let hasPending = totals.unclassifiedMerchantCount > 0 || !anyUnclassified.isEmpty
+        let hasPending = !unclassified.isEmpty
 
         let historial = tile(title: "Historial", action: { onOpen(.movements) }) {
             bigNumber("\(movementCount)", caption: movementCount == 1 ? "movimiento este mes" : "movimientos este mes")
@@ -961,7 +955,10 @@ struct DashboardView: View {
         let range = month.interval
         if hasPending {
             tile(title: "Pendientes", action: { onOpen(.pending) }) {
-                let count = totals.unclassifiedMerchantCount
+                // Movimientos, no comercios: es lo que cuenta Pendientes
+                // («Todo el historial (N)»), y las dos cifras suman eso.
+                let count = unclassified.filter { $0.date >= range.start && $0.date < range.end }.count
+                let earlierPending = unclassified.filter { $0.date < range.start }.count
                 VStack(alignment: .leading, spacing: 4) {
                     bigNumber("\(count)",
                               caption: isCurrentMonth ? "de este mes" : "de " + monthName.lowercased(),

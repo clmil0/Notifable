@@ -82,6 +82,8 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
         authSession = ASWebAuthenticationSession(url: url, callbackURLScheme: scheme) { callbackURL, error in
             guard error == nil, let callbackURL = callbackURL else {
                 print("Auth Error: \(String(describing: error))")
+                let nsError = error as NSError?
+                Diagnostics.shared.log("Gmail auth: la ventana de Google terminó sin respuesta (\(nsError?.domain ?? "?") \(nsError?.code ?? 0): \(nsError?.localizedDescription ?? "sin error"))")
                 return
             }
 
@@ -89,6 +91,9 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
                   items.first(where: { $0.name == "state" })?.value == state,
                   let code = items.first(where: { $0.name == "code" })?.value else {
                 print("Gmail: respuesta de Google sin código o con otro state; se descarta.")
+                let items = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false)?.queryItems ?? []
+                let googleError = items.first(where: { $0.name == "error" })?.value ?? "ninguno"
+                Diagnostics.shared.log("Gmail auth: ✗ respuesta sin código o con otro state (error de Google: \(googleError))")
                 return
             }
 
@@ -96,12 +101,15 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
         }
         
         authSession?.presentationContextProvider = self
-        authSession?.start()
+        let started = authSession?.start() ?? false
+        Diagnostics.shared.log("Gmail auth: se abre la ventana de Google (\(started ? "ok" : "✗ no arrancó"))")
     }
     
     /// Desvincular también revoca el permiso en Google: una copia del token
     /// que hubiera quedado en otro lado deja de servir.
     func signOut() {
+        Diagnostics.shared.log("Gmail auth: se desvincula la cuenta")
+        UserDefaults.standard.removeObject(forKey: Self.grantedScopeKey)
         if let token = getRefreshToken() ?? getAccessToken() { revoke(token) }
         SecureStore.gmail.removeAll()
         setIDToken(nil)
@@ -117,6 +125,7 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
     /// a valer. Se borran los tokens (el correo se queda, para decir cuál
     /// cuenta hay que volver a vincular) y la app lo muestra.
     private func markAccessRevoked() {
+        Diagnostics.shared.log("Gmail auth: ✗ Google respondió invalid_grant; el permiso ya no vale y hay que volver a conectar")
         SecureStore.gmail.removeAll()
         setIDToken(nil)
         UserDefaults.standard.removeObject(forKey: Keys.hasIdentity)
@@ -151,9 +160,15 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
         request.httpBody = bodyString.data(using: .utf8)
         
         URLSession.shared.dataTask(with: request) { data, response, error in
-            guard let data = data, error == nil else { return }
+            guard let data = data, error == nil else {
+                Diagnostics.shared.log("Gmail auth: ✗ canje del código, error de red: \(error?.localizedDescription ?? "sin datos")")
+                return
+            }
             do {
                 if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    Diagnostics.shared.log("Gmail auth: canje del código HTTP \(status) · access: \(json["access_token"] != nil ? "sí" : "no") · refresh: \(json["refresh_token"] != nil ? "sí" : "no") · id_token: \(json["id_token"] != nil ? "sí" : "no") · permisos: \(json["scope"] as? String ?? "?") · error: \(json["error"] as? String ?? "ninguno") \(json["error_description"] as? String ?? "")")
+                    if let scope = json["scope"] as? String { Self.rememberGrantedScope(scope) }
                     if let accessToken = json["access_token"] as? String {
                         self.saveAccessToken(accessToken)
                     }
@@ -174,6 +189,7 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
     
     func refreshAccessToken(completion: @escaping (String?) -> Void) {
         guard let refreshToken = getRefreshToken(), let url = URL(string: tokenURL) else {
+            Diagnostics.shared.log("Gmail auth: ✗ no se puede renovar, no hay refresh token guardado")
             completion(nil)
             return
         }
@@ -187,11 +203,15 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
         
         URLSession.shared.dataTask(with: request) { data, response, error in
             guard let data = data, error == nil else {
+                Diagnostics.shared.log("Gmail auth: ✗ renovación, error de red: \(error?.localizedDescription ?? "sin datos")")
                 completion(nil)
                 return
             }
             do {
                 let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                Diagnostics.shared.log("Gmail auth: renovación HTTP \(status) · access: \(json?["access_token"] != nil ? "sí" : "no") · permisos: \(json?["scope"] as? String ?? "?") · error: \(json?["error"] as? String ?? "ninguno") \(json?["error_description"] as? String ?? "")")
+                if let scope = json?["scope"] as? String { Self.rememberGrantedScope(scope) }
                 if let json, let newAccessToken = json["access_token"] as? String {
                     self.saveAccessToken(newAccessToken)
                     self.saveIdentity(from: json)
@@ -201,10 +221,29 @@ class GmailAuthService: NSObject, ObservableObject, ASWebAuthenticationPresentat
                     completion(nil)
                 }
             } catch {
+                Diagnostics.shared.log("Gmail auth: ✗ renovación con respuesta ilegible (HTTP \((response as? HTTPURLResponse)?.statusCode ?? -1))")
                 completion(nil)
             }
         }.resume()
     }
+
+    /// Los permisos que Google concedió de verdad. En la pantalla de
+    /// consentimiento se puede desmarcar la casilla de Gmail: la cuenta queda
+    /// «conectada» (hay token) pero cada lectura responde 403.
+    static let grantedScopeKey = "GmailGrantedScope"
+
+    private static func rememberGrantedScope(_ scope: String) {
+        UserDefaults.standard.set(scope, forKey: grantedScopeKey)
+    }
+
+    static var grantedScope: String? { UserDefaults.standard.string(forKey: grantedScopeKey) }
+
+    /// `nil` si todavía no se sabe (se conectó antes de guardarlo).
+    static var hasGmailScope: Bool? {
+        grantedScope.map { $0.contains("gmail.readonly") }
+    }
+
+    var hasRefreshToken: Bool { getRefreshToken() != nil }
     
     // MARK: - Identidad (para la sincronización con cuenta)
 

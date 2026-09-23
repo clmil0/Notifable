@@ -212,9 +212,14 @@ struct SettingsView: View {
                         tint: Color(white: 0.35)) {
                 DataBackupView()
             }
-            // Diagnóstico y FinanceKit salen de la lista visible (`5a`): se
-            // llega a los dos buscándolos. FinanceKit es una prueba de
-            // desarrollo y sólo existe en DEBUG (`SettingsEntry.searchable`).
+            SettingsSeparator()
+            // Visible otra vez: hace falta para pedir el informe de Gmail a
+            // quien no puede buscarlo. FinanceKit sigue fuera: es una prueba
+            // de desarrollo y sólo existe en DEBUG (`SettingsEntry.searchable`).
+            SettingsRow(title: "Diagnóstico", icon: "stethoscope",
+                        tint: Color(white: 0.35)) {
+                DiagnosticsView()
+            }
         }
     }
 

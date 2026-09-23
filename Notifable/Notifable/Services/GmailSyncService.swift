@@ -22,12 +22,17 @@ class GmailSyncService: ObservableObject {
         }
     }
     @Published var diagnosticResult: String = ""
+    /// Qué encontró la última lectura pedida a mano: «Gmail no devolvió
+    /// correos de bancos en ese rango» no es lo mismo que «todo ya estaba
+    /// importado», y sin esto las dos se veían como una lectura que se
+    /// cancelaba al segundo.
+    @Published var lastRunSummary: String?
     @Published var showDiagnostic: Bool = false
     
-    private let baseURL = "https://gmail.googleapis.com/gmail/v1/users/me"
+    let baseURL = "https://gmail.googleapis.com/gmail/v1/users/me"
     
     // Lista de parsers modulares de cada banco
-    private let parsers: [BankEmailParser] = [
+    let parsers: [BankEmailParser] = [
         BBVAParser(),
         BCPParser(),
         YapeParser(),
@@ -79,7 +84,12 @@ class GmailSyncService: ObservableObject {
     ///   en Gmail y bancos cambia la fila de "Última lectura" por la barra de
     ///   progreso) salvo que de verdad haya correos nuevos que procesar.
     /// Hay una lectura en curso. Sólo se toca en el hilo principal.
-    private var isRunning = false
+    private(set) var isRunning = false
+    /// Cuándo empezó la lectura en curso. Una que lleva demasiado «en curso»
+    /// se da por colgada: si no, `isRunning` bloquearía todas las demás y
+    /// cada intento terminaría al instante sin decir nada.
+    private(set) var runStartedAt: Date?
+    static let stuckRunThreshold: TimeInterval = 180
     /// Quien espera a que la lectura termine: la tarea de segundo plano, que
     /// no puede darse por terminada antes de tiempo.
     private var runCompletions: [() -> Void] = []
@@ -105,6 +115,7 @@ class GmailSyncService: ObservableObject {
     private func finishRun() {
         DispatchQueue.main.async {
             self.isRunning = false
+            self.runStartedAt = nil
             let waiting = self.runCompletions
             self.runCompletions = []
             for completion in waiting { completion() }
@@ -128,6 +139,7 @@ class GmailSyncService: ObservableObject {
         // propio desfase no le haga saltarse una vuelta.
         if !force, let lastSync = lastSyncDate, Date().timeIntervalSince(lastSync) < Self.foregroundPollInterval - 10 {
             print("Sync throttled. Last sync was \(Int(Date().timeIntervalSince(lastSync)/60)) minutes ago.")
+            if !quiet { Diagnostics.shared.log("Sync Gmail: omitida, la última fue hace \(Int(Date().timeIntervalSince(lastSync))) s") }
             completion?()
             return
         }
@@ -140,6 +152,7 @@ class GmailSyncService: ObservableObject {
         // de "¿Cuánto correo miramos?" o en Gmail y bancos.
         if startDate == nil, endDate == nil, lastSyncDate == nil {
             print("Sync skipped: sin lectura previa y sin rango elegido por el usuario.")
+            Diagnostics.shared.log("Sync Gmail: omitida, nunca se eligió desde cuándo leer (lastSyncDate vacío y sin rango)")
             completion?()
             return
         }
@@ -149,6 +162,13 @@ class GmailSyncService: ObservableObject {
         // cada una su copia de los mismos correos. Un rango pedido a medias no
         // se pierde: se lanza al acabar la actual. Una comprobación normal se
         // descarta, porque la lectura en curso ya la cubre.
+        if isRunning, let started = runStartedAt,
+           Date().timeIntervalSince(started) > Self.stuckRunThreshold {
+            Diagnostics.shared.log("Sync Gmail: ⚠️ la lectura anterior lleva \(Int(Date().timeIntervalSince(started))) s en curso; se da por colgada y se libera")
+            isRunning = false
+            runStartedAt = nil
+            isSyncing = false
+        }
         if isRunning {
             if startDate != nil || endDate != nil { queuedRange = (startDate, endDate) }
             Diagnostics.shared.log("Sync Gmail: ya hay una lectura en curso, \(queuedRange != nil ? "se encola el rango" : "se omite")")
@@ -156,13 +176,15 @@ class GmailSyncService: ObservableObject {
             return
         }
         isRunning = true
+        runStartedAt = Date()
         if let completion { runCompletions.append(completion) }
 
-        Diagnostics.shared.log("Sync Gmail: inicio (force: \(force), rango: \(startDate != nil || endDate != nil))")
+        Diagnostics.shared.log("Sync Gmail: inicio (force: \(force), quiet: \(quiet), desde: \(Self.logDate(startDate)), hasta: \(Self.logDate(endDate)), última: \(Self.logDate(lastSyncDate)))")
         if !quiet {
             DispatchQueue.main.async {
                 self.isSyncing = true
                 self.lastSyncError = nil
+                self.lastRunSummary = nil
                 self.totalEmailsToProcess = 0
                 self.emailsProcessed = 0
                 self.expensesFoundByBank = [:]
@@ -170,9 +192,10 @@ class GmailSyncService: ObservableObject {
         }
         
         guard let token = GmailAuthService.shared.getAccessToken() else {
+            Diagnostics.shared.log("Sync Gmail: ✗ no hay token de acceso guardado (refresh token: \(GmailAuthService.shared.hasRefreshToken ? "sí" : "no"))")
             DispatchQueue.main.async {
                 self.isSyncing = false
-                self.lastSyncError = "No access token"
+                self.lastSyncError = "No hay permiso de Gmail guardado. Desvincula y vuelve a conectar la cuenta."
             }
             finishRun()
             return
@@ -188,6 +211,7 @@ class GmailSyncService: ObservableObject {
             case .failure(let error):
                 // Token might be expired, try to refresh
                 print("Failed to fetch messages: \(error). Trying to refresh token...")
+                Diagnostics.shared.log("Sync Gmail: la lista falló (\(Self.describe(error))); se renueva el token y se reintenta")
                 GmailAuthService.shared.refreshAccessToken { newToken in
                     if let newToken = newToken {
                         self?.fetchMessageList(token: newToken, startDate: startDate, endDate: endDate) { result in
@@ -198,6 +222,7 @@ class GmailSyncService: ObservableObject {
                                                       coversNow: Self.reachesNow(endDate),
                                                       quiet: quiet)
                             case .failure(let err):
+                                Diagnostics.shared.log("Sync Gmail: ✗ la lista volvió a fallar tras renovar el token (\(Self.describe(err)))")
                                 DispatchQueue.main.async {
                                     self?.isSyncing = false
                                     self?.lastSyncError = err.localizedDescription
@@ -206,9 +231,12 @@ class GmailSyncService: ObservableObject {
                             }
                         }
                     } else {
+                        Diagnostics.shared.log("Sync Gmail: ✗ no se pudo renovar el token; la lectura se corta")
                         DispatchQueue.main.async {
                             self?.isSyncing = false
-                            self?.lastSyncError = "Token refresh failed"
+                            self?.lastSyncError = GmailAuthService.shared.accessRevoked
+                                ? "Google retiró el permiso. Vuelve a conectar Gmail."
+                                : "No se pudo renovar el permiso de Gmail. Revisa la conexión e inténtalo de nuevo."
                         }
                         self?.finishRun()
                     }
@@ -245,9 +273,11 @@ class GmailSyncService: ObservableObject {
         // Siempre con `completion`: un `return` a secas dejaría la lectura
         // "en curso" para siempre y `isRunning` bloquearía todas las demás.
         guard let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            Diagnostics.shared.log("Sync Gmail: ✗ no se pudo codificar la búsqueda: \(query)")
             completion(.success([]))
             return
         }
+        Diagnostics.shared.log("Sync Gmail: búsqueda «\(query)»")
 
         // Gmail pagina: sin seguir `nextPageToken`, un rango largo se cortaba en
         // 500 correos y el resto se perdía en silencio. Cinco meses de dos
@@ -275,14 +305,26 @@ class GmailSyncService: ObservableObject {
 
         URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
             if let error = error {
+                Diagnostics.shared.log("Sync Gmail: ✗ lista, error de red: \(Self.describe(error))")
                 completion(.failure(error))
                 return
             }
-            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            if status == 401 {
+                Diagnostics.shared.log("Sync Gmail: lista 401 (token vencido o inválido): \(Self.bodyExcerpt(data))")
                 completion(.failure(NSError(domain: "Auth", code: 401, userInfo: nil)))
                 return
             }
+            // Antes cualquier otro error (403 sin permiso de Gmail, 429 cuota,
+            // 5xx) se leía como «ningún correo»: la lectura acababa al instante
+            // sin decir nada.
+            guard (200...299).contains(status) else {
+                Diagnostics.shared.log("Sync Gmail: ✗ lista HTTP \(status): \(Self.bodyExcerpt(data))")
+                completion(.failure(Self.apiError(status: status, data: data)))
+                return
+            }
             guard let data = data else {
+                Diagnostics.shared.log("Sync Gmail: lista sin cuerpo (HTTP \(status))")
                 completion(.success(accumulated))
                 return
             }
@@ -291,6 +333,7 @@ class GmailSyncService: ObservableObject {
                 let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
                 let messages = json?["messages"] as? [[String: Any]] ?? []
                 let total = accumulated + messages
+                Diagnostics.shared.log("Sync Gmail: página con \(messages.count) correos (acumulado \(total.count), estimado \(json?["resultSizeEstimate"] ?? "?"))")
 
                 // Tope de cordura: 20 páginas son 10 000 correos.
                 if let next = json?["nextPageToken"] as? String, total.count < 10_000 {
@@ -301,6 +344,7 @@ class GmailSyncService: ObservableObject {
                     completion(.success(total))
                 }
             } catch {
+                Diagnostics.shared.log("Sync Gmail: ✗ lista con JSON ilegible: \(Self.bodyExcerpt(data))")
                 completion(.failure(error))
             }
         }.resume()
@@ -479,7 +523,18 @@ class GmailSyncService: ObservableObject {
             }
         } }
         
-        Diagnostics.shared.log("Sync Gmail: \(newMessages.count) correos por procesar de \(messages.count)")
+        let skippedDeleted = messages.filter { ($0["id"] as? String).map(deletedIDs.contains) ?? false }.count
+        Diagnostics.shared.log("Sync Gmail: \(newMessages.count) correos por procesar de \(messages.count) (rango: \(isRangeSync), ya procesados antes: \(processedIDs.count), borrados a propósito omitidos: \(skippedDeleted))")
+        if !quiet, messages.isEmpty {
+            let summary = "Gmail no devolvió ningún correo de los bancos compatibles en ese periodo."
+            DispatchQueue.main.async { self.lastRunSummary = summary }
+        }
+        // La lista respondió: un error de una comprobación anterior ya no vale.
+        if quiet, lastSyncError != nil { DispatchQueue.main.async { self.lastSyncError = nil } }
+        let runStart = Date()
+        var unrecognized = 0
+        var failedFetches = 0
+        var alreadyImportedCount = 0
         var newIDs = processedIDs
         let queue = DispatchQueue(label: "com.notifable.syncQueue") // Para evitar race conditions
         
@@ -505,10 +560,19 @@ class GmailSyncService: ObservableObject {
                     
                     var foundBankName: String? = nil
                     
+                    if body == nil { queue.sync { failedFetches += 1 } }
                     if let body = body {
                         let alreadyImported = queue.sync { knownIDs.contains(id) }
+                        let parsed = alreadyImported ? nil : self?.parseEmailBody(body, receivedAt: receivedAt)
+                        if alreadyImported {
+                            queue.sync { alreadyImportedCount += 1 }
+                            Diagnostics.shared.log("Sync Gmail: correo \(id) ya estaba importado")
+                        } else if parsed == nil {
+                            queue.sync { unrecognized += 1 }
+                            Diagnostics.shared.log("Sync Gmail: correo \(id) no reconocido por ningún lector (\(body.count) caracteres): «\(Self.excerpt(body, 160))»")
+                        }
 
-                        if !alreadyImported, let parsed = self?.parseEmailBody(body, receivedAt: receivedAt) {
+                        if !alreadyImported, let parsed {
                             foundBankName = parsed.bankName
                             DispatchQueue.main.sync {
                                 if let context = self?.modelContext {
@@ -521,6 +585,7 @@ class GmailSyncService: ObservableObject {
                                         let amount = expense.amount
                                         let currency = expense.currency
                                         inserted = self?.handleExpenseInsertion(expenseData: (expense, parsed.bankName), emailID: id, context: context) == true
+                                        Diagnostics.shared.log("Sync Gmail: correo \(id) → \(parsed.bankName) gasto\(expense.isReversal ? " (anulación)" : "") \(currency) \(amount) «\(title)» \(inserted ? "insertado" : "no insertado (duplicado o unido)")")
                                         // Sólo lo que acaba de llegar: leer seis
                                         // meses de pasado no son cien avisos.
                                         if inserted, !isRangeSync {
@@ -532,6 +597,7 @@ class GmailSyncService: ObservableObject {
                                         let amount = income.amount
                                         let currency = income.currency
                                         inserted = self?.handleIncomeInsertion(income: income, emailID: id, context: context) == true
+                                        Diagnostics.shared.log("Sync Gmail: correo \(id) → \(parsed.bankName) ingreso \(currency) \(amount) \(inserted ? "insertado" : "no insertado (duplicado)")")
                                         if inserted, !isRangeSync {
                                             NotificationManager.shared.notifyImported(
                                                 title: title, amount: amount, currency: currency, isIncome: true)
@@ -586,7 +652,16 @@ class GmailSyncService: ObservableObject {
                 // una vez por correo.
                 self?.backfillAccountData(token: token)
                 print("Sync complete. Found \(newExpensesFound) new expenses of \(newMessages.count) checked.")
-                Diagnostics.shared.log("Sync Gmail: fin, \(newExpensesFound) nuevos")
+                let seconds = Int(Date().timeIntervalSince(runStart))
+                Diagnostics.shared.log("Sync Gmail: fin en \(seconds) s · revisados \(newMessages.count) · nuevos \(newExpensesFound) · ya importados \(alreadyImportedCount) · no reconocidos \(unrecognized) · descargas fallidas \(failedFetches)")
+                if !quiet, !messages.isEmpty {
+                    var parts = ["\(newMessages.count) correos revisados", "\(newExpensesFound) nuevos"]
+                    if alreadyImportedCount > 0 { parts.append("\(alreadyImportedCount) ya estaban") }
+                    if unrecognized > 0 { parts.append("\(unrecognized) sin reconocer") }
+                    if failedFetches > 0 { parts.append("\(failedFetches) no se pudieron descargar") }
+                    if newMessages.isEmpty { parts = ["Los \(messages.count) correos de ese periodo ya se habían leído"] }
+                    self?.lastRunSummary = parts.joined(separator: " · ")
+                }
                 self?.finishRun()
             }
         }
@@ -857,6 +932,16 @@ class GmailSyncService: ObservableObject {
         
         URLSession.shared.dataTask(with: request) { data, response, error in
             guard let data = data, error == nil else {
+                Diagnostics.shared.log("Sync Gmail: ✗ correo \(id), error de red: \(error.map(Self.describe) ?? "sin datos")")
+                completion(nil, nil)
+                return
+            }
+            // Una respuesta de error también es JSON: antes se leía como un
+            // correo vacío, no lo reconocía ningún lector y quedaba marcado
+            // como procesado para siempre.
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            guard (200...299).contains(status) else {
+                Diagnostics.shared.log("Sync Gmail: ✗ correo \(id) HTTP \(status): \(Self.bodyExcerpt(data))")
                 completion(nil, nil)
                 return
             }
@@ -864,6 +949,7 @@ class GmailSyncService: ObservableObject {
             do {
                 if let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any] {
                     let bodyText = self.extractFullText(from: json)
+                    Diagnostics.shared.log("Sync Gmail: correo \(id) · \(Self.header("From", in: json) ?? "?") · «\(Self.header("Subject", in: json) ?? "?")» · \(Self.mimeSummary(json)) · \(bodyText.count) caracteres")
                     
                     let receivedAt = (json["internalDate"] as? String)
                         .flatMap(Double.init)
@@ -878,7 +964,7 @@ class GmailSyncService: ObservableObject {
         }.resume()
     }
     
-    private func extractFullText(from json: [String: Any]) -> String {
+    func extractFullText(from json: [String: Any]) -> String {
         guard let payload = json["payload"] as? [String: Any] else {
             return json["snippet"] as? String ?? ""
         }
@@ -942,7 +1028,7 @@ class GmailSyncService: ObservableObject {
         return receivedAt
     }
 
-    private func parseEmailBody(_ text: String, receivedAt: Date?) -> (expense: Expense?, income: Income?, bankName: String)? {
+    func parseEmailBody(_ text: String, receivedAt: Date?) -> (expense: Expense?, income: Income?, bankName: String)? {
         let cleanText = text.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
 
         for parser in parsers {

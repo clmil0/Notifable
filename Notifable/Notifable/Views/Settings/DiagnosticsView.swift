@@ -3,6 +3,9 @@ import SwiftUI
 /// Lo que dejó `Diagnostics`: bitácoras de las últimas aperturas e informes
 /// de MetricKit, cada uno para leer o compartir.
 struct DiagnosticsView: View {
+    @Environment(\.modelContext) private var modelContext
+    @State private var gmailReports: [URL] = []
+    @State private var isBuildingGmailReport = false
     @State private var reports: [URL] = []
     @State private var sessions: [URL] = []
     @State private var confirmDelete = false
@@ -13,6 +16,38 @@ struct DiagnosticsView: View {
                 Text("Si la app se congela o se cierra, aquí queda la última marca de lo que estaba haciendo. Los informes de iOS con la pila de llamadas llegan en la apertura siguiente, a veces horas después.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Button {
+                    Task {
+                        isBuildingGmailReport = true
+                        _ = await GmailDiagnosticReport.build(context: modelContext)
+                        isBuildingGmailReport = false
+                        reload()
+                    }
+                } label: {
+                    HStack {
+                        Label("Generar informe de Gmail", systemImage: "envelope.badge")
+                        Spacer()
+                        if isBuildingGmailReport { ProgressView() }
+                    }
+                }
+                .disabled(isBuildingGmailReport)
+
+                ForEach(gmailReports, id: \.self) { url in
+                    HStack {
+                        fileRow(url)
+                        ShareLink(item: url) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            } header: {
+                Text("Lectura de correo")
+            } footer: {
+                Text("Prueba la conexión con Google y Gmail, revisa cómo se leen tus últimos correos de bancos y junta la bitácora de las lecturas. Tarda unos segundos. No incluye contraseñas ni tokens, pero sí remitentes, asuntos y extractos de correos bancarios (montos y comercios): compártelo sólo con quien te ayuda.")
             }
 
             Section("Informes de iOS (\(reports.count))") {
@@ -80,6 +115,7 @@ struct DiagnosticsView: View {
     }
 
     private func reload() {
+        gmailReports = Array(Diagnostics.shared.files(prefix: "gmail-informe-").prefix(3))
         reports = Diagnostics.shared.files(prefix: "metrickit-")
         sessions = Diagnostics.shared.files(prefix: "session-")
     }

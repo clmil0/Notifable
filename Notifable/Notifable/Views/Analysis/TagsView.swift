@@ -3,12 +3,12 @@ import SwiftData
 
 /// Etiquetas, la hermana de Categorías.
 ///
-/// La regla de lectura, que es lo que decide toda la forma de esta pantalla:
-/// **una etiqueta no es una porción del total**. Un gasto puede llevar dos, así
-/// que sumar las filas da más que el mes. Por eso aquí no hay dona, ni
-/// porcentajes, ni barras comparadas contra el gasto del mes: hay una lista de
-/// montos y, al final, la única cifra que sí es disjunta —lo que no lleva
-/// ninguna etiqueta—.
+/// La regla de lectura: **una etiqueta no es una porción del total del mes**.
+/// Un gasto puede llevar dos, así que sumar las filas da más que el mes. La
+/// dona, la misma de Categorías, reparte por eso la **suma de las etiquetas**,
+/// no el gasto del mes: dice cuál pesa más frente a las otras. La única cifra
+/// que sí se resta del mes es la del final —lo que no lleva ninguna
+/// etiqueta—.
 ///
 /// Y por eso tampoco hay límites: un límite sobre algo que se solapa no tiene
 /// aritmética. Los límites siguen viviendo en Categorías, bajo cada fila.
@@ -61,7 +61,12 @@ struct TagsView: View {
                                     title: "Aún no hay etiquetas",
                                     message: "Una etiqueta cruza categorías: dos gastos de Salud pueden ser «madre» y «padre». Ábrela desde cualquier movimiento, o créala aquí.")
                 } else {
-                    list(rows)
+                    let slices = self.slices(rows)
+                    if !slices.isEmpty {
+                        chart(slices)
+                            .padding(.bottom, 10)
+                    }
+                    list(rows, slices: slices)
                 }
 
                 newTagRow
@@ -74,7 +79,7 @@ struct TagsView: View {
                 }
 
                 ShellNote(icon: "info.circle",
-                          text: "Un movimiento puede llevar varias etiquetas, así que estas cifras no suman el total del mes. Los límites se ponen por categoría.",
+                          text: "Un movimiento puede llevar varias etiquetas, así que estas cifras no suman el total del mes: la dona compara las etiquetas entre sí. Los límites se ponen por categoría.",
                           tint: palette.tertiaryLabel)
                     .padding(.horizontal, 2)
             }
@@ -133,17 +138,43 @@ struct TagsView: View {
         return used == 1 ? "1 etiqueta usada en \(name)" : "\(used) etiquetas usadas en \(name)"
     }
 
+    // MARK: - Gráfico
+
+    /// Sólo las que tuvieron gasto este mes, ya ordenadas de mayor a menor.
+    private func slices(_ rows: [TagTotals.Row]) -> [CategoryDonut.Slice] {
+        rows.filter { Money.cents($0.total) > 0 }.map {
+            CategoryDonut.Slice(category: $0.tag, total: $0.total, color: catalog.color(for: $0.tag))
+        }
+    }
+
+    /// Igual que en Categorías (`2d`): suelto sobre el fondo, dona y leyenda.
+    private func chart(_ slices: [CategoryDonut.Slice]) -> some View {
+        HStack(spacing: 18) {
+            CategoryDonut(slices: slices)
+
+            DonutLegend(slices: slices, total: Money.sum(slices) { $0.total })
+                .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 2)
+        .padding(.top, 14)
+    }
+
     // MARK: - Lista
 
-    private func list(_ rows: [TagTotals.Row]) -> some View {
+    private func list(_ rows: [TagTotals.Row], slices: [CategoryDonut.Slice]) -> some View {
         let everUsed = self.everUsed
+        // Las que la dona junta en «Otras» llevan su gris, como en Categorías.
+        let max = CategoryDonut.maxEntries
+        let shown = slices.count > max ? max - 1 : slices.count
+        let grouped = Set(slices.dropFirst(shown).map(\.id))
 
         return MovementCard {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                 Button {
                     selectedTag = TagRef(name: row.tag)
                 } label: {
-                    tagRow(row, everUsed: everUsed)
+                    tagRow(row, everUsed: everUsed,
+                           dot: grouped.contains(row.tag) ? palette.tertiaryLabel : catalog.color(for: row.tag))
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
@@ -168,7 +199,7 @@ struct TagsView: View {
         }
     }
 
-    private func tagRow(_ row: TagTotals.Row, everUsed: Set<String>) -> some View {
+    private func tagRow(_ row: TagTotals.Row, everUsed: Set<String>, dot: Color) -> some View {
         let isIdle = row.count == 0
         // Nunca se puso a nada: es la única que necesita un empujón. Una que se
         // usó en otros meses no está pidiendo nada, sólo no tuvo gasto en éste.
@@ -176,7 +207,7 @@ struct TagsView: View {
 
         return HStack(spacing: 12) {
             Circle()
-                .fill(catalog.color(for: row.tag))
+                .fill(dot)
                 .frame(width: 10, height: 10)
                 .padding(.leading, 4)
 

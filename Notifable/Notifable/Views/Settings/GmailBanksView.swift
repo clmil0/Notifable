@@ -261,6 +261,20 @@ struct GmailBanksView: View {
                 .font(.caption)
                 .foregroundStyle(palette.secondaryLabel)
 
+            // Sin esto una lectura que fallaba o no encontraba nada se veía
+            // igual: la barra aparecía y se iba al segundo.
+            if let error = gmailSync.lastSyncError {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(palette.negative)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let summary = gmailSync.lastRunSummary {
+                Label(summary, systemImage: "checkmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             Button {
                 gmailSync.modelContext = modelContext
                 let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []

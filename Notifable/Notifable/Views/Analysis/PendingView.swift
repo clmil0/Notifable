@@ -120,9 +120,14 @@ struct PendingView: View {
                     // El segmento se queda aunque el mes esté al día: la
                     // pestaña existe por lo pendiente de meses anteriores, y
                     // sin él no habría forma de llegar a verlo.
-                    let totalAllCount = expenses.filter { $0.category == Accounting.unclassified && $0.countsAsSpending }.count
+                    // Movimientos en los dos: son las mismas cifras que la
+                    // tarjeta del dashboard («N de este mes · M de meses
+                    // anteriores»), y el historial es su suma.
+                    let allPending = expenses.filter { $0.category == Accounting.unclassified && $0.countsAsSpending }
+                    let range = month.interval
+                    let monthCount = allPending.filter { $0.date >= range.start && $0.date < range.end }.count
                     ShellSegment(items: [Scope.month, .all], selection: $scope, tint: accent.color) {
-                        $0 == .month ? "Este mes" : "Todo el historial (\(totalAllCount))"
+                        $0 == .month ? "Este mes (\(monthCount))" : "Todo el historial (\(allPending.count))"
                     }
                     .padding(.bottom, 14)
 
@@ -188,7 +193,8 @@ struct PendingView: View {
             didPickInitialScope = true
             let range = month.interval
             let monthHasPending = expenses.contains {
-                $0.category == Accounting.unclassified && $0.date >= range.start && $0.date < range.end
+                $0.category == Accounting.unclassified && $0.countsAsSpending
+                    && $0.date >= range.start && $0.date < range.end
             }
             if !monthHasPending { scope = .all }
         }

@@ -395,6 +395,19 @@ final class FriendsManager {
 
     // MARK: - Compartidos
 
+    /// El mes (`yyyy-MM-01`) del que `outgoing` trae la respuesta del
+    /// servidor. La caché puede ser de un mes anterior: hasta que se pida el
+    /// actual, no se sabe qué hay publicado ahora.
+    private var outgoingMonth: String?
+
+    /// `true` si `outgoing` es la respuesta del servidor para el mes en curso;
+    /// si no lo era, la pide. Sin red se queda en `false`.
+    func ensureCurrentOutgoing() async -> Bool {
+        if outgoingMonth == Self.currentMonthKey { return true }
+        await loadShares()
+        return outgoingMonth == Self.currentMonthKey
+    }
+
     private func loadShares() async {
         guard let uid = auth.userID else { return }
         let month = Self.currentMonthKey
@@ -407,6 +420,7 @@ final class FriendsManager {
         }
         if let asSharer = await fetchShares(query: "sharer_id=eq.\(uid)&period_month=eq.\(month)") {
             outgoing = asSharer
+            outgoingMonth = month
             touched = true
         }
         // Sólo si al menos una de las dos llamadas trajo algo de verdad: si

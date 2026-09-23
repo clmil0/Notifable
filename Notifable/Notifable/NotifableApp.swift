@@ -62,6 +62,9 @@ struct NotifableApp: App {
                     // Pinta Amigos con lo último que se vio, antes de que
                     // AmigosHubView llegue a pedir nada por red.
                     FriendsManager.shared.configure(container: sharedModelContainer)
+                    // Y re-publica lo que les compartes cada vez que cambia
+                    // el gasto del mes.
+                    ShareAutoSync.shared.start(container: sharedModelContainer)
                     Task {
                         await PaymentReminders.shared.uploadStoredToken()
                         await PaymentReminders.shared.refresh()
