@@ -162,15 +162,9 @@ struct AddTransactionSheet: View {
         .sheet(isPresented: $showQuickEditor) {
             QuickExpenseEditor(quick: editingQuick)
         }
-        .toolbar {
-            // El `.decimalPad` no tiene tecla de retorno, así que sin esto no
-            // hay forma de cerrarlo y tapa el botón de guardar.
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Listo") { focused = nil }
-                    .fontWeight(.semibold)
-            }
-        }
+        // Sin barra «Listo» sobre el teclado: el botón de registrar ya queda
+        // encima del `.decimalPad`, y en iOS 26 esa barra flota justo sobre
+        // él y se come los toques. El teclado se cierra deslizando la lista.
         .onAppear(perform: preselectSingleDebt)
         .task {
             // El foco inicial va al monto, que es lo primero que se escribe.

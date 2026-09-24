@@ -29,6 +29,10 @@ struct SpendBarChart: View {
 
     let columns: [Column]
     @Binding var selected: Int?
+    /// La entrada espera a que el dashboard termine de leer el historial: la
+    /// animación la mueve el hilo principal fotograma a fotograma, y si
+    /// arranca mientras se lee la base, se traba.
+    var isReady: Bool = true
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -52,7 +56,7 @@ struct SpendBarChart: View {
 
     /// Identifica el juego de periodos, no sus montos: un gasto nuevo no
     /// repite la entrada.
-    private var periodsKey: String { columns.map(\.label).joined(separator: "|") }
+    private var periodsKey: String { columns.map(\.label).joined(separator: "|") + (isReady ? "" : "|…") }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
@@ -63,6 +67,7 @@ struct SpendBarChart: View {
         .frame(height: Self.barArea + Self.labelRoom + 18, alignment: .bottom)
         .onChange(of: selected) { _, _ in selectedAt = Date() }
         .task(id: periodsKey) {
+            guard isReady else { filled = false; return }
             guard !reduceMotion else { filled = true; return }
             var reset = Transaction()
             reset.disablesAnimations = true
@@ -83,9 +88,15 @@ struct SpendBarChart: View {
             ZStack(alignment: .bottom) {
                 Color.clear.frame(height: Self.barArea)
 
-                bar(hasSpend: hasSpend, isSelected: isSelected, height: barHeight)
+                // Crece en alto, no con `scaleEffect`: escalada, la barra
+                // aplastaba sus esquinas y la línea clara mientras subía.
+                bar(hasSpend: hasSpend, isSelected: isSelected, height: filled ? barHeight : 0)
+                    .animation(filled ? .spring(duration: 0.55, bounce: 0.32)
+                                            .delay(Double(index) * Self.stagger) : nil,
+                               value: filled)
+                    .frame(height: barHeight, alignment: .bottom)
                     .overlay(alignment: .bottom) {
-                        if isSelected && hasSpend && barHeight >= 10 && !reduceMotion {
+                        if filled && isSelected && hasSpend && barHeight >= 10 && !reduceMotion {
                             BubbleBurst(seed: column.id,
                                         barHeight: barHeight,
                                         ring: palette.expense.mixed(with: .white, amount: 0.3, scheme: scheme),
@@ -94,10 +105,6 @@ struct SpendBarChart: View {
                                 .allowsHitTesting(false)
                         }
                     }
-                    .scaleEffect(x: 1, y: filled ? 1 : 0, anchor: .bottom)
-                    .animation(filled ? .spring(response: 0.6, dampingFraction: 0.55)
-                                            .delay(Double(index) * Self.stagger) : nil,
-                               value: filled)
             }
             .overlay(alignment: .top) {
                 if isSelected {

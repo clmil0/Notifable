@@ -209,8 +209,21 @@ struct DashboardView: View {
             header
         }
         .task {
-            loadCatalog()
-            newMovements.baselineIfNeeded(NewMovements.keys(expenses: allExpenses, incomes: allIncomes))
+            // La primera vez el gráfico espera al catálogo (`isReady`). Al
+            // volver de otra pantalla el gráfico repite su entrada en
+            // seguida, así que releer el historial —y armar el resumen del
+            // asistente— va después: hecho en medio, trababa la animación.
+            let firstLoad = catalog == nil
+            if firstLoad {
+                loadCatalog()
+                newMovements.baselineIfNeeded(NewMovements.keys(expenses: allExpenses, incomes: allIncomes))
+            }
+            try? await Task.sleep(for: .milliseconds(1500))
+            guard !Task.isCancelled else { return }
+            if !firstLoad {
+                loadCatalog()
+                newMovements.baselineIfNeeded(NewMovements.keys(expenses: allExpenses, incomes: allIncomes))
+            }
             refreshBrief()
         }
         .onChange(of: self.expenses.count) { _, _ in
@@ -610,7 +623,8 @@ struct DashboardView: View {
 
             SpendBarChart(columns: chart.columns,
                           selected: Binding(get: { selectedColumn ?? chart.defaultSelection },
-                                            set: { selectedColumn = $0 }))
+                                            set: { selectedColumn = $0 }),
+                          isReady: catalog != nil)
         }
         .padding(.horizontal, 2)
     }
