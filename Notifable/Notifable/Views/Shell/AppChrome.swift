@@ -43,7 +43,9 @@ struct ShellCircleButton: View {
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(tint ?? palette.secondaryLabel)
                 .frame(width: ShellMetrics.circleButton, height: ShellMetrics.circleButton)
-                .background(.ultraThinMaterial, in: Circle())
+                // Superficie opaca, no material: el blur se recalculaba en
+                // cada fotograma con el contenido pasando por debajo.
+                .background(palette.surface, in: Circle())
                 .overlay(Circle().stroke(palette.hairline, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
@@ -99,7 +101,7 @@ struct SubtabPill<Tab: AppSubtab>: View {
             }
         }
         .padding(3)
-        .background(.ultraThinMaterial, in: Capsule())
+        .background(palette.surface, in: Capsule())
         .overlay(Capsule().stroke(palette.hairline, lineWidth: 0.5))
     }
 

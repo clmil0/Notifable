@@ -33,6 +33,8 @@ struct SpendBarChart: View {
     /// animación la mueve el hilo principal fotograma a fotograma, y si
     /// arranca mientras se lee la base, se traba.
     var isReady: Bool = true
+    /// Para detener las burbujas mientras se desliza la pantalla.
+    var scroll: ScrollProgress?
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -88,19 +90,23 @@ struct SpendBarChart: View {
             ZStack(alignment: .bottom) {
                 Color.clear.frame(height: Self.barArea)
 
-                // Crece en alto, no con `scaleEffect`: escalada, la barra
-                // aplastaba sus esquinas y la línea clara mientras subía.
-                bar(hasSpend: hasSpend, isSelected: isSelected, height: filled ? barHeight : 0)
-                    .animation(filled ? .spring(duration: 0.55, bounce: 0.32)
+                // Sube desde abajo desplazándose, recortada por la base: no
+                // se deforma (con `scaleEffect` se aplastaban las esquinas y
+                // la línea clara) y, al ser sólo un desplazamiento, no
+                // obliga a recalcular el layout en cada fotograma.
+                bar(hasSpend: hasSpend, isSelected: isSelected, height: barHeight)
+                    .offset(y: filled ? 0 : barHeight + 2)
+                    .animation(filled ? .spring(duration: 0.55, bounce: 0.3)
                                             .delay(Double(index) * Self.stagger) : nil,
                                value: filled)
-                    .frame(height: barHeight, alignment: .bottom)
+                    .clipShape(OpenTopClip())
                     .overlay(alignment: .bottom) {
                         if filled && isSelected && hasSpend && barHeight >= 10 && !reduceMotion {
                             BubbleBurst(seed: column.id,
                                         barHeight: barHeight,
                                         ring: palette.expense.mixed(with: .white, amount: 0.3, scheme: scheme),
-                                        start: max(selectedAt, entrance + Self.settle + Double(index) * Self.stagger))
+                                        start: max(selectedAt, entrance + Self.settle + Double(index) * Self.stagger),
+                                        scroll: scroll)
                                 .frame(height: barHeight + BubbleBurst.headroom)
                                 .allowsHitTesting(false)
                         }
@@ -180,13 +186,16 @@ private struct BubbleBurst: View {
     let barHeight: CGFloat
     let ring: Color
     let start: Date
+    let scroll: ScrollProgress?
 
     private static let count = 4
     /// Parte del ciclo en que la burbuja sube; el resto es el anillo.
     private static let riseShare = 0.86
 
     var body: some View {
-        TimelineView(.animation) { timeline in
+        // A 60 fps como mucho —las burbujas no ganan nada a 120— y en pausa
+        // mientras se desliza la pantalla.
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: scroll?.isScrolling ?? false)) { timeline in
             Canvas { context, size in
                 draw(in: &context, size: size, elapsed: timeline.date.timeIntervalSince(start))
             }
@@ -249,6 +258,14 @@ private struct BubbleBurst: View {
     private static func random(_ i: Int, _ n: Int) -> Double {
         let x = sin(Double(n) * 127.1 + Double(i) * 311.7) * 43758.5453
         return x - floor(x)
+    }
+}
+
+/// Recorta por abajo y por los lados, pero deja libre hacia arriba: el
+/// rebote de la entrada y el borde de la barra elegida no se cortan.
+private struct OpenTopClip: Shape {
+    func path(in rect: CGRect) -> Path {
+        Path(CGRect(x: rect.minX - 4, y: rect.minY - 40, width: rect.width + 8, height: rect.height + 42))
     }
 }
 

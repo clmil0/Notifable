@@ -14,25 +14,21 @@ final class ScrollProgress {
     /// debe encender el blur del header).
     var offset: CGFloat = 0
 
-    /// El scroll va hacia abajo: la píldora de tabs se encoge a sólo íconos.
-    var isScrollingDown: Bool = false
+    /// Se está deslizando: las burbujas del gráfico se detienen mientras
+    /// tanto, para dejarle el fotograma entero al scroll.
+    var isScrolling: Bool = false
 
-    private var lastOffset: CGFloat = 0
+    /// Más allá de esto el header ya está en su estado final: seguir
+    /// publicando el desplazamiento sólo invalidaba vistas en cada fotograma.
+    private static let publishLimit: CGFloat = 64
 
     func update(_ newOffset: CGFloat) {
-        let clamped = max(0, newOffset)
-        // Umbral de 6 pt: sin él, el temblor natural del dedo alterna el
-        // estado de las etiquetas varias veces por segundo.
-        if abs(clamped - lastOffset) > 6 {
-            isScrollingDown = clamped > lastOffset && clamped > 40
-            lastOffset = clamped
-        }
-        offset = clamped
+        let clamped = min(max(0, newOffset), Self.publishLimit)
+        if clamped != offset { offset = clamped }
     }
 
     func reset() {
         offset = 0
-        lastOffset = 0
-        isScrollingDown = false
+        isScrolling = false
     }
 }

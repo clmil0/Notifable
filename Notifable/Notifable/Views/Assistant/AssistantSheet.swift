@@ -68,10 +68,19 @@ enum AssistantData {
 
 // MARK: - Botón del header
 
+/// Si el ✦ lleva punto. Aparte del dashboard: cambiarlo no debe volver a
+/// evaluar su cuerpo, que calcula los totales del mes.
+@Observable
+final class AssistantDot {
+    static let shared = AssistantDot()
+    var hasNews = false
+}
+
 /// ✦ en el header del dashboard, con punto cuando hay un resumen sin abrir.
 struct AssistantHeaderButton: View {
-    let hasNews: Bool
     let action: () -> Void
+
+    private var hasNews: Bool { AssistantDot.shared.hasNews }
 
     @Environment(\.colorScheme) private var scheme
     private var palette: Palette { Palette(scheme) }
@@ -83,7 +92,7 @@ struct AssistantHeaderButton: View {
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(accent.onSurface(scheme))
                 .frame(width: ShellMetrics.circleButton, height: ShellMetrics.circleButton)
-                .background(.ultraThinMaterial, in: Circle())
+                .background(palette.surface, in: Circle())
                 .overlay(Circle().stroke(palette.hairline, lineWidth: 0.5))
                 .overlay(alignment: .topTrailing) {
                     if hasNews {

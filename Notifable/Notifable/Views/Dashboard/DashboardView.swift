@@ -23,7 +23,6 @@ struct DashboardView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.scenePhase) private var scenePhase
 
     /// El mes mostrado y el anterior, nada más.
     @Query private var expenses: [Expense]
@@ -61,8 +60,6 @@ struct DashboardView: View {
     @State private var scrollToTop = false
 
     // Asistente (`1f`)
-    @State private var briefCards: [BriefCard] = []
-    @State private var briefNews = false
     @State private var assistant: AssistantPresentation?
     /// Lo que pidió un botón del asistente; se hace al cerrarse la hoja.
     @State private var pendingAction: AssistantAction?
@@ -205,6 +202,9 @@ struct DashboardView: View {
             } action: { _, offset in
                 progress.update(offset)
             }
+            .onScrollPhaseChange { _, phase in
+                if progress.isScrolling != phase.isScrolling { progress.isScrolling = phase.isScrolling }
+            }
 
             header
         }
@@ -230,9 +230,12 @@ struct DashboardView: View {
             loadCatalog()
             refreshBrief()
         }
-        // Un día nuevo trae resumen nuevo aunque la app siguiera abierta.
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { refreshBrief() }
+        // Un día nuevo trae resumen nuevo aunque la app siguiera abierta. Con
+        // la notificación y no con `scenePhase`: leer éste del entorno volvía
+        // a evaluar todo el dashboard justo durante la entrada del gráfico.
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            guard let day = Self.briefDay, day != AssistantBrief.dayKey(Date()) else { return }
+            refreshBrief()
         }
         .onChange(of: chartMode) { _, _ in selectedColumn = nil }
         .onChange(of: monthOffset) { _, _ in
@@ -274,21 +277,24 @@ struct DashboardView: View {
         var id: String { name }
     }
 
+    /// El día del último resumen calculado: al volver a la app sólo se
+    /// recalcula si cambió.
+    private static var briefDay: String?
+
     /// Las tarjetas del día, para saber si el ✦ lleva punto.
     private func refreshBrief() {
+        Self.briefDay = AssistantBrief.dayKey(Date())
         let inputs = AssistantData.inputs(context: modelContext, usdToPen: rate)
-        briefCards = AssistantBrief.cards(inputs)
-        withAnimation(.easeInOut(duration: 0.2)) {
-            briefNews = AssistantSeenState().hasNews(briefCards)
-        }
+        let news = AssistantSeenState().hasNews(AssistantBrief.cards(inputs))
+        guard news != AssistantDot.shared.hasNews else { return }
+        withAnimation(.easeInOut(duration: 0.2)) { AssistantDot.shared.hasNews = news }
     }
 
     private func openAssistant() {
         let inputs = AssistantData.inputs(context: modelContext, usdToPen: rate)
         let cards = AssistantBrief.cards(inputs)
-        briefCards = cards
         AssistantSeenState().markSeen(cards)
-        withAnimation(.easeInOut(duration: 0.2)) { briefNews = false }
+        withAnimation(.easeInOut(duration: 0.2)) { AssistantDot.shared.hasNews = false }
         assistant = AssistantPresentation(cards: cards, inputs: inputs,
                                           categories: AssistantData.categories(context: modelContext))
     }
@@ -315,7 +321,7 @@ struct DashboardView: View {
         HStack(spacing: 8) {
             accountChip
             Spacer(minLength: 8)
-            AssistantHeaderButton(hasNews: briefNews, action: openAssistant)
+            AssistantHeaderButton(action: openAssistant)
             ShellCircleButton(icon: "slider.horizontal.3", label: "Configuración", action: onSettings)
         }
         .padding(.horizontal, ShellMetrics.sideInset)
@@ -624,7 +630,8 @@ struct DashboardView: View {
             SpendBarChart(columns: chart.columns,
                           selected: Binding(get: { selectedColumn ?? chart.defaultSelection },
                                             set: { selectedColumn = $0 }),
-                          isReady: catalog != nil)
+                          isReady: catalog != nil,
+                          scroll: progress)
         }
         .padding(.horizontal, 2)
     }

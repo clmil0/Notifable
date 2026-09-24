@@ -34,7 +34,9 @@ class ExchangeRateService: ObservableObject {
     static var isRateStale: Bool { (rateAgeInDays ?? Int.max) > 1 }
 
     @Published var usdToPenRate: Double = ExchangeRateService.storedRate
-    @Published var rateDate: Date? = ExchangeRateService.storedRateDate
+    /// No publicada: nadie la dibuja, y avisar de su cambio volvía a evaluar
+    /// cada pantalla que observa el tipo de cambio.
+    var rateDate: Date? = ExchangeRateService.storedRateDate
 
     init() {
         fetchLatestRate()
@@ -57,7 +59,9 @@ class ExchangeRateService: ObservableObject {
                     
                     let now = Date()
                     DispatchQueue.main.async {
-                        self?.usdToPenRate = penRate
+                        // Sólo si cambió: el mismo valor de ayer no tiene por
+                        // qué redibujar el dashboard en plena entrada.
+                        if self?.usdToPenRate != penRate { self?.usdToPenRate = penRate }
                         self?.rateDate = now
                         UserDefaults.standard.set(penRate, forKey: ExchangeRateService.rateKey)
                         UserDefaults.standard.set(now.timeIntervalSince1970, forKey: ExchangeRateService.rateDateKey)
