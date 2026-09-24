@@ -40,6 +40,8 @@ struct SpendBarChart: View {
     /// Cuándo empezó la última entrada: las burbujas esperan a que la barra
     /// se asiente.
     @State private var entrance = Date.distantPast
+    /// Cuándo se eligió la barra actual: las burbujas cuentan desde aquí.
+    @State private var selectedAt = Date.distantPast
 
     private static let barArea: CGFloat = 112
     private static let labelRoom: CGFloat = 22
@@ -59,6 +61,7 @@ struct SpendBarChart: View {
             }
         }
         .frame(height: Self.barArea + Self.labelRoom + 18, alignment: .bottom)
+        .onChange(of: selected) { _, _ in selectedAt = Date() }
         .task(id: periodsKey) {
             guard !reduceMotion else { filled = true; return }
             var reset = Transaction()
@@ -86,7 +89,7 @@ struct SpendBarChart: View {
                             BubbleBurst(seed: column.id,
                                         barHeight: barHeight,
                                         ring: palette.expense.mixed(with: .white, amount: 0.3, scheme: scheme),
-                                        notBefore: entrance + Self.settle + Double(index) * Self.stagger)
+                                        start: max(selectedAt, entrance + Self.settle + Double(index) * Self.stagger))
                                 .frame(height: barHeight + BubbleBurst.headroom)
                                 .allowsHitTesting(false)
                         }
@@ -169,9 +172,7 @@ private struct BubbleBurst: View {
     let seed: Int
     let barHeight: CGFloat
     let ring: Color
-    let notBefore: Date
-
-    @State private var start: Date?
+    let start: Date
 
     private static let count = 4
     /// Parte del ciclo en que la burbuja sube; el resto es el anillo.
@@ -180,11 +181,9 @@ private struct BubbleBurst: View {
     var body: some View {
         TimelineView(.animation) { timeline in
             Canvas { context, size in
-                guard let start else { return }
                 draw(in: &context, size: size, elapsed: timeline.date.timeIntervalSince(start))
             }
         }
-        .onAppear { start = max(Date(), notBefore) }
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize, elapsed: TimeInterval) {

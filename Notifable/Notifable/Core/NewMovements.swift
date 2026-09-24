@@ -1,21 +1,24 @@
 import Foundation
 import Observation
 
-/// Los movimientos que llegaron del correo y todavía no viste en Movimientos.
+/// Los movimientos que todavía no viste en Movimientos: los que llegaron del
+/// correo y los que anotaste a mano.
 ///
 /// Cuentan para el globo de la tarjeta «Historial» del dashboard y son los que
 /// Movimientos resalta un momento al entrar; entrar los da por vistos.
 ///
-/// La llave es el id del correo (`TransactionKey`), no el `UUID`: releer el
-/// correo borra y rearma los gastos con otro `UUID`, y todo volvería a ser
-/// nuevo. Lo anotado a mano no cuenta: ya lo viste al anotarlo.
+/// Lo del correo se reconoce por el id del mensaje, no por el `UUID`: releer
+/// el correo borra y rearma los gastos con otro `UUID`, y todo volvería a ser
+/// nuevo. Lo anotado a mano no se rearma, así que su `UUID` basta.
 @Observable
 final class NewMovements {
 
     static let shared = NewMovements()
 
     private static let seenKey = "newMovements.seen"
-    private static let baselineKey = "newMovements.baselined"
+    /// `v2`: desde que cuenta lo anotado a mano; lo que ya existía se vuelve
+    /// a dar por visto una vez.
+    private static let baselineKey = "newMovements.baselined.v2"
 
     private(set) var seen: Set<String>
     /// Hasta la primera vez no hay con qué comparar: todo lo que ya existe se
@@ -29,13 +32,15 @@ final class NewMovements {
     }
 
     static func key(_ expense: Expense) -> String? {
-        guard !expense.isTransfer, let id = expense.emailID, !id.isEmpty else { return nil }
-        return "mail:" + id
+        guard !expense.isTransfer else { return nil }
+        if let id = expense.emailID, !id.isEmpty { return "mail:" + id }
+        return "id:" + expense.id.uuidString
     }
 
     static func key(_ income: Income) -> String? {
-        guard !income.isTransfer, let id = income.emailID, !id.isEmpty else { return nil }
-        return "mail:" + id
+        guard !income.isTransfer else { return nil }
+        if let id = income.emailID, !id.isEmpty { return "mail:" + id }
+        return "id:" + income.id.uuidString
     }
 
     static func key(_ item: TransactionItem) -> String? {

@@ -33,10 +33,10 @@ struct DashboardView: View {
     @Query private var unclassified: [Expense]
     /// Lo marcado por cobrar: poco, y lo que dice la tarjeta de Amigos.
     @Query private var debtExpenses: [Expense]
-    /// Todo lo que llegó del correo, de cualquier mes: para el globo de
-    /// movimientos nuevos de «Historial».
-    @Query private var mailExpenses: [Expense]
-    @Query private var mailIncomes: [Income]
+    /// Todos los movimientos, de cualquier mes: para el globo de movimientos
+    /// nuevos de «Historial».
+    @Query private var allExpenses: [Expense]
+    @Query private var allIncomes: [Income]
 
     @StateObject private var rates = ExchangeRateService.shared
     @StateObject private var accountBook = AccountBook.shared
@@ -87,8 +87,8 @@ struct DashboardView: View {
             $0.category == unclassifiedName && !$0.isTransfer && !$0.isVoided && !$0.isReversal
         })
         _debtExpenses = Query(filter: #Predicate<Expense> { $0.isDebt && !$0.isTransfer })
-        _mailExpenses = Query(filter: #Predicate<Expense> { $0.emailID != nil && !$0.isTransfer })
-        _mailIncomes = Query(filter: #Predicate<Income> { $0.emailID != nil && !$0.isTransfer })
+        _allExpenses = Query(filter: #Predicate<Expense> { !$0.isTransfer })
+        _allIncomes = Query(filter: #Predicate<Income> { !$0.isTransfer })
     }
 
     static func month(offset: Int) -> Period {
@@ -199,7 +199,7 @@ struct DashboardView: View {
         }
         .task {
             loadCatalog()
-            newMovements.baselineIfNeeded(NewMovements.keys(expenses: mailExpenses, incomes: mailIncomes))
+            newMovements.baselineIfNeeded(NewMovements.keys(expenses: allExpenses, incomes: allIncomes))
         }
         .onChange(of: self.expenses.count) { _, _ in loadCatalog() }
         .onChange(of: chartMode) { _, _ in selectedColumn = nil }
@@ -922,7 +922,7 @@ struct DashboardView: View {
             + incomes.filter { !$0.isTransfer && $0.date >= range.start && $0.date < range.end }.count
         let hasPending = !unclassified.isEmpty
 
-        let newCount = newMovements.unseen(in: NewMovements.keys(expenses: mailExpenses, incomes: mailIncomes)).count
+        let newCount = newMovements.unseen(in: NewMovements.keys(expenses: allExpenses, incomes: allIncomes)).count
         let historial = tile(title: "Historial", badge: newCount, action: { onOpen(.movements) }) {
             bigNumber("\(movementCount)", caption: movementCount == 1 ? "movimiento este mes" : "movimientos este mes")
         }
@@ -1004,7 +1004,7 @@ struct DashboardView: View {
                     Text(title)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(palette.label)
-                    // Movimientos nuevos del correo que aún no viste: el mismo
+                    // Movimientos que aún no viste en Historial: el mismo
                     // globo que las solicitudes de Social.
                     if badge > 0 {
                         Text(badge > 99 ? "99+" : "\(badge)")
