@@ -1,11 +1,20 @@
 import SwiftUI
 
-/// Apariencia, con vista previa en vivo (`1e`).
+/// Apariencia (`1c`): un mini-Resumen fijo arriba y los ajustes por pestaña.
 ///
-/// Elegir un color mirando un círculo de 12 pt no dice cómo se verá el monto
-/// grande, la barra ni la pestaña activa. La vista previa de arriba sí, y
-/// "Ver todos" abre una galería donde cada tema es un mini-Resumen real.
+/// La vista previa es una miniatura del dashboard real —cuentas, monto,
+/// barras, tarjetas, Dictar y +— para que cada ajuste tenga dónde notarse, y
+/// marca con un anillo lo que acaba de cambiar.
 struct AppearanceSettingsView: View {
+
+    enum Tab: String, CaseIterable {
+        case color = "Color"
+        case text = "Texto"
+        case voice = "Voz"
+    }
+
+    /// La parte de la vista previa que se ilumina tras un cambio.
+    enum Flash { case surface, cats, type, dict }
 
     @Environment(\.colorScheme) private var scheme
     @AppStorage(AppThemeColor.storageKey) private var appAccentColor = AppThemeColor.blue.rawValue
@@ -16,42 +25,75 @@ struct AppearanceSettingsView: View {
     @AppStorage(AppThemeColor.themedCategoryColorsKey) private var themedCategoryColors = false
     @AppStorage(DictationStyle.storageKey) private var dictationStyle = DictationStyle.bars.rawValue
 
+    @State private var tab: Tab = .color
+    @State private var flash: Flash?
+    @State private var flashTask: Task<Void, Never>?
+    @State private var recentThemes = AppThemeColor.recent()
     @State private var showsThemeGallery = false
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .blue }
     private var appearance: AppAppearance { AppAppearance(rawValue: appearanceRaw) ?? .dark }
     private var palette: Palette { Palette(scheme, accent: accent, intense: intenseThemeTint) }
+    private var textSize: AppTextSize { AppTextSize(rawValue: appTextSize) ?? .sistema }
+    private var fontDesign: AppFontDesign { AppFontDesign(rawValue: appFontDesign) ?? .sistema }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Fija arriba y siempre visible (`5b`): cada cambio se ve sin
-            // volver a subir.
-            preview
-                .padding(.vertical, 12)
-                .background(palette.background)
+            AppearancePreview(palette: palette, flash: flash, dictationStyle: dictationStyle,
+                              amountScale: textSize.amountScale)
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+
+            ShellSegment(items: Tab.allCases, selection: $tab) { $0.rawValue }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
 
             ScrollView {
-                VStack(spacing: 22) {
-                    colorThemeRow
-                    themePicker
-                    fontDesignPicker
-                    textSizePicker
-                    intenseTintSection
-                    categoryColorsSection
-                    dictationSection
+                Group {
+                    switch tab {
+                    case .color: colorTab
+                    case .text: textTab
+                    case .voice: voiceTab
+                    }
                 }
-                .padding(.vertical, 12)
+                .padding(.top, 18)
+                .padding(.bottom, 40)
             }
+            .scrollIndicators(.hidden)
         }
         .background(palette.background)
         .navigationTitle("Apariencia")
         .navigationBarTitleDisplayMode(.inline)
+        .animation(.easeInOut(duration: 0.3), value: appAccentColor)
+        .animation(.easeInOut(duration: 0.3), value: intenseThemeTint)
+        .onChange(of: appAccentColor) { _, raw in
+            if let theme = AppThemeColor(rawValue: raw) { AppThemeColor.noteUsed(theme) }
+            recentThemes = AppThemeColor.recent()
+            ring(.surface)
+        }
+        .onChange(of: intenseThemeTint) { _, _ in ring(.surface) }
+        .onChange(of: themedCategoryColors) { _, _ in ring(.cats) }
+        .onChange(of: appFontDesign) { _, _ in ring(.type) }
+        .onChange(of: appTextSize) { _, _ in ring(.type) }
+        .onChange(of: dictationStyle) { _, _ in ring(.dict) }
+        .onDisappear { flashTask?.cancel() }
         .fullScreenCover(isPresented: $showsThemeGallery) {
             ThemeGalleryView(current: accent) { theme in
                 withAnimation(.easeInOut(duration: 0.2)) { appAccentColor = theme.rawValue }
             }
             .appAppearance()
             .appTextSize()
+        }
+    }
+
+    /// Enciende el anillo de una parte de la vista previa durante un segundo.
+    private func ring(_ part: Flash) {
+        withAnimation(.easeOut(duration: 0.25)) { flash = part }
+        flashTask?.cancel()
+        flashTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1100))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.35)) { flash = nil }
         }
     }
 
@@ -71,130 +113,103 @@ struct AppearanceSettingsView: View {
         .padding(.horizontal, 20)
     }
 
-    // MARK: - Vista previa
+    private func block<Content: View>(_ title: String, spacing: CGFloat = 8,
+                                      @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            sectionTitle(title)
+            content()
+        }
+    }
 
-    private var preview: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("VISTA PREVIA")
+    // MARK: - Color
 
-            VStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("GASTADO ESTE MES")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(accent.onSurface(scheme))
-                        Spacer()
-                        Text("quedan 18 días")
-                            .font(.caption2)
-                            .foregroundStyle(palette.secondaryLabel)
-                    }
+    private var colorTab: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 10) {
+                sectionTitle("TEMA · " + accent.rawValue.uppercased(),
+                             trailing: ("Ver todos", { showsThemeGallery = true }))
+                themeRow
+            }
 
-                    Text(Money.format(1842.50))
-                        .font(.system(size: 30, weight: .bold))
-                        .foregroundStyle(accent.onSurface(scheme))
-                        .padding(.top, 4)
+            block("TARJETAS") {
+                ShellSegment(items: [false, true], selection: $intenseThemeTint) { $0 ? "Con tinte" : "Neutras" }
+                    .overlay { segmentChips(count: 2) { index in intenseChip(index == 1) } }
+                    .padding(.horizontal, 16)
+            }
 
-                    previewBar
-                        .padding(.top, 10)
+            block("CATEGORÍAS") {
+                ShellSegment(items: [false, true], selection: $themedCategoryColors) { $0 ? "Del tema" : "Propios" }
+                    .overlay { segmentChips(count: 2) { index in categoryDots(themed: index == 1) } }
+                    .padding(.horizontal, 16)
+            }
 
-                    HStack(spacing: 6) {
-                        previewChip("Comida 34%", fill: accent.color, ink: .white)
-                        previewChip("Ingresos", fill: accent.secondarySoftFill(scheme), ink: accent.secondaryOnSurface(scheme))
-                        previewChip("Transporte", fill: palette.track, ink: palette.secondaryLabel)
-                    }
-                    .padding(.top, 11)
+            block("MODO") {
+                ShellSegment(items: AppAppearance.allCases, selection: appearanceBinding) { option in
+                    option == .system ? "Auto" : option.rawValue
                 }
-                .padding(14)
-            }
-            .background(palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .stroke(palette.hairline, lineWidth: 0.5)
-            )
-            .padding(.horizontal, 16)
-            .animation(.easeInOut(duration: 0.2), value: appAccentColor)
-        }
-    }
-
-    /// La barra con su marca de ritmo, igual que en Resumen.
-    private var previewBar: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(palette.track)
-                Capsule()
-                    .fill(accent.color)
-                    .frame(width: geo.size.width * 0.77)
-                Rectangle()
-                    .fill(Color.white)
-                    .frame(width: 2)
-                    .offset(x: geo.size.width * 0.60)
+                .padding(.horizontal, 16)
             }
         }
-        .frame(height: 10)
-        .clipShape(Capsule())
     }
 
-    private func previewChip(_ text: String, fill: Color, ink: Color) -> some View {
-        Text(text)
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(ink)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(fill)
-            .clipShape(Capsule())
-            .lineLimit(1)
-    }
-
-    // MARK: - Tema de color
-
-    /// Los temas son pares de color —gasto e ingreso—, no un swatch suelto
-    /// (`5b`). Tres a la vista: el actual y dos más; el resto en «Ver todos».
-    private var colorThemeRow: some View {
-        let others = AppThemeColor.allCases.filter { $0 != accent }
-        let shown = [accent] + Array(others.prefix(2))
-
-        return VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("TEMA DE COLOR", trailing: ("Ver todos", { showsThemeGallery = true }))
-
-            HStack(spacing: 10) {
-                ForEach(shown, id: \.self) { theme in
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { appAccentColor = theme.rawValue }
-                    } label: {
-                        VStack(spacing: 6) {
-                            HStack(spacing: -6) {
-                                Circle().fill(theme.color).frame(width: 22, height: 22)
-                                Circle().fill(theme.incomeFillColor).frame(width: 22, height: 22)
-                            }
-                            Text(theme.rawValue)
-                                .font(.system(size: 12.5, weight: theme == accent ? .semibold : .regular))
-                                .foregroundStyle(palette.label)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                            .stroke(theme == accent ? accent.color : palette.hairline, lineWidth: theme == accent ? 1.5 : 0.5))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(theme == accent ? [.isSelected] : [])
+    /// Los seis temas usados más recientemente, en círculo; el elegido con
+    /// anillo. El resto, en «Ver todos».
+    private var themeRow: some View {
+        HStack {
+            ForEach(recentThemes) { theme in
+                let selected = theme == accent
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { appAccentColor = theme.rawValue }
+                } label: {
+                    ThemeSwatch(theme: theme, size: 36)
+                        .padding(4)
+                        .overlay(Circle().stroke(selected ? theme.onSurface(scheme) : .clear, lineWidth: 2))
+                        .contentShape(Circle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(theme.rawValue)
+                .accessibilityAddTraits(selected ? .isSelected : [])
+                if theme != recentThemes.last { Spacer(minLength: 0) }
             }
-            .padding(.horizontal, 16)
         }
+        .padding(.horizontal, 18)
     }
 
-    // MARK: - Tema claro / oscuro
-
-    private var themePicker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("MODO")
-
-            ShellSegment(items: AppAppearance.allCases, selection: appearanceBinding) { option in
-                option == .system ? "Auto" : option.rawValue
+    /// La muestra va dentro del segmento, delante del texto: se superpone en
+    /// la mitad que le toca a cada opción.
+    private func segmentChips<Chip: View>(count: Int, @ViewBuilder chip: @escaping (Int) -> Chip) -> some View {
+        HStack(spacing: 0) {
+            ForEach(0..<count, id: \.self) { index in
+                chip(index)
+                    .padding(.leading, 18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 16)
+        }
+        .padding(4)
+        .allowsHitTesting(false)
+    }
+
+    private func intenseChip(_ tinted: Bool) -> some View {
+        let sample = Palette(scheme, accent: accent, intense: tinted)
+        return RoundedRectangle(cornerRadius: 4, style: .continuous)
+            .fill(sample.surface)
+            .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .stroke(tinted ? accent.color.opacity(0.6) : palette.label.opacity(0.18), lineWidth: 1))
+            .frame(width: 12, height: 12)
+    }
+
+    private func categoryDots(themed: Bool) -> some View {
+        let ramp = accent.categoryRamp(scheme)
+        let own: [Color] = ["Comida", "Supermercado", "Transporte"]
+            .map { CategoryStyle.defaultColor(for: $0, accent: accent.color) }
+        let colors = themed ? Array(ramp.prefix(3)) : own
+        return HStack(spacing: -3) {
+            ForEach(Array(colors.enumerated()), id: \.offset) { _, color in
+                Circle()
+                    .fill(color)
+                    .frame(width: 10, height: 10)
+                    .overlay(Circle().stroke(palette.surface, lineWidth: 1.5))
+            }
         }
     }
 
@@ -202,124 +217,346 @@ struct AppearanceSettingsView: View {
         Binding(get: { appearance }, set: { appearanceRaw = $0.rawValue })
     }
 
-    // MARK: - Tipo de letra
+    // MARK: - Texto
 
-    /// Cada opción se muestra escrita en su propio diseño: se elige viendo la
-    /// letra, no leyendo su nombre.
-    private var fontDesignPicker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("TIPO DE LETRA")
-
-            HStack(spacing: 10) {
-                ForEach(AppFontDesign.allCases) { option in
-                    let selected = appFontDesign == option.rawValue
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { appFontDesign = option.rawValue }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Aa")
-                                .font(.system(size: 28, weight: .semibold, design: option.design))
-                                .foregroundStyle(palette.label)
-                            Text(option.rawValue)
-                                .font(.system(size: 13.5, weight: .semibold, design: option.design))
-                                .foregroundStyle(palette.label)
-                            Text(option.detail)
-                                .font(.system(size: 11.5, design: option.design))
-                                .foregroundStyle(palette.secondaryLabel)
-                                .lineLimit(2, reservesSpace: true)
-                        }
-                        .fontDesign(option.design)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .stroke(selected ? accent.color : palette.hairline, lineWidth: selected ? 2 : 0.5)
-                        )
+    private var textTab: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            block("TIPO DE LETRA", spacing: 10) {
+                HStack(spacing: 10) {
+                    ForEach(AppFontDesign.allCases) { option in
+                        fontTile(option)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("\(option.rawValue): \(option.detail)")
-                    .accessibilityAddTraits(selected ? .isSelected : [])
                 }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
+
+            block("TAMAÑO DE TEXTO", spacing: 10) {
+                ShellSegment(items: AppTextSize.allCases.map(\.rawValue), selection: $appTextSize) { $0 }
+                    .padding(.horizontal, 16)
+
+                Text(textSize == .sistema
+                     ? "Se usa el tamaño de letra que tengas configurado en iOS."
+                     : "Este tamaño manda sobre el que tengas configurado en iOS.")
+                    .font(.caption)
+                    .foregroundStyle(palette.secondaryLabel)
+                    .padding(.horizontal, 20)
+            }
         }
     }
 
-    // MARK: - Tamaño de texto
+    /// Cada opción escrita en su propio diseño: se elige viendo la letra.
+    private func fontTile(_ option: AppFontDesign) -> some View {
+        let selected = fontDesign == option
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) { appFontDesign = option.rawValue }
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Aa")
+                    .font(.system(size: 26, weight: .semibold, design: option.design))
+                Text(option.rawValue)
+                    .font(.system(size: 13, weight: .semibold, design: option.design))
+            }
+            .foregroundStyle(palette.label)
+            .fontDesign(option.design)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(selected ? accent.color : palette.hairline, lineWidth: selected ? 2 : 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(option.rawValue): \(option.detail)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
 
-    private var textSizePicker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            sectionTitle("TAMAÑO DE TEXTO")
+    // MARK: - Voz
 
-            ShellSegment(items: AppTextSize.allCases.map(\.rawValue), selection: $appTextSize) { $0 }
-                .padding(.horizontal, 16)
+    private var voiceTab: some View {
+        block("ANIMACIÓN AL ESCUCHAR", spacing: 10) {
+            HStack(spacing: 10) {
+                dictationTile(.bars, name: "Barras", detail: "Siguen el volumen de tu voz.")
+                dictationTile(.blob, name: "Orgánica", detail: "Una forma que respira tras el micrófono.")
+            }
+            .padding(.horizontal, 16)
 
-            Text(appTextSize == AppTextSize.sistema.rawValue
-                 ? "Se usa el tamaño de letra que tengas configurado en iOS."
-                 : "Este tamaño manda sobre el que tengas configurado en iOS.")
+            Text("También se ve en la píldora «Dictar» de la vista previa.")
                 .font(.caption)
                 .foregroundStyle(palette.secondaryLabel)
                 .padding(.horizontal, 20)
         }
     }
 
-    // MARK: - Intensificar el color
-
-    private var intenseTintSection: some View {
-        TailoredToggleSection(title: "Intensidad del tema",
-                              isOn: $intenseThemeTint,
-                              label: "Intensificar el color del tema",
-                              detail: intenseThemeTint
-                                ? "Las tarjetas y sus bordes llevan un tinte del tema en toda la app."
-                                : "Tarjetas en gris neutro; el tema se ve en botones, barras y acentos.",
-                              tint: accent.color)
-            .animation(.easeInOut(duration: 0.2), value: intenseThemeTint)
-    }
-
-    // MARK: - Colores de categoría
-
-    private var categoryColorsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            TailoredToggleSection(title: "Colores de categoría",
-                                  isOn: $themedCategoryColors,
-                                  label: "Usar los colores del tema",
-                                  detail: themedCategoryColors
-                                    ? "Las categorías toman tonos armonizados del tema. Las que tengan un color elegido a mano lo conservan."
-                                    : "Cada categoría usa su propio color.",
-                                  tint: accent.color)
-
-            if themedCategoryColors {
-                HStack(spacing: 6) {
-                    ForEach(Array(accent.categoryRamp(scheme).prefix(5).enumerated()), id: \.offset) { _, color in
-                        Circle().fill(color).frame(width: 14, height: 14)
-                    }
+    private func dictationTile(_ style: DictationStyle, name: String, detail: String) -> some View {
+        let selected = dictationStyle == style.rawValue
+        return Button {
+            withAnimation(.easeInOut(duration: 0.2)) { dictationStyle = style.rawValue }
+        } label: {
+            VStack(alignment: .leading, spacing: 9) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous).fill(palette.background)
+                    DictationIndicator(style: style, size: .tile)
+                        .padding(.horizontal, 12)
                 }
-                .padding(.horizontal, 20)
-                .transition(.opacity)
+                .frame(height: 74)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(palette.label)
+                    Text(detail)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(palette.secondaryLabel)
+                        .lineLimit(2, reservesSpace: true)
+                }
+                .padding(.horizontal, 2)
             }
+            .padding(10)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(selected ? accent.color : palette.hairline, lineWidth: selected ? 2 : 0.5)
+            )
         }
-        .animation(.easeInOut(duration: 0.2), value: themedCategoryColors)
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(name): \(detail)")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
-// MARK: - Dictado
+// MARK: - Indicador de dictado en miniatura
 
-extension AppearanceSettingsView {
-    /// Barras (`1a`) por defecto; la forma orgánica (`1c`) es la alternativa.
-    fileprivate var dictationSection: some View {
-        let organic = Binding(
-            get: { dictationStyle == DictationStyle.blob.rawValue },
-            set: { dictationStyle = ($0 ? DictationStyle.blob : .bars).rawValue }
+/// Las mismas animaciones de la hoja de dictado, a escala de muestra.
+struct DictationIndicator: View {
+    enum Size { case pill, tile }
+
+    let style: DictationStyle
+    let size: Size
+
+    private var accent: AppThemeColor { .current }
+
+    var body: some View {
+        switch style {
+        case .bars:
+            DictationBars(level: 0.55, isActive: true,
+                          count: size == .pill ? 5 : 14,
+                          height: size == .pill ? 18 : 40,
+                          spacing: 3)
+                .frame(width: size == .pill ? 26 : nil)
+        case .blob:
+            let diameter: CGFloat = size == .pill ? 26 : 44
+            ZStack {
+                DictationBlob(level: 0.3, isActive: true, size: diameter)
+                Circle()
+                    .fill(accent.color)
+                    .frame(width: diameter * 0.72, height: diameter * 0.72)
+                Image(systemName: "mic.fill")
+                    .font(.system(size: diameter * 0.33, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+        }
+    }
+}
+
+// MARK: - Vista previa
+
+/// Mini-Resumen: chip de cuentas, monto con su delta, barras, dos tarjetas,
+/// la píldora de Dictar y el +. Cifras de muestra fijas.
+private struct AppearancePreview: View {
+    let palette: Palette
+    let flash: AppearanceSettingsView.Flash?
+    let dictationStyle: String
+    let amountScale: CGFloat
+
+    private static let bars: [Double] = [64, 92, 38, 12, 71, 55, 84]
+
+    private var scheme: ColorScheme { palette.scheme }
+    private var accent: AppThemeColor { palette.accent }
+    private var month: String { Period.spanishMonthName(for: Date()).uppercased() }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                accountChip
+                Spacer()
+                Text("VISTA PREVIA")
+                    .font(.system(size: 10, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(palette.tertiaryLabel)
+            }
+
+            amount
+                .ringed(flash == .type, color: accent.color)
+
+            bars
+
+            HStack(spacing: 10) {
+                categoriesCard
+                    .ringed(flash == .cats, color: accent.color, radius: 16)
+                pendingCard
+                    .ringed(flash == .surface, color: accent.color, radius: 16)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                dictationPill
+                    .ringed(flash == .dict, color: accent.color, radius: 19)
+                Spacer()
+                Circle()
+                    .fill(accent.color)
+                    .frame(width: 42, height: 42)
+                    .overlay(Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.white))
+                    .shadow(color: accent.color.opacity(0.38), radius: 11)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 14)
+        .padding(.bottom, 12)
+        .background(palette.background, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 26, style: .continuous)
+            .stroke(palette.label.opacity(0.09), lineWidth: 1))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Vista previa del resumen con la apariencia elegida")
+    }
+
+    private var accountChip: some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(accent.softFill(scheme))
+                .frame(width: 18, height: 18)
+                .overlay(Image(systemName: "building.columns.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(accent.onSurface(scheme)))
+            Text("Todas las cuentas")
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(palette.label)
+        }
+        .padding(.leading, 5)
+        .padding(.trailing, 10)
+        .frame(height: 28)
+        .background(palette.surface, in: Capsule())
+        .overlay(Capsule().stroke(palette.hairline, lineWidth: 0.5))
+    }
+
+    private var amount: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("GASTADO EN " + month)
+                .font(.system(size: 10.5, weight: .semibold))
+                .tracking(0.25)
+                .foregroundStyle(palette.secondaryLabel)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("S/ 2,612")
+                    .font(.system(size: 34 * amountScale, weight: .bold))
+                    .tracking(-1.2)
+                    .foregroundStyle(palette.label)
+                Text(".40")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(palette.secondaryLabel)
+                Text("↑ S/ 318 vs. mes anterior")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accent.isDuotone ? accent.secondaryOnSurface(scheme) : accent.onSurface(scheme))
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(accent.isDuotone ? accent.secondarySoftFill(scheme) : palette.expenseSoft,
+                                in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .padding(.leading, 4)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+        }
+        .padding(2)
+    }
+
+    private var bars: some View {
+        let top = palette.expense.mixed(with: .white, amount: 0.28, scheme: scheme)
+        let peak = Self.bars.max() ?? 1
+        return HStack(alignment: .bottom, spacing: 8) {
+            ForEach(Array(Self.bars.enumerated()), id: \.offset) { index, value in
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(LinearGradient(colors: [palette.expense, top], startPoint: .bottom, endPoint: .top))
+                    .frame(height: max(4, 58 * value / peak))
+                    .opacity(index == Self.bars.count - 1 ? 1 : 0.55)
+            }
+        }
+        .frame(height: 58)
+    }
+
+    private var categoriesCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Categorías")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(palette.label)
+            ForEach(["Comida", "Transporte"], id: \.self) { name in
+                let color = CategoryStyle.color(for: name, accent: accent.color)
+                HStack(spacing: 7) {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(color.opacity(0.22))
+                        .frame(width: 22, height: 22)
+                        .overlay(Image(systemName: CategoryStyle.icon(for: name))
+                            .font(.system(size: 11))
+                            .foregroundStyle(color))
+                    Text(name)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(palette.label)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(10)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(palette.hairline, lineWidth: 0.5))
+    }
+
+    private var pendingCard: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Pendientes")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(palette.label)
+            Text("3")
+                .font(.system(size: 24, weight: .bold))
+                .foregroundStyle(accent.secondaryOnSurface(scheme))
+            Text("de este mes")
+                .font(.system(size: 11))
+                .foregroundStyle(palette.secondaryLabel)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(10)
+        .background(palette.surface, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(palette.hairline, lineWidth: 0.5))
+    }
+
+    private var dictationPill: some View {
+        HStack(spacing: 8) {
+            DictationIndicator(style: DictationStyle(rawValue: dictationStyle) ?? .bars, size: .pill)
+                .frame(width: 30, height: 30)
+            Text("Escuchando…")
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(accent.onSurface(scheme))
+        }
+        .padding(.leading, 6)
+        .padding(.trailing, 14)
+        .frame(height: 38)
+        .background(palette.surface, in: Capsule())
+        .overlay(Capsule().stroke(palette.hairline, lineWidth: 0.5))
+    }
+}
+
+private extension View {
+    /// El anillo de «esto cambió»: borde del acento con un halo suave.
+    func ringed(_ on: Bool, color: Color, radius: CGFloat = 10) -> some View {
+        overlay(
+            RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .stroke(color, lineWidth: 2)
+                .padding(-2)
+                .background(
+                    RoundedRectangle(cornerRadius: radius + 5, style: .continuous)
+                        .stroke(color.opacity(0.22), lineWidth: 5)
+                        .padding(-4.5)
+                )
+                .opacity(on ? 1 : 0)
+                .allowsHitTesting(false)
         )
-        return TailoredToggleSection(title: "Dictado por voz",
-                                     isOn: organic,
-                                     label: "Animación orgánica al escuchar",
-                                     detail: organic.wrappedValue
-                                        ? "Una forma que respira detrás del micrófono mientras hablas."
-                                        : "Barras que siguen el volumen de tu voz.",
-                                     tint: accent.color)
-            .animation(.easeInOut(duration: 0.2), value: dictationStyle)
     }
 }
 

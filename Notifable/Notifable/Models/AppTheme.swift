@@ -140,3 +140,41 @@ extension AppThemeColor {
         defaults.set(true, forKey: key)
     }
 }
+
+// MARK: - Temas recientes
+
+extension AppThemeColor {
+
+    /// Ajustes › Apariencia muestra en su fila los seis temas usados más
+    /// recientemente; el resto vive en «Ver todos».
+    static let recentKey = "recentAccentColors"
+    static let recentCount = 6
+
+    /// Semilla cuando todavía no hay historial: los seis del diseño.
+    private static let recentSeed: [AppThemeColor] = [.blue, .purple, .green, .orange, .lavender, .peach]
+
+    static func recent(defaults: UserDefaults = .standard) -> [AppThemeColor] {
+        let stored = (defaults.string(forKey: recentKey) ?? "")
+            .split(separator: ",")
+            .compactMap { AppThemeColor(rawValue: String($0)) }
+        var result: [AppThemeColor] = []
+        for theme in stored + recentSeed where !result.contains(theme) {
+            result.append(theme)
+        }
+        // El tema en uso siempre está a la vista.
+        let inUse = AppThemeColor(rawValue: defaults.string(forKey: storageKey) ?? "") ?? .blue
+        if !result.prefix(recentCount).contains(inUse) { result.insert(inUse, at: 0) }
+        return Array(result.prefix(recentCount))
+    }
+
+    /// Un tema que ya está en la fila no se mueve —la fila no salta bajo el
+    /// dedo—; uno nuevo (de la galería) entra primero y empuja al más viejo.
+    static func noteUsed(_ theme: AppThemeColor, defaults: UserDefaults = .standard) {
+        var list = recent(defaults: defaults)
+        if !list.contains(theme) {
+            list.insert(theme, at: 0)
+            list = Array(list.prefix(recentCount))
+        }
+        defaults.set(list.map(\.rawValue).joined(separator: ","), forKey: recentKey)
+    }
+}

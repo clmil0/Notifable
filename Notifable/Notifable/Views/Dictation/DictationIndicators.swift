@@ -36,6 +36,10 @@ struct DictationMicButton: View {
 struct DictationBars: View {
     var level: Double
     var isActive: Bool
+    /// La vista previa de Apariencia usa una versión chica, con menos barras.
+    var count: Int = 18
+    var height: CGFloat = 56
+    var spacing: CGFloat = 4
 
     private var accent: AppThemeColor { .current }
 
@@ -49,8 +53,8 @@ struct DictationBars: View {
             // Aun callado, una respiración mínima dice «te estoy oyendo».
             let gain = isActive ? 0.22 + 0.78 * min(1, level * 1.3) : 0
 
-            HStack(spacing: 4) {
-                ForEach(0..<Self.durations.count, id: \.self) { i in
+            HStack(spacing: spacing) {
+                ForEach(0..<min(count, Self.durations.count), id: \.self) { i in
                     let phase = (t + Self.delays[i]) / Self.durations[i] * 2 * .pi
                     let wave = 0.5 - 0.5 * cos(phase)
                     let height = 0.12 + 0.88 * wave * gain
@@ -58,10 +62,10 @@ struct DictationBars: View {
                     RoundedRectangle(cornerRadius: 3, style: .continuous)
                         .fill(accent.color)
                         .frame(maxWidth: .infinity)
-                        .frame(height: max(6, 56 * height))
+                        .frame(height: max(min(6, self.height * 0.2), self.height * height))
                 }
             }
-            .frame(height: 56)
+            .frame(height: self.height)
         }
         .accessibilityHidden(true)
     }
@@ -74,6 +78,7 @@ struct DictationBars: View {
 struct DictationBlob: View {
     var level: Double
     var isActive: Bool
+    var size: CGFloat = 60
 
     private var accent: AppThemeColor { .current }
 
@@ -87,7 +92,7 @@ struct DictationBlob: View {
                     .fill(LinearGradient(colors: [accent.color, Color(red: 0.50, green: 0.85, blue: 0.74)],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .opacity(0.34)
-                    .frame(width: 72, height: 72)
+                    .frame(width: size * 1.2, height: size * 1.2)
                     .rotationEffect(.radians(t / 5.5 * 2 * .pi))
                     .scaleEffect(swell)
 
@@ -95,12 +100,12 @@ struct DictationBlob: View {
                     .fill(LinearGradient(colors: [accent.color, Color(red: 0.55, green: 0.75, blue: 0.95)],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .opacity(0.5)
-                    .frame(width: 56, height: 56)
+                    .frame(width: size * 0.93, height: size * 0.93)
                     .rotationEffect(.radians(-t / 4 * 2 * .pi))
                     .scaleEffect(1 + (swell - 1) * 0.6)
             }
         }
-        .frame(width: 60, height: 60)
+        .frame(width: size, height: size)
         .accessibilityHidden(true)
     }
 }
