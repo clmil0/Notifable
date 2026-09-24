@@ -82,7 +82,7 @@ struct SpendBarChart: View {
 
                 bar(hasSpend: hasSpend, isSelected: isSelected, height: barHeight)
                     .overlay(alignment: .bottom) {
-                        if isSelected && hasSpend && barHeight >= 16 && !reduceMotion {
+                        if isSelected && hasSpend && barHeight >= 10 && !reduceMotion {
                             BubbleBurst(seed: column.id,
                                         barHeight: barHeight,
                                         ring: palette.expense.mixed(with: .white, amount: 0.3, scheme: scheme),
@@ -193,18 +193,22 @@ private struct BubbleBurst: View {
         let barRect = CGRect(x: 0, y: top, width: size.width, height: barHeight)
 
         for n in 0..<Self.count {
-            let diameter = 4 + Self.random(seed, n) * 3
+            // En barras bajas las burbujas son más chicas y suben más rápido.
+            let diameter = min(4 + Self.random(seed, n) * 3, max(3, barHeight * 0.35))
             let x = size.width * (0.12 + Self.random(seed, n + 9) * 0.64) + diameter / 2
-            let duration = 1.8 + Self.random(seed, n + 3) * 1.8
-            let local = elapsed - Self.random(seed, n + 5) * duration
+            let duration = (1.8 + Self.random(seed, n + 3) * 1.8) * max(0.5, (barHeight / 112).squareRoot())
+            // Salidas escalonadas: la primera parte en cuanto se elige la
+            // barra, así siempre se ven burbujas desde el primer momento.
+            let offset = (Double(n) + Self.random(seed, n + 5) * 0.5) / Double(Self.count) * duration
+            let local = elapsed - offset
             guard local >= 0 else { continue }   // esta burbuja aún no sale
             let phase = local.truncatingRemainder(dividingBy: duration) / duration
 
             if phase < Self.riseShare {
-                // Sube con aceleración, del fondo hasta que su centro toca la superficie.
+                // Sube con aceleración, desde el fondo de la barra hasta que su centro toca la superficie.
                 let q = phase / Self.riseShare
                 let eased = q * q
-                let y = barRect.maxY + diameter / 2 - (barHeight + diameter / 2) * eased
+                let y = barRect.maxY - diameter / 2 - (barHeight - diameter / 2) * eased
                 let wobble = sin(q * .pi) * (Self.random(seed, n + 7) - 0.5) * 5
                 let opacity = 0.85 * min(1, q / 0.14)
                 let rect = CGRect(x: x + wobble - diameter / 2, y: y - diameter / 2,
