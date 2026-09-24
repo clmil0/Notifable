@@ -143,6 +143,7 @@ final class AssistantChat: ObservableObject {
                 messages.append(reply)
                 return
             } catch {
+                Diagnostics.shared.log("Asistente: \(error)")
                 messages.append(AssistantMessage(role: .assistant,
                                                  text: "No pude responder eso ahora. Prueba a preguntarlo de otra forma."))
                 return
