@@ -23,6 +23,7 @@ struct DashboardView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.scenePhase) private var scenePhase
 
     /// El mes mostrado y el anterior, nada más.
     @Query private var expenses: [Expense]
@@ -58,6 +59,16 @@ struct DashboardView: View {
     @State private var selectedColumn: Int?
     @State private var openStat: StatDetail?
     @State private var scrollToTop = false
+
+    // Asistente (`1f`)
+    @State private var briefCards: [BriefCard] = []
+    @State private var briefNews = false
+    @State private var assistant: AssistantPresentation?
+    /// Lo que pidió un botón del asistente; se hace al cerrarse la hoja.
+    @State private var pendingAction: AssistantAction?
+    @State private var assistantCategory: CategoryRef?
+    @State private var showsRecurring = false
+    @State private var reminderDebt: Expense?
 
     private let month: Period
 
@@ -200,8 +211,16 @@ struct DashboardView: View {
         .task {
             loadCatalog()
             newMovements.baselineIfNeeded(NewMovements.keys(expenses: allExpenses, incomes: allIncomes))
+            refreshBrief()
         }
-        .onChange(of: self.expenses.count) { _, _ in loadCatalog() }
+        .onChange(of: self.expenses.count) { _, _ in
+            loadCatalog()
+            refreshBrief()
+        }
+        // Un día nuevo trae resumen nuevo aunque la app siguiera abierta.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { refreshBrief() }
+        }
         .onChange(of: chartMode) { _, _ in selectedColumn = nil }
         .onChange(of: monthOffset) { _, _ in
             selectedColumn = nil
@@ -209,6 +228,72 @@ struct DashboardView: View {
         }
         .onChange(of: categoryBudgets.budgets) { _, _ in loadMonthExtras() }
         .sheet(item: $openStat) { StatSheet(stat: $0) }
+        .sheet(item: $assistant, onDismiss: runPendingAction) { presentation in
+            AssistantSheet(cards: presentation.cards, inputs: presentation.inputs,
+                           categories: presentation.categories) { pendingAction = $0 }
+                .appTextSize()
+        }
+        .sheet(item: $assistantCategory) { CategoryDetailView(category: $0.name) }
+        .sheet(isPresented: $showsRecurring) {
+            NavigationStack {
+                RecurringManagementView()
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Listo") { showsRecurring = false }
+                        }
+                    }
+            }
+        }
+        .sheet(item: $reminderDebt) { ReminderComposerSheet(initialDebt: $0) }
+    }
+
+    // MARK: - Asistente
+
+    struct AssistantPresentation: Identifiable {
+        let id = UUID()
+        let cards: [BriefCard]
+        let inputs: AssistantInputs
+        let categories: [String]
+    }
+
+    struct CategoryRef: Identifiable {
+        let name: String
+        var id: String { name }
+    }
+
+    /// Las tarjetas del día, para saber si el ✦ lleva punto.
+    private func refreshBrief() {
+        let inputs = AssistantData.inputs(context: modelContext, usdToPen: rate)
+        briefCards = AssistantBrief.cards(inputs)
+        withAnimation(.easeInOut(duration: 0.2)) {
+            briefNews = AssistantSeenState().hasNews(briefCards)
+        }
+    }
+
+    private func openAssistant() {
+        let inputs = AssistantData.inputs(context: modelContext, usdToPen: rate)
+        let cards = AssistantBrief.cards(inputs)
+        briefCards = cards
+        AssistantSeenState().markSeen(cards)
+        withAnimation(.easeInOut(duration: 0.2)) { briefNews = false }
+        assistant = AssistantPresentation(cards: cards, inputs: inputs,
+                                          categories: AssistantData.categories(context: modelContext))
+    }
+
+    private func runPendingAction() {
+        guard let action = pendingAction else { return }
+        pendingAction = nil
+        switch action {
+        case .section(let raw):
+            if let section = AppSection(rawValue: raw) { onOpen(section) }
+        case .category(let name):
+            assistantCategory = CategoryRef(name: name)
+        case .recurring:
+            showsRecurring = true
+        case .reminder(let id):
+            let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.id == id })
+            reminderDebt = try? modelContext.fetch(descriptor).first
+        }
     }
 
     // MARK: - Header
@@ -217,6 +302,7 @@ struct DashboardView: View {
         HStack(spacing: 8) {
             accountChip
             Spacer(minLength: 8)
+            AssistantHeaderButton(hasNews: briefNews, action: openAssistant)
             ShellCircleButton(icon: "slider.horizontal.3", label: "Configuración", action: onSettings)
         }
         .padding(.horizontal, ShellMetrics.sideInset)
