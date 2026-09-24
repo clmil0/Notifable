@@ -34,6 +34,9 @@ struct MovementsView: View {
     @State private var selectedIncome: Income?
     @State private var expenseToCategorize: Expense?
     @State private var showsAccounts = false
+    /// Los movimientos del correo que no habías visto: se resaltan dos
+    /// segundos al entrar y quedan como vistos.
+    @State private var highlighted: Set<String> = []
     /// Armado fuera del cuerpo: necesita el historial entero, y antes se
     /// volvía a armar en cada dibujado —al abrir una hoja, al escribir en el
     /// buscador—.
@@ -199,6 +202,7 @@ struct MovementsView: View {
         // Al cobrar el último pendiente la opción desaparece: sin esto la
         // lista se quedaba vacía y sin forma de salir.
         .onAppear(perform: rebuildCatalog)
+        .task { await showNewMovements() }
         .onChange(of: expenses.count) { _, _ in rebuildCatalog() }
         .onChange(of: incomes.count) { _, _ in rebuildCatalog() }
         .onChange(of: hasDebts) { _, has in
@@ -223,6 +227,24 @@ struct MovementsView: View {
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(28)
         }
+    }
+
+    /// Resalta lo nuevo y lo da por visto. Si todo lo nuevo son ingresos, abre
+    /// en Ingresos para que se vea.
+    private func showNewMovements() async {
+        let store = NewMovements.shared
+        let keys = NewMovements.keys(expenses: expenses, incomes: incomes)
+        store.baselineIfNeeded(keys)
+        let fresh = store.unseen(in: keys)
+        guard !fresh.isEmpty else { return }
+        store.markSeen(fresh)
+
+        let hasNewExpense = expenses.contains { NewMovements.key($0).map(fresh.contains) == true }
+        if !hasNewExpense, kind == .gastos { kind = .ingresos }
+        highlighted = fresh
+
+        try? await Task.sleep(for: .seconds(2))
+        withAnimation(.easeOut(duration: 0.6)) { highlighted = [] }
     }
 
     private func rebuildCatalog() {
@@ -292,15 +314,19 @@ struct MovementsView: View {
 
             MovementCard {
                 ForEach(Array(bucket.items.enumerated()), id: \.element.id) { index, item in
-                    switch item {
-                    case .expense(let expense):
-                        MovementRow(expense: expense,
-                                    showsTime: true,
-                                    onTap: { selectedExpense = expense },
-                                    onAssignCategory: { expenseToCategorize = expense })
-                    case .income(let income):
-                        IncomeRow(income: income, showsTime: true, onTap: { selectedIncome = income })
+                    let isNew = NewMovements.key(item).map(highlighted.contains) == true
+                    Group {
+                        switch item {
+                        case .expense(let expense):
+                            MovementRow(expense: expense,
+                                        showsTime: true,
+                                        onTap: { selectedExpense = expense },
+                                        onAssignCategory: { expenseToCategorize = expense })
+                        case .income(let income):
+                            IncomeRow(income: income, showsTime: true, onTap: { selectedIncome = income })
+                        }
                     }
+                    .background(palette.expenseSoft.opacity(isNew ? 1 : 0))
 
                     if index < bucket.items.count - 1 { MovementSeparator() }
                 }

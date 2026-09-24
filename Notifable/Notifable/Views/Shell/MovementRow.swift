@@ -420,6 +420,8 @@ struct MovementCard<Content: View>: View {
     var body: some View {
         VStack(spacing: 0) { content }
             .background(palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            // El resaltado de una fila nueva no se sale por las esquinas.
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 20, style: .continuous)
                     .stroke(palette.hairline, lineWidth: 0.5)

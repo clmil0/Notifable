@@ -33,6 +33,10 @@ struct DashboardView: View {
     @Query private var unclassified: [Expense]
     /// Lo marcado por cobrar: poco, y lo que dice la tarjeta de Amigos.
     @Query private var debtExpenses: [Expense]
+    /// Todo lo que llegó del correo, de cualquier mes: para el globo de
+    /// movimientos nuevos de «Historial».
+    @Query private var mailExpenses: [Expense]
+    @Query private var mailIncomes: [Income]
 
     @StateObject private var rates = ExchangeRateService.shared
     @StateObject private var accountBook = AccountBook.shared
@@ -43,6 +47,7 @@ struct DashboardView: View {
 
     @State private var filter = AccountFilter.shared
     @State private var social = SocialProfileStore.shared
+    @State private var newMovements = NewMovements.shared
     @State private var catalog: AccountCatalog?
     /// Las categorías con límite y cómo van en el ciclo del mes mostrado. Un
     /// ciclo anual necesita el historial entero, así que se calcula junto al
@@ -82,6 +87,8 @@ struct DashboardView: View {
             $0.category == unclassifiedName && !$0.isTransfer && !$0.isVoided && !$0.isReversal
         })
         _debtExpenses = Query(filter: #Predicate<Expense> { $0.isDebt && !$0.isTransfer })
+        _mailExpenses = Query(filter: #Predicate<Expense> { $0.emailID != nil && !$0.isTransfer })
+        _mailIncomes = Query(filter: #Predicate<Income> { $0.emailID != nil && !$0.isTransfer })
     }
 
     static func month(offset: Int) -> Period {
@@ -190,7 +197,10 @@ struct DashboardView: View {
 
             header
         }
-        .task { loadCatalog() }
+        .task {
+            loadCatalog()
+            newMovements.baselineIfNeeded(NewMovements.keys(expenses: mailExpenses, incomes: mailIncomes))
+        }
         .onChange(of: self.expenses.count) { _, _ in loadCatalog() }
         .onChange(of: chartMode) { _, _ in selectedColumn = nil }
         .onChange(of: monthOffset) { _, _ in
@@ -912,7 +922,8 @@ struct DashboardView: View {
             + incomes.filter { !$0.isTransfer && $0.date >= range.start && $0.date < range.end }.count
         let hasPending = !unclassified.isEmpty
 
-        let historial = tile(title: "Historial", action: { onOpen(.movements) }) {
+        let newCount = newMovements.unseen(in: NewMovements.keys(expenses: mailExpenses, incomes: mailIncomes)).count
+        let historial = tile(title: "Historial", badge: newCount, action: { onOpen(.movements) }) {
             bigNumber("\(movementCount)", caption: movementCount == 1 ? "movimiento este mes" : "movimientos este mes")
         }
         let categorias = tile(title: "Categorías", action: { onOpen(.categories) }) {
@@ -985,14 +996,26 @@ struct DashboardView: View {
     /// mismo, para que las columnas de arriba y abajo cuadren.
     private static let gridSpacing: CGFloat = 14
 
-    private func tile<Content: View>(title: String, action: @escaping () -> Void,
+    private func tile<Content: View>(title: String, badge: Int = 0, action: @escaping () -> Void,
                                      @ViewBuilder content: () -> Content) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
+                HStack(spacing: 6) {
                     Text(title)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(palette.label)
+                    // Movimientos nuevos del correo que aún no viste: el mismo
+                    // globo que las solicitudes de Social.
+                    if badge > 0 {
+                        Text(badge > 99 ? "99+" : "\(badge)")
+                            .font(.system(size: 11, weight: .bold))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 5)
+                            .frame(minWidth: 18, minHeight: 18)
+                            .background(palette.expense, in: Capsule())
+                            .transition(.scale.combined(with: .opacity))
+                    }
                     Spacer(minLength: 4)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 13, weight: .semibold))
@@ -1011,6 +1034,8 @@ struct DashboardView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
+        .accessibilityValue(badge > 0 ? (badge == 1 ? "1 movimiento nuevo" : "\(badge) movimientos nuevos") : "")
+        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: badge)
     }
 
     private func bigNumber(_ value: String, caption: String, tint: Color? = nil) -> some View {
