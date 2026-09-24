@@ -24,12 +24,14 @@ struct PendingView: View {
     @Query(sort: \Expense.date, order: .reverse) private var expenses: [Expense]
     @StateObject private var rates = ExchangeRateService.shared
 
-    @State private var scope: Scope = .month
+    /// El periodo elegido. `nil` hasta que la pantalla aparece: mientras
+    /// tanto vale el de por defecto (`initialScope`), así el primer dibujado
+    /// ya sale en el bueno en vez de pasar por «Este mes» y saltar.
+    @State private var chosenScope: Scope?
     /// Movimientos elegidos.
     @State private var selected: Set<UUID> = []
     @State private var expanded: Set<String> = []
     @State private var visibleCount = pageSize
-    @State private var didPickInitialScope = false
     @State private var assigning: AssignTarget?
     @State private var showsBulk = false
 
@@ -44,6 +46,19 @@ struct PendingView: View {
     private var accent: AppThemeColor { .current }
     private var rate: Double { rates.usdToPenRate }
     private var month: Period { Period(granularity: .mes, reference: Date()) }
+
+    private var scope: Scope { chosenScope ?? initialScope }
+
+    /// Este mes si le queda algo por clasificar; si ya está al día, todo el
+    /// historial, que es donde queda lo pendiente.
+    private var initialScope: Scope {
+        let range = month.interval
+        let monthHasPending = expenses.contains {
+            $0.category == Accounting.unclassified && $0.countsAsSpending
+                && $0.date >= range.start && $0.date < range.end
+        }
+        return monthHasPending ? .month : .all
+    }
 
     // MARK: - Datos
 
@@ -126,7 +141,9 @@ struct PendingView: View {
                     let allPending = expenses.filter { $0.category == Accounting.unclassified && $0.countsAsSpending }
                     let range = month.interval
                     let monthCount = allPending.filter { $0.date >= range.start && $0.date < range.end }.count
-                    ShellSegment(items: [Scope.month, .all], selection: $scope, tint: accent.color) {
+                    ShellSegment(items: [Scope.month, .all],
+                                 selection: Binding(get: { scope }, set: { chosenScope = $0 }),
+                                 tint: accent.color) {
                         $0 == .month ? "Este mes (\(monthCount))" : "Todo el historial (\(allPending.count))"
                     }
                     .padding(.bottom, 14)
@@ -188,15 +205,9 @@ struct PendingView: View {
             visibleCount = Self.pageSize
         }
         .onAppear {
-            // Si el mes ya está al día, se abre directamente en lo que queda.
-            guard !didPickInitialScope else { return }
-            didPickInitialScope = true
-            let range = month.interval
-            let monthHasPending = expenses.contains {
-                $0.category == Accounting.unclassified && $0.countsAsSpending
-                    && $0.date >= range.start && $0.date < range.end
-            }
-            if !monthHasPending { scope = .all }
+            // Se fija el de entrada: clasificar lo último del mes no cambia de
+            // periodo bajo el dedo (se ve «Este mes está al día»).
+            if chosenScope == nil { chosenScope = initialScope }
         }
         .sheet(isPresented: $showsBulk) {
             BulkClassifyView(onlyThisMonth: scope == .month)

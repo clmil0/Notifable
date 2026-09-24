@@ -46,6 +46,8 @@ enum AppAppearance: String, CaseIterable, Identifiable, Codable {
 struct SettingsStatus {
 
     let isConnected: Bool
+    /// Ver `GmailAuthService.missingGmailScope`.
+    var missingGmailScope = false
     let account: String?
     let lastSync: Date?
     let activeBankCount: Int
@@ -58,6 +60,7 @@ struct SettingsStatus {
 
     var level: Level {
         guard isConnected else { return .disconnected }
+        if missingGmailScope { return .attention }
         if activeBankCount == 0 { return .attention }
         if let lastSync, lastSync < Date().addingTimeInterval(-60 * 60 * 48) { return .attention }
         return .ok
@@ -66,7 +69,9 @@ struct SettingsStatus {
     var headline: String {
         switch level {
         case .ok:           return "Lectura automática activa"
-        case .attention:    return activeBankCount == 0 ? "Ningún banco activo" : "Sin leer hace más de 2 días"
+        case .attention:
+            if missingGmailScope { return "Falta el permiso de Gmail" }
+            return activeBankCount == 0 ? "Ningún banco activo" : "Sin leer hace más de 2 días"
         case .disconnected: return "Conecta tu correo"
         }
     }

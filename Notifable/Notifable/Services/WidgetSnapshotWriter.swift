@@ -34,7 +34,9 @@ final class WidgetSnapshotWriter {
 
         let center = NotificationCenter.default
         // `Task { @MainActor in … }`: ver la nota de `ConfigBackupManager.startWatching`.
-        observers.append(center.addObserver(forName: ModelContext.didSave, object: nil, queue: .main) { [weak self] _ in
+        observers.append(center.addObserver(forName: ModelContext.didSave, object: nil, queue: .main) { [weak self] note in
+            // La caché de amigos no sale en los widgets (`SocialCacheSave`).
+            guard !SocialCacheSave.isCacheOnly(note) else { return }
             Task { @MainActor in self?.scheduleRefresh() }
         })
         observers.append(center.addObserver(forName: UserDefaults.didChangeNotification,
@@ -43,11 +45,11 @@ final class WidgetSnapshotWriter {
         })
         observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification,
                                             object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.refreshNow() }
+            Task { @MainActor in self?.refreshInBackground() }
         })
         observers.append(center.addObserver(forName: UIApplication.significantTimeChangeNotification,
                                             object: nil, queue: .main) { [weak self] _ in
-            Task { @MainActor in self?.refreshNow() }
+            Task { @MainActor in self?.refreshInBackground() }
         })
 
         scheduleRefresh()
@@ -59,12 +61,64 @@ final class WidgetSnapshotWriter {
         pending = Task { [weak self] in
             try? await Task.sleep(for: Self.debounce)
             guard !Task.isCancelled else { return }
-            self?.refreshNow()
+            self?.refreshInBackground()
         }
     }
 
-    /// Sin espera. Para los intents de Siri: el proceso puede suspenderse
-    /// antes de que venza la espera de `scheduleRefresh`.
+    /// Hay un resumen armándose en segundo plano.
+    private var isRefreshing = false
+    /// Llegó otro cambio mientras tanto: al terminar se arma otra vez.
+    private var needsAnotherRefresh = false
+
+    /// Lo pesado —leer todo el historial, los recurrentes y los totales del
+    /// mes— en segundo plano. En el hilo principal esto congelaba la app entre
+    /// 4 y 9 s tras cada guardado (bitácora del 23/09). Del hilo principal sólo
+    /// sale lo que vive ahí: el catálogo de categorías, el tema y los límites.
+    func refreshInBackground() {
+        pending?.cancel()
+        guard !isRefreshing else { needsAnotherRefresh = true; return }
+        let container = self.container ?? AppModelContainer.shared
+        isRefreshing = true
+
+        // Al pasar a segundo plano iOS suspende la app enseguida: sin este
+        // tiempo extra el resumen se quedaría a medias.
+        var backgroundTask = UIBackgroundTaskIdentifier.invalid
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Resumen de widgets") {
+            UIApplication.shared.endBackgroundTask(backgroundTask)
+            backgroundTask = .invalid
+        }
+
+        Task { @MainActor in
+            defer {
+                if backgroundTask != .invalid { UIApplication.shared.endBackgroundTask(backgroundTask) }
+                isRefreshing = false
+                if needsAnotherRefresh {
+                    needsAnotherRefresh = false
+                    scheduleRefresh()
+                }
+            }
+            let now = Date()
+            do {
+                let stored = try await Task.detached(priority: .utility) {
+                    try Self.readStore(context: ModelContext(container), now: now)
+                }.value
+                let inputs = Self.inputs(from: stored)
+                let changed = try await Task.detached(priority: .utility) {
+                    try WidgetSnapshotStore.save(WidgetSnapshotBuilder.build(inputs, now: now))
+                }.value
+                if changed { WidgetCenter.shared.reloadAllTimelines() }
+            } catch {
+                Diagnostics.shared.log("Widgets: no se pudo armar o escribir el resumen: \(error)")
+            }
+            // Las frases de Siri con un gasto rápido ("Registra pasaje en AgruPay")
+            // dependen de los nombres guardados.
+            NotifableShortcutsProvider.updateAppShortcutParameters()
+        }
+    }
+
+    /// Sin espera y en el hilo principal. Sólo para los intents de Siri: el
+    /// proceso puede suspenderse antes de que termine una tarea en segundo
+    /// plano. Todo lo demás va por `refreshInBackground`.
     func refreshNow() {
         pending?.cancel()
         let container = self.container ?? AppModelContainer.shared
@@ -87,8 +141,6 @@ final class WidgetSnapshotWriter {
             Diagnostics.shared.log("Widgets: no se pudo escribir el resumen: \(error)")
         }
 
-        // Las frases de Siri con un gasto rápido ("Registra pasaje en AgruPay")
-        // dependen de los nombres guardados.
         NotifableShortcutsProvider.updateAppShortcutParameters()
     }
 
@@ -96,27 +148,35 @@ final class WidgetSnapshotWriter {
 
     static func makeSnapshot(context: ModelContext, now: Date,
                              defaults: UserDefaults = .standard) throws -> WidgetSnapshot {
+        let stored = try readStore(context: context, now: now)
+        return WidgetSnapshotBuilder.build(inputs(from: stored, defaults: defaults), now: now)
+    }
+
+    /// Lo que sale de la base, ya como valores: se puede armar en cualquier
+    /// hilo con un `ModelContext` de ese mismo hilo.
+    struct StoredData {
+        var expenses: [ExpenseSnapshot]
+        var incomes: [IncomeSnapshot]
+        var usdToPen: Double
+        var quickActions: [WidgetSnapshot.QuickAction]
+        var pendingRecurringCount: Int
+        var nextRecurring: WidgetSnapshot.UpcomingItem?
+        var categoryCounts: [String: Int]
+    }
+
+    nonisolated static func readStore(context: ModelContext, now: Date) throws -> StoredData {
         let expenses = try context.fetch(FetchDescriptor<Expense>())
         let incomes = try context.fetch(FetchDescriptor<Income>())
         let rules = try context.fetch(FetchDescriptor<RecurringExpense>())
         let quick = try context.fetch(FetchDescriptor<QuickExpense>(sortBy: [SortDescriptor(\.sortIndex)]))
 
         let usdToPen = ExchangeRateService.storedRate
-        let accent = AppThemeColor.current
-        // Instancia nueva y no `.shared`: lee lo último guardado en `defaults`.
-        let limitStore = CategoryBudgetStore(defaults: defaults)
-
         let awaiting = RecurringEngine.pending(rules: rules, expenses: expenses, now: now).filter(\.isAwaiting)
 
-        let inputs = WidgetSnapshotBuilder.Inputs(
+        return StoredData(
             expenses: expenses.map(\.accountingSnapshot),
             incomes: incomes.map(\.accountingSnapshot),
             usdToPen: usdToPen,
-            monthlyBudget: defaults.object(forKey: BudgetStore.monthlyBudgetKey) as? Double ?? 0,
-            budgetEnabled: defaults.object(forKey: BudgetStore.enabledKey) as? Bool ?? true,
-            tracksIncome: defaults.object(forKey: BudgetStore.tracksIncomeKey) as? Bool ?? true,
-            hideAmounts: WidgetSnapshotBuilder.hideAmounts(defaults: defaults),
-            categoryBudgets: limitStore.budgets.values.filter(\.hasLimit),
             quickActions: quick.map {
                 WidgetSnapshot.QuickAction(id: $0.id,
                                            label: $0.label,
@@ -126,23 +186,57 @@ final class WidgetSnapshotWriter {
             },
             pendingRecurringCount: awaiting.reduce(0) { $0 + $1.dates.count },
             nextRecurring: nextRecurring(rules, now: now, usdToPen: usdToPen),
-            categoryNames: CategoryStyle.selectable(history: expenses),
+            categoryCounts: CategoryStyle.usageCounts(expenses)
+        )
+    }
+
+    /// Ajustes, tema y estilo de cada categoría. Barato, pero en el hilo
+    /// principal: `CategoryCatalog` se edita desde ahí. El estilo queda
+    /// resuelto en una tabla para que `build` pueda correr en otro hilo.
+    static func inputs(from stored: StoredData,
+                       defaults: UserDefaults = .standard) -> WidgetSnapshotBuilder.Inputs {
+        let accent = AppThemeColor.current
+        // Instancia nueva y no `.shared`: lee lo último guardado en `defaults`.
+        let limitStore = CategoryBudgetStore(defaults: defaults)
+        let categoryBudgets = limitStore.budgets.values.filter(\.hasLimit)
+        let categoryNames = CategoryStyle.selectable(counts: stored.categoryCounts)
+
+        var styles: [String: WidgetSnapshotBuilder.Style] = [:]
+        let styled = Set(categoryNames).union(stored.categoryCounts.keys)
+            .union(categoryBudgets.map(\.category))
+            .union([Accounting.unclassified])
+        for category in styled {
+            styles[category] = WidgetSnapshotBuilder.Style(
+                symbol: CategoryStyle.icon(for: category),
+                colorHex: CategoryStyle.color(for: category, accent: accent.color).hex(.light))
+        }
+        let fallback = WidgetSnapshotBuilder.Style(symbol: "bag.fill", colorHex: "808080")
+
+        return WidgetSnapshotBuilder.Inputs(
+            expenses: stored.expenses,
+            incomes: stored.incomes,
+            usdToPen: stored.usdToPen,
+            monthlyBudget: defaults.object(forKey: BudgetStore.monthlyBudgetKey) as? Double ?? 0,
+            budgetEnabled: defaults.object(forKey: BudgetStore.enabledKey) as? Bool ?? true,
+            tracksIncome: defaults.object(forKey: BudgetStore.tracksIncomeKey) as? Bool ?? true,
+            hideAmounts: WidgetSnapshotBuilder.hideAmounts(defaults: defaults),
+            categoryBudgets: categoryBudgets,
+            quickActions: stored.quickActions,
+            pendingRecurringCount: stored.pendingRecurringCount,
+            nextRecurring: stored.nextRecurring,
+            categoryNames: categoryNames,
             theme: WidgetSnapshot.Theme(accentHex: accent.color.hex(.light),
                                         accentDarkHex: accent.color.hex(.dark),
                                         incomeHex: accent.incomeColor(.light).hex(.light)),
-            style: { category in
-                WidgetSnapshotBuilder.Style(symbol: CategoryStyle.icon(for: category),
-                                            colorHex: CategoryStyle.color(for: category, accent: accent.color).hex(.light))
-            },
+            style: { styles[$0] ?? fallback },
             penguin: defaults.string(forKey: SocialProfileStore.Keys.penguin)
                 .flatMap { $0.data(using: .utf8) }
                 .flatMap { try? JSONDecoder().decode(PenguinLook.self, from: $0) }
         )
-        return WidgetSnapshotBuilder.build(inputs, now: now)
     }
 
     /// El próximo recurrente en los siete días siguientes que aún no se resolvió.
-    static func nextRecurring(_ rules: [RecurringExpense], now: Date, usdToPen: Double) -> WidgetSnapshot.UpcomingItem? {
+    nonisolated static func nextRecurring(_ rules: [RecurringExpense], now: Date, usdToPen: Double) -> WidgetSnapshot.UpcomingItem? {
         let cal = Period.calendar
         let today = cal.startOfDay(for: now)
         guard let horizon = cal.date(byAdding: .day, value: 8, to: today) else { return nil }

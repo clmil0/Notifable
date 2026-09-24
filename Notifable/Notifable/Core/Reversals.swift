@@ -19,7 +19,9 @@ extension Expense {
 /// Candidata: misma moneda y monto, hasta 7 días antes **o después** del
 /// aviso (el correo de la compra puede llegar tarde), y la misma tarjeta si
 /// los dos la dicen. La sugerida es la más cercana **anterior** al aviso: no
-/// se anula lo que todavía no se había comprado.
+/// se anula lo que todavía no se había comprado. Si el aviso nombra el
+/// comercio (la devolución de BCP lo hace; la anulación de BBVA dice
+/// «REVERSO TOTAL»), manda la anterior de ese mismo comercio.
 enum ReversalMatcher {
 
     static let merchantPrefix = "ANULACIÓN - "
@@ -31,6 +33,8 @@ enum ReversalMatcher {
         let currency: String
         let date: Date
         let digits: String?
+        /// El comercio, sin el prefijo del aviso. Sólo desempata la sugerida.
+        var merchant: String? = nil
     }
 
     /// Las candidatas en orden: la sugerida primero (si la hay), luego por
@@ -43,8 +47,9 @@ enum ReversalMatcher {
                 && abs(charge.date.timeIntervalSince(reversal.date)) <= window
                 && (charge.digits == nil || reversal.digits == nil || charge.digits == reversal.digits)
         }
-        let suggested = matching
-            .filter { $0.date <= reversal.date }
+        let before = matching.filter { $0.date <= reversal.date }
+        let sameMerchant = before.filter { $0.merchant != nil && $0.merchant == reversal.merchant }
+        let suggested = (sameMerchant.isEmpty ? before : sameMerchant)
             .max { $0.date < $1.date }?.id
         let ordered = matching
             .sorted { abs($0.date.timeIntervalSince(reversal.date)) < abs($1.date.timeIntervalSince(reversal.date)) }
@@ -54,8 +59,11 @@ enum ReversalMatcher {
     }
 
     static func charge(_ expense: Expense) -> Charge {
-        Charge(id: expense.id, cents: Money.cents(expense.amount), currency: expense.currency,
-               date: expense.date, digits: expense.cardLastDigits)
+        var name = expense.merchant
+        if expense.isReversal, name.hasPrefix(merchantPrefix) { name.removeFirst(merchantPrefix.count) }
+        return Charge(id: expense.id, cents: Money.cents(expense.amount), currency: expense.currency,
+                      date: expense.date, digits: expense.cardLastDigits,
+                      merchant: name.trimmingCharacters(in: .whitespaces).uppercased())
     }
 
     /// Anula la compra elegida y borra el aviso. La anulación queda anotada

@@ -128,6 +128,8 @@ struct AssistantSheet: View {
     @State private var polished: [BriefCard]?
     @State private var draft = ""
     @FocusState private var fieldFocused: Bool
+    /// Horas sin escribir tras las que se limpia el chat a la vista.
+    @AppStorage(AssistantChatMemory.lifetimeKey) private var lifetime = AssistantChatMemory.defaultLifetime
 
     private var palette: Palette { Palette(scheme) }
     private var accent: AppThemeColor { .current }
@@ -196,6 +198,10 @@ struct AssistantSheet: View {
                     .foregroundStyle(palette.secondaryLabel)
             }
             Spacer()
+            if canChat {
+                lifetimeMenu
+                    .padding(.top, 6)
+            }
             Button { dismiss() } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 13, weight: .bold))
@@ -210,6 +216,27 @@ struct AssistantSheet: View {
         .padding(.horizontal, 22)
         .padding(.top, 22)
         .padding(.bottom, 14)
+    }
+
+    /// Cuándo se borra el chat a la vista. El asistente recuerda 24 h igual.
+    private var lifetimeMenu: some View {
+        Menu {
+            Picker("Borrar el chat tras", selection: $lifetime) {
+                ForEach(AssistantChatMemory.lifetimeOptions, id: \.self) { hours in
+                    Text(hours == 1 ? "1 hora sin escribir" : "\(hours) horas sin escribir").tag(hours)
+                }
+            }
+            .pickerStyle(.inline)
+            Text("Aunque se borre, el asistente recuerda lo hablado en las últimas 24 horas.")
+        } label: {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(palette.secondaryLabel)
+                .frame(width: 30, height: 30)
+                .background(palette.track, in: Circle())
+        }
+        .accessibilityLabel("Borrar el chat tras \(lifetime) h sin escribir")
+        .onChange(of: lifetime) { _, _ in chat.lifetimeChanged() }
     }
 
     private func cardView(_ card: BriefCard) -> some View {

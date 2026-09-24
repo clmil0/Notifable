@@ -517,7 +517,8 @@ enum TransferDetector {
     }
 
     /// Recalcula `isTransfer` en todo el historial. Devuelve cuántos cambiaron.
-    @MainActor
+    /// Sirve con cualquier `ModelContext`; la lectura de Gmail lo llama con
+    /// uno de fondo y le pasa las preferencias leídas en el hilo principal.
     @discardableResult
     static func apply(in context: ModelContext, preferences: AccountPreferences = AccountBook.shared.preferences) -> Int {
         let mine = preferences.minePayees

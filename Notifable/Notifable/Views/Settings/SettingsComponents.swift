@@ -271,6 +271,9 @@ struct SettingsStatusCard: View {
     }
 
     private var attentionCause: String {
+        if status.missingGmailScope {
+            return "Google no dio permiso para leer el correo. Toca, vuelve a conectar y marca la casilla de Gmail."
+        }
         if status.activeBankCount == 0 {
             return "Ningún banco activo: no entrará ningún gasto. Actívalos en Gmail y bancos."
         }

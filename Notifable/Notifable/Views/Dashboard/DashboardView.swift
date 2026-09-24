@@ -31,8 +31,6 @@ struct DashboardView: View {
     /// que cuenta Pendientes, para que las cifras de la tarjeta y las de la
     /// pantalla coincidan. Son pocos (se van vaciando).
     @Query private var unclassified: [Expense]
-    /// Lo marcado por cobrar: poco, y lo que dice la tarjeta de Amigos.
-    @Query private var debtExpenses: [Expense]
     /// Las claves de todos los movimientos, para el globo de nuevos de
     /// «Historial». Antes eran dos `@Query` del historial entero: se
     /// cargaban al dibujar la cuadrícula —unos 190 ms en el hilo principal,
@@ -48,9 +46,11 @@ struct DashboardView: View {
     @StateObject private var categoryBudgets = CategoryBudgetStore.shared
 
     @State private var filter = AccountFilter.shared
-    @State private var social = SocialProfileStore.shared
     @State private var newMovements = NewMovements.shared
     @State private var catalog: AccountCatalog?
+    /// Con qué datos se leyó el historial por última vez (`StoreRevision`).
+    /// En una caja: anotarlo no debe volver a dibujar el dashboard.
+    @State private var loaded = LoadedRevisions()
     /// Las categorías con límite y cómo van en el ciclo del mes mostrado. Un
     /// ciclo anual necesita el historial entero, así que se calcula junto al
     /// catálogo y no en cada dibujado.
@@ -96,7 +96,6 @@ struct DashboardView: View {
         _unclassified = Query(filter: #Predicate<Expense> {
             $0.category == unclassifiedName && !$0.isTransfer && !$0.isVoided && !$0.isReversal
         })
-        _debtExpenses = Query(filter: #Predicate<Expense> { $0.isDebt && !$0.isTransfer })
     }
 
     static func month(offset: Int) -> Period {
@@ -138,6 +137,7 @@ struct DashboardView: View {
     /// tarjetas y a qué banco llega cada Plin—, así que se arma fuera del
     /// cuerpo y una sola vez por aparición, no en cada dibujado.
     private func loadCatalog() {
+        loaded.catalog = StoreRevision.current
         let all = (try? modelContext.fetch(FetchDescriptor<Expense>())) ?? []
         let allIncomes = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
         catalog = AccountCatalog(expenses: all, incomes: allIncomes)
@@ -216,9 +216,16 @@ struct DashboardView: View {
             let firstLoad = catalog == nil
             if firstLoad { loadCatalog() }
             try? await Task.sleep(for: .milliseconds(1500))
+            // Leer el historial entero en el hilo principal: nunca a mitad de
+            // un deslizamiento, que es justo lo que se hace al volver aquí.
+            await ScrollActivity.idle()
             guard !Task.isCancelled else { return }
-            if !firstLoad { loadCatalog() }
-            refreshBrief()
+            // Al volver de otra pantalla sólo se relee si algo se guardó
+            // mientras tanto: si no, el catálogo y el resumen siguen valiendo.
+            if !firstLoad, loaded.catalog != StoreRevision.current { loadCatalog() }
+            if loaded.brief != StoreRevision.current || Self.briefDay != AssistantBrief.dayKey(Date()) {
+                refreshBrief()
+            }
         }
         .onChange(of: self.expenses.count) { _, _ in
             loadCatalog()
@@ -236,7 +243,12 @@ struct DashboardView: View {
             selectedColumn = nil
             loadMonthExtras()
         }
-        .onChange(of: categoryBudgets.budgets) { _, _ in loadMonthExtras() }
+        .onChange(of: categoryBudgets.budgets) { _, _ in
+            loadMonthExtras()
+            // Los límites no pasan por SwiftData: el resumen del asistente
+            // los usa, así que se vuelve a armar al regresar.
+            loaded.brief = -1
+        }
         .sheet(item: $openStat) { StatSheet(stat: $0) }
         .sheet(item: $assistant, onDismiss: runPendingAction) { presentation in
             AssistantSheet(cards: presentation.cards, inputs: presentation.inputs,
@@ -277,6 +289,7 @@ struct DashboardView: View {
 
     /// Las tarjetas del día, para saber si el ✦ lleva punto.
     private func refreshBrief() {
+        loaded.brief = StoreRevision.current
         Self.briefDay = AssistantBrief.dayKey(Date())
         let inputs = AssistantData.inputs(context: modelContext, usdToPen: rate)
         let news = AssistantSeenState().hasNews(AssistantBrief.cards(inputs))
@@ -599,9 +612,12 @@ struct DashboardView: View {
 
     /// «15 set».
     private func dayMonth(_ date: Date) -> String {
-        date.formatted(.dateTime.day().month(.abbreviated).locale(Locale(identifier: "es_ES")))
-            .replacingOccurrences(of: ".", with: "")
+        date.formatted(Self.dayMonthStyle).replacingOccurrences(of: ".", with: "")
     }
+
+    /// Una vez y no por llamada: cada stat pide una etiqueta por día del mes.
+    private static let dayMonthStyle = Date.FormatStyle.dateTime.day().month(.abbreviated)
+        .locale(Locale(identifier: "es_ES"))
 
     private func chartBlock(_ chart: ChartData) -> some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1022,15 +1038,18 @@ struct DashboardView: View {
             + incomes.filter { !$0.isTransfer && $0.date >= range.start && $0.date < range.end }.count
         let hasPending = !unclassified.isEmpty
 
-        let newCount = newMovements.unseen(in: movementKeys).count
-        let historial = tile(title: "Historial", badge: newCount, action: { onOpen(.movements) }) {
+        // El globo se cuenta dentro de la tarjeta, no aquí: marcar algo como
+        // visto sólo vuelve a dibujar esa tarjeta, no el dashboard entero.
+        let keys = movementKeys
+        let historial = tile(title: "Historial", badge: { NewMovements.shared.unseen(in: keys).count },
+                             action: { onOpen(.movements) }) {
             bigNumber("\(movementCount)", caption: movementCount == 1 ? "movimiento este mes" : "movimientos este mes")
         }
         let categorias = tile(title: "Categorías", action: { onOpen(.categories) }) {
             topCategories(totals)
         }
         let amigos = tile(title: "Amigos", action: { onOpen(.social) }) {
-            friendsSummary
+            FriendsSummary()
         }
 
         // Dos columnas en vertical; en horizontal (o en iPad) caben las
@@ -1096,46 +1115,10 @@ struct DashboardView: View {
     /// mismo, para que las columnas de arriba y abajo cuadren.
     private static let gridSpacing: CGFloat = 14
 
-    private func tile<Content: View>(title: String, badge: Int = 0, action: @escaping () -> Void,
-                                     @ViewBuilder content: () -> Content) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 6) {
-                    Text(title)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(palette.label)
-                    // Movimientos que aún no viste en Historial: el mismo
-                    // globo que las solicitudes de Social.
-                    if badge > 0 {
-                        Text(badge > 99 ? "99+" : "\(badge)")
-                            .font(.system(size: 11, weight: .bold))
-                            .monospacedDigit()
-                            .foregroundStyle(Color.white)
-                            .padding(.horizontal, 5)
-                            .frame(minWidth: 18, minHeight: 18)
-                            .background(palette.expense, in: Capsule())
-                            .transition(.scale.combined(with: .opacity))
-                    }
-                    Spacer(minLength: 4)
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(palette.duoText ?? palette.secondaryLabel)
-                }
-                content()
-                Spacer(minLength: 0)
-            }
-            .padding(15)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .frame(minHeight: 128)
-            .background(palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(palette.hairline, lineWidth: 0.5))
-            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityValue(badge > 0 ? (badge == 1 ? "1 movimiento nuevo" : "\(badge) movimientos nuevos") : "")
-        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: badge)
+    private func tile<Content: View>(title: String, badge: @escaping () -> Int = { 0 },
+                                     action: @escaping () -> Void,
+                                     @ViewBuilder content: @escaping () -> Content) -> some View {
+        DashboardTile(title: title, badge: badge, action: action, content: content)
     }
 
     private func bigNumber(_ value: String, caption: String, tint: Color? = nil) -> some View {
@@ -1182,16 +1165,116 @@ struct DashboardView: View {
         }
     }
 
-    /// El pingüino del perfil y lo que te deben: los gastos por cobrar que
-    /// aún no te pagan del todo. Sin nada por cobrar, cuántos amigos tienes.
-    private var friendsSummary: some View {
+}
+
+
+/// El dashboard con su mes. Guarda cuántos meses se retrocedió para que
+/// `DashboardView` se reconstruya —con consultas del mes nuevo— al cambiarlo.
+struct DashboardScreen: View {
+    let progress: ScrollProgress
+    let onOpen: (AppSection) -> Void
+    let onSettings: () -> Void
+
+    @State private var monthOffset = 0
+
+    var body: some View {
+        DashboardView(monthOffset: $monthOffset,
+                      progress: progress,
+                      onOpen: onOpen,
+                      onSettings: onSettings)
+    }
+}
+
+/// Con qué `StoreRevision` se armó cada lectura del historial del dashboard.
+private final class LoadedRevisions {
+    var catalog = -1
+    var brief = -1
+}
+
+// MARK: - Tarjetas de la cuadrícula
+
+/// Una tarjeta de la cuadrícula del dashboard.
+///
+/// El globo y el contenido se piden **dentro** de su cuerpo: lo que lean
+/// (movimientos vistos, amigos, cobros) queda ligado a esta tarjeta, y un
+/// cambio ahí la vuelve a dibujar sólo a ella, no al dashboard con sus totales,
+/// gráfico y stats.
+private struct DashboardTile<Content: View>: View {
+    let title: String
+    let badge: () -> Int
+    let action: () -> Void
+    let content: () -> Content
+
+    @Environment(\.colorScheme) private var scheme
+    private var palette: Palette { Palette(scheme) }
+
+    var body: some View {
+        let badge = self.badge()
+
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 6) {
+                    Text(title)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(palette.label)
+                    // Movimientos que aún no viste en Historial: el mismo
+                    // globo que las solicitudes de Social.
+                    if badge > 0 {
+                        Text(badge > 99 ? "99+" : "\(badge)")
+                            .font(.system(size: 11, weight: .bold))
+                            .monospacedDigit()
+                            .foregroundStyle(Color.white)
+                            .padding(.horizontal, 5)
+                            .frame(minWidth: 18, minHeight: 18)
+                            .background(palette.expense, in: Capsule())
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(palette.duoText ?? palette.secondaryLabel)
+                }
+                content()
+                Spacer(minLength: 0)
+            }
+            .padding(15)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(minHeight: 128)
+            .background(palette.surface, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 20, style: .continuous)
+                .stroke(palette.hairline, lineWidth: 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityValue(badge > 0 ? (badge == 1 ? "1 movimiento nuevo" : "\(badge) movimientos nuevos") : "")
+        .animation(.spring(response: 0.35, dampingFraction: 0.7), value: badge)
+    }
+}
+
+/// El pingüino del perfil y lo que te deben: los gastos por cobrar que aún no
+/// te pagan del todo. Sin nada por cobrar, cuántos amigos tienes.
+///
+/// Vista propia, con su consulta: amigos, solicitudes y cobros cambian con el
+/// tiempo real de Supabase, y leídos desde el dashboard lo recalculaban todo
+/// en cada aviso —también a mitad de un deslizamiento—.
+private struct FriendsSummary: View {
+    /// Lo marcado por cobrar: poco.
+    @Query(filter: #Predicate<Expense> { $0.isDebt && !$0.isTransfer })
+    private var debtExpenses: [Expense]
+
+    @Environment(\.colorScheme) private var scheme
+    private var palette: Palette { Palette(scheme) }
+    private var accent: AppThemeColor { .current }
+
+    var body: some View {
         let open = debtExpenses.filter { Money.cents(Accounting.outstanding(of: $0)) > 0 }
         let owed = Money.sum(open.map { Accounting.outstanding(of: $0) })
         let requests = FriendsManager.shared.incomingRequests.count + PaymentReminders.shared.inbox.count
         let friends = FriendsManager.shared.friends.count
 
-        return HStack(spacing: 10) {
-            PenguinAvatar(look: social.penguin, size: 52, background: accent.softFill(scheme))
+        HStack(spacing: 10) {
+            PenguinAvatar(look: SocialProfileStore.shared.penguin, size: 52, background: accent.softFill(scheme))
                 .overlay(alignment: .topTrailing) {
                     if requests > 0 {
                         Text(requests > 99 ? "99+" : "\(requests)")
@@ -1226,23 +1309,5 @@ struct DashboardView: View {
                 }
             }
         }
-    }
-}
-
-
-/// El dashboard con su mes. Guarda cuántos meses se retrocedió para que
-/// `DashboardView` se reconstruya —con consultas del mes nuevo— al cambiarlo.
-struct DashboardScreen: View {
-    let progress: ScrollProgress
-    let onOpen: (AppSection) -> Void
-    let onSettings: () -> Void
-
-    @State private var monthOffset = 0
-
-    var body: some View {
-        DashboardView(monthOffset: $monthOffset,
-                      progress: progress,
-                      onOpen: onOpen,
-                      onSettings: onSettings)
     }
 }

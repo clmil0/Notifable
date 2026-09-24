@@ -448,11 +448,8 @@ enum MovementDay {
         if calendar.isDateInToday(day) { return "Hoy" }
         if calendar.isDateInYesterday(day) { return "Ayer" }
 
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "es_ES")
-        formatter.dateFormat = calendar.isDate(day, equalTo: Date(), toGranularity: .year)
-            ? "EEEE d 'de' MMMM"
-            : "EEEE d 'de' MMMM, yyyy"
+        let formatter = calendar.isDate(day, equalTo: Date(), toGranularity: .year)
+            ? longThisYear : longOtherYear
         return formatter.string(from: day).capitalizedFirst
     }
 
@@ -463,12 +460,25 @@ enum MovementDay {
         if calendar.isDateInToday(day) { return "Hoy" }
         if calendar.isDateInYesterday(day) { return "Ayer" }
 
+        let formatter = calendar.isDate(day, equalTo: Date(), toGranularity: .year)
+            ? shortThisYear : shortOtherYear
+        return formatter.string(from: day)
+    }
+
+    // Creados una vez: armar un `DateFormatter` es caro, y en Movimientos se
+    // pedía uno por cabecera de día justo mientras la lista se desliza y
+    // monta filas nuevas. Nunca se modifican después, así que compartirlos
+    // es seguro.
+    private static let longThisYear = formatter("EEEE d 'de' MMMM")
+    private static let longOtherYear = formatter("EEEE d 'de' MMMM, yyyy")
+    private static let shortThisYear = formatter("d 'de' MMMM")
+    private static let shortOtherYear = formatter("d 'de' MMMM, yyyy")
+
+    private static func formatter(_ format: String) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "es_ES")
-        formatter.dateFormat = calendar.isDate(day, equalTo: Date(), toGranularity: .year)
-            ? "d 'de' MMMM"
-            : "d 'de' MMMM, yyyy"
-        return formatter.string(from: day)
+        formatter.dateFormat = format
+        return formatter
     }
 }
 
@@ -477,8 +487,13 @@ private struct TimeLabel: View {
     let date: Date
     @Environment(\.colorScheme) private var scheme
 
+    /// Armado una vez y no por fila: la lista monta filas mientras se desliza.
+    private static let style = Date.FormatStyle.dateTime
+        .hour(.twoDigits(amPM: .omitted)).minute()
+        .locale(Locale(identifier: "es_ES"))
+
     var body: some View {
-        Text(date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute().locale(Locale(identifier: "es_ES"))))
+        Text(date.formatted(Self.style))
             .font(.system(size: 12.5))
             .monospacedDigit()
             .foregroundStyle(Palette(scheme).secondaryLabel)

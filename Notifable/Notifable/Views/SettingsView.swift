@@ -113,6 +113,7 @@ struct SettingsView: View {
     private var status: SettingsStatus {
         SettingsStatus(
             isConnected: gmailAuth.isAuthenticated,
+            missingGmailScope: gmailAuth.missingGmailScope,
             account: gmailAuth.isAuthenticated ? "Sólo lectura del correo" : nil,
             lastSync: gmailSync.lastSyncDate,
             activeBankCount: BankSource.activeCount,
@@ -265,6 +266,7 @@ struct SettingsView: View {
 
     private var gmailValue: String {
         guard gmailAuth.isAuthenticated else { return gmailAuth.accessRevoked ? "Se desconectó" : "Sin conectar" }
+        if gmailAuth.missingGmailScope { return "Falta permiso" }
         return BankSource.summaryLabel
     }
 

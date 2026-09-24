@@ -164,6 +164,26 @@ struct SettingsTests {
         #expect(noBanks.headline == "Ningún banco activo")
     }
 
+    @Test("Conectado sin la casilla de Gmail: pide atención aunque haya leído hace poco")
+    func estadoSinPermisoDeGmail() {
+        let status = SettingsStatus(isConnected: true, missingGmailScope: true, account: "yo@gmail.com",
+                                    lastSync: Date(), activeBankCount: 5, totalBankCount: 5,
+                                    expensesThisMonth: 12, unclassifiedMerchants: 0, pendingRecurring: 0)
+        #expect(status.level == .attention)
+        #expect(status.headline == "Falta el permiso de Gmail")
+    }
+
+    @Test("El 403 por permisos insuficientes se reconoce y no se confunde con otros 403")
+    func errorSinPermisoDeGmail() {
+        let body = #"{"error":{"code":403,"message":"Request had insufficient authentication scopes.","errors":[{"reason":"insufficientPermissions"}]}}"#
+        let scope = GmailSyncService.apiError(status: 403, data: Data(body.utf8))
+        #expect(GmailSyncService.isMissingScope(scope))
+        #expect(scope.localizedDescription == GmailAuthService.missingScopeMessage)
+
+        let disabled = #"{"error":{"code":403,"message":"Gmail API has not been used in project 1"}}"#
+        #expect(!GmailSyncService.isMissingScope(GmailSyncService.apiError(status: 403, data: Data(disabled.utf8))))
+    }
+
     // MARK: - 4. Ninguna fila vacía
 
     @Test("4. Ninguna fila de la raíz muestra cadena vacía")

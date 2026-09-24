@@ -64,7 +64,9 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         self.container = container
 
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: ModelContext.didSave, object: nil, queue: .main) { _ in
+        observers.append(center.addObserver(forName: ModelContext.didSave, object: nil, queue: .main) { note in
+            // La caché de amigos no cambia ningún aviso (`SocialCacheSave`).
+            guard !SocialCacheSave.isCacheOnly(note) else { return }
             Task { @MainActor in NotificationManager.shared.scheduleRefresh() }
         })
         observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification,
@@ -79,6 +81,7 @@ class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         pending?.cancel()
         pending = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(1.5))
+            await ScrollActivity.idle()   // lee la base en el hilo principal
             guard !Task.isCancelled else { return }
             self?.refreshNow()
         }

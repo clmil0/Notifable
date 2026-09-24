@@ -18,6 +18,12 @@ struct TrackableScrollView<Content: View>: View {
     @Binding var scrollToTopTrigger: Bool
     /// Fila a la que desplazarse, centrada. Se vuelve a `nil` al llegar.
     @Binding var scrollTarget: UUID?
+    /// Si esta lista avisó a `ScrollActivity` de que se desliza: al
+    /// desaparecer a mitad de gesto hay que cerrar ese aviso. En una caja y no
+    /// en un `@State` suelto: cambiarlo no debe volver a dibujar nada, y como
+    /// `@State` reconstruía la lista entera al empezar y al terminar cada
+    /// deslizamiento.
+    @State private var report = ScrollReport()
 
     init(scrollToTopTrigger: Binding<Bool> = .constant(false),
          scrollTarget: Binding<UUID?> = .constant(nil),
@@ -38,6 +44,10 @@ struct TrackableScrollView<Content: View>: View {
             // Sin barra de desplazamiento: con el header y el FAB flotando,
             // la barra del sistema se veía enorme y tapaba el borde derecho.
             .scrollIndicators(.hidden)
+            .onScrollPhaseChange { _, phase in
+                report.update(isScrolling: phase.isScrolling)
+            }
+            .onDisappear { report.update(isScrolling: false) }
             .onChange(of: scrollToTopTrigger) { _, _ in
                 withAnimation {
                     proxy.scrollTo("top", anchor: .top)
@@ -51,5 +61,16 @@ struct TrackableScrollView<Content: View>: View {
                 scrollTarget = nil
             }
         }
+    }
+}
+
+/// Lo que una lista le dijo a `ScrollActivity`. Clase simple, sin observar.
+private final class ScrollReport {
+    private var isScrolling = false
+
+    func update(isScrolling scrolling: Bool) {
+        guard scrolling != isScrolling else { return }
+        isScrolling = scrolling
+        if scrolling { ScrollActivity.began() } else { ScrollActivity.ended() }
     }
 }

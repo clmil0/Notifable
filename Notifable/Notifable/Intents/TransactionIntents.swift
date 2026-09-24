@@ -50,26 +50,37 @@ struct ExpenseCategoryEntity: AppEntity {
 struct ExpenseCategoryQuery: EntityStringQuery {
     @MainActor
     func entities(for identifiers: [String]) async throws -> [ExpenseCategoryEntity] {
-        let known = Set(try Self.names())
+        let known = Set(try await Self.names())
         return identifiers.filter(known.contains).map(ExpenseCategoryEntity.init(id:))
     }
 
     @MainActor
     func entities(matching string: String) async throws -> [ExpenseCategoryEntity] {
-        try Self.names()
+        try await Self.names()
             .filter { IntentText.matches($0, string) }
             .map(ExpenseCategoryEntity.init(id:))
     }
 
     @MainActor
     func suggestedEntities() async throws -> [ExpenseCategoryEntity] {
-        try Self.names().map(ExpenseCategoryEntity.init(id:))
+        try await Self.names().map(ExpenseCategoryEntity.init(id:))
     }
 
+    /// Las categorías, las más usadas primero.
+    ///
+    /// iOS pide esto cada vez que la app actualiza sus frases de Siri —tras
+    /// cada guardado—, a menudo mientras se usa la app. Leer todo el historial
+    /// en el hilo principal eran ~160 ms de pantalla trabada; ahora se cuenta
+    /// en segundo plano y sólo con la categoría de cada gasto.
     @MainActor
-    static func names() throws -> [String] {
-        let history = try AppModelContainer.shared.mainContext.fetch(FetchDescriptor<Expense>())
-        return CategoryStyle.selectable(history: history)
+    static func names() async throws -> [String] {
+        let container = AppModelContainer.shared
+        let counts = try await Task.detached(priority: .userInitiated) {
+            var descriptor = FetchDescriptor<Expense>()
+            descriptor.propertiesToFetch = [\.category]
+            return CategoryStyle.usageCounts(try ModelContext(container).fetch(descriptor))
+        }.value
+        return CategoryStyle.selectable(counts: counts)
     }
 }
 

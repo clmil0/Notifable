@@ -71,7 +71,10 @@ class GmailSyncService: ObservableObject {
             self.syncEmails(quiet: true)
         }
         timer.tolerance = 5
-        RunLoop.main.add(timer, forMode: .common)
+        // `.default` y no `.common`: mientras el dedo desliza una lista el
+        // bucle principal está en modo de seguimiento y el timer espera a que
+        // se suelte, en vez de lanzar la lectura en pleno gesto.
+        RunLoop.main.add(timer, forMode: .default)
         pollTimer = timer
     }
 
@@ -200,6 +203,19 @@ class GmailSyncService: ObservableObject {
             finishRun()
             return
         }
+
+        // Sin `gmail.readonly` cada lectura es un 403 seguro, y renovar no lo
+        // arregla: se cortaba igual tras dos llamadas y una renovación, en
+        // cada apertura y cada cuarto de hora en segundo plano.
+        if GmailAuthService.lacksGmailScope {
+            Diagnostics.shared.log("Sync Gmail: omitida, Google no dio permiso para leer el correo (hay que volver a vincular)")
+            DispatchQueue.main.async {
+                self.isSyncing = false
+                self.lastSyncError = GmailAuthService.missingScopeMessage
+            }
+            finishRun()
+            return
+        }
         
         fetchMessageList(token: token, startDate: startDate, endDate: endDate) { [weak self] result in
             switch result {
@@ -208,6 +224,14 @@ class GmailSyncService: ObservableObject {
                                       isRangeSync: startDate != nil || endDate != nil,
                                       coversNow: Self.reachesNow(endDate),
                                       quiet: quiet)
+            case .failure(let error) where Self.isMissingScope(error):
+                Diagnostics.shared.log("Sync Gmail: ✗ Google no dio permiso para leer el correo; no se reintenta, hay que volver a vincular")
+                GmailAuthService.shared.markMissingGmailScope()
+                DispatchQueue.main.async {
+                    self?.isSyncing = false
+                    self?.lastSyncError = error.localizedDescription
+                }
+                self?.finishRun()
             case .failure(let error):
                 // Token might be expired, try to refresh
                 print("Failed to fetch messages: \(error). Trying to refresh token...")
@@ -574,6 +598,9 @@ class GmailSyncService: ObservableObject {
 
                         if !alreadyImported, let parsed {
                             foundBankName = parsed.bankName
+                            // Guardarlo redibuja el dashboard: nunca a mitad
+                            // de un deslizamiento (ver `ScrollActivity`).
+                            ScrollActivity.waitUntilIdle()
                             DispatchQueue.main.sync {
                                 if let context = self?.modelContext {
                                     var inserted = false
@@ -628,10 +655,15 @@ class GmailSyncService: ObservableObject {
             }
             
             group.wait()
+            // Aquí seguimos en un hilo de fondo, y así se queda: la limpieza
+            // de después de leer recorre todo el historial varias veces, y en
+            // el hilo principal congelaba la app 4 s al final de cada lectura
+            // con algo nuevo (bitácora del 23/09, 3.0.2).
+            queue.sync {
+                UserDefaults.standard.set(newIDs, forKey: "processedEmailIDs")
+            }
+            self?.tidyUpAfterReading()
             DispatchQueue.main.async {
-                queue.sync {
-                    UserDefaults.standard.set(newIDs, forKey: "processedEmailIDs")
-                }
                 // Una sincronización histórica acotada no marca "al día": si lo
                 // hiciera, la automática miraría sólo desde hace una hora y el
                 // tramo entre esa fecha final y hoy no se descargaría nunca.
@@ -639,15 +671,6 @@ class GmailSyncService: ObservableObject {
                     self?.lastSyncDate = Date()
                 }
                 self?.isSyncing = false
-                // Los gastos acaban de rearmarse desde el correo, así que ahora
-                // sí existen los que estaban esperando su marca de deuda o su
-                // categoría restaurada. Ver ConfigBackupManager.
-                if let context = self?.modelContext {
-                    Self.removeLinkedDuplicates(in: context)
-                    ConfigBackupManager.reapplyPendingDecisions(modelContext: context)
-                    // Lo recién llegado puede ir a una cuenta tuya.
-                    TransferDetector.apply(in: context)
-                }
                 // Lo importado antes de guardar el banco se completa aparte,
                 // una vez por correo.
                 self?.backfillAccountData(token: token)
@@ -667,6 +690,29 @@ class GmailSyncService: ObservableObject {
         }
     }
     
+    /// Lo de después de cada lectura: los gastos acaban de rearmarse desde el
+    /// correo, así que ahora sí existen los que esperaban su marca de deuda o
+    /// su categoría restaurada (ver `ConfigBackupManager`), y lo recién llegado
+    /// puede ir a una cuenta tuya.
+    ///
+    /// **Desde un hilo de fondo**, con un `ModelContext` propio creado y usado
+    /// en este mismo hilo. Cada paso guarda sólo si cambió algo —casi nunca—,
+    /// y lo guardado llega solo al contexto principal y a las `@Query`.
+    private func tidyUpAfterReading() {
+        assert(!Thread.isMainThread, "tidyUpAfterReading bloquearía el hilo principal")
+        let (container, preferences) = DispatchQueue.main.sync {
+            (modelContext?.container, AccountBook.shared.preferences)
+        }
+        guard let container else { return }
+        let started = Date()
+        let context = ModelContext(container)
+        context.autosaveEnabled = false
+        Self.removeLinkedDuplicates(in: context)
+        ConfigBackupManager.reapplyPendingDecisions(modelContext: context)
+        TransferDetector.apply(in: context, preferences: preferences)
+        Diagnostics.shared.log("Sync Gmail: limpieza de después de leer en \(Int(Date().timeIntervalSince(started) * 1000)) ms (fuera del hilo principal)")
+    }
+
     func recoverExpenses(ids: [String]) {
         guard let token = GmailAuthService.shared.getAccessToken() else { return }
         
@@ -736,19 +782,14 @@ class GmailSyncService: ObservableObject {
             }
             
             group.wait()
+            queue.sync {
+                UserDefaults.standard.set(processedIDs, forKey: "processedEmailIDs")
+                // Limpiamos la papelera
+                UserDefaults.standard.removeObject(forKey: "pendingRecoveryIDs")
+            }
+            self?.tidyUpAfterReading()
             DispatchQueue.main.async {
-                queue.sync {
-                    UserDefaults.standard.set(processedIDs, forKey: "processedEmailIDs")
-                    // Limpiamos la papelera
-                    UserDefaults.standard.removeObject(forKey: "pendingRecoveryIDs")
-                }
                 self?.isSyncing = false
-                if let context = self?.modelContext {
-                    Self.removeLinkedDuplicates(in: context)
-                    ConfigBackupManager.reapplyPendingDecisions(modelContext: context)
-                    // Lo recién llegado puede ir a una cuenta tuya.
-                    TransferDetector.apply(in: context)
-                }
                 print("Recovery complete. Restored \(newExpensesFound) expenses.")
             }
         }

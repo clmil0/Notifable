@@ -89,10 +89,21 @@ enum CategoryStyle {
     /// Incluye las del catálogo aunque no tengan ni un gasto: una categoría
     /// recién creada en `6a` tiene que sobrevivir a cerrar la pantalla.
     static func selectable(history: [Expense]) -> [String] {
+        selectable(counts: usageCounts(history))
+    }
+
+    /// Cuántos gastos hay por categoría, sin contar «Sin Clasificar». Se
+    /// puede calcular fuera del hilo principal; `selectable(counts:)` no,
+    /// porque lee `CategoryCatalog`.
+    static func usageCounts(_ history: [Expense]) -> [String: Int] {
         var counts: [String: Int] = [:]
         for expense in history where expense.category != Accounting.unclassified {
             counts[expense.category, default: 0] += 1
         }
+        return counts
+    }
+
+    static func selectable(counts: [String: Int]) -> [String] {
         let known = Set(counts.keys)
             .union(defaults)
             .union(CategoryCatalog.shared.names)

@@ -51,15 +51,19 @@ final class CachedFriendShare {
         updatedAt = row.updatedAt
     }
 
+    /// Sólo asigna lo que cambió: para SwiftData, asignar el mismo valor
+    /// también es un cambio, y guardarlo hace releer todas las `@Query`.
     func update(from row: FriendShareRow) {
-        sharerID = row.sharerID
-        viewerID = row.viewerID
-        shareTotal = row.shareTotal
-        shareCategoriesData = (try? JSONEncoder().encode(row.shareCategories)) ?? Data()
-        totalAmount = row.totalAmount
-        categoryTotalsData = (try? JSONEncoder().encode(row.categoryTotals)) ?? Data()
-        viewerStatus = row.viewerStatus
-        updatedAt = row.updatedAt
+        let categories = (try? JSONEncoder().encode(row.shareCategories)) ?? Data()
+        let totals = (try? JSONEncoder().encode(row.categoryTotals)) ?? Data()
+        if sharerID != row.sharerID { sharerID = row.sharerID }
+        if viewerID != row.viewerID { viewerID = row.viewerID }
+        if shareTotal != row.shareTotal { shareTotal = row.shareTotal }
+        if shareCategoriesData != categories { shareCategoriesData = categories }
+        if totalAmount != row.totalAmount { totalAmount = row.totalAmount }
+        if categoryTotalsData != totals { categoryTotalsData = totals }
+        if viewerStatus != row.viewerStatus { viewerStatus = row.viewerStatus }
+        if updatedAt != row.updatedAt { updatedAt = row.updatedAt }
     }
 
     var asRow: FriendShareRow {
@@ -68,5 +72,26 @@ final class CachedFriendShare {
         return FriendShareRow(id: id, sharerID: sharerID, viewerID: viewerID, shareTotal: shareTotal,
                                shareCategories: categories, totalAmount: totalAmount,
                                categoryTotals: totals, viewerStatus: viewerStatus, updatedAt: updatedAt)
+    }
+}
+
+/// Reconoce los guardados que sólo tocaron estas cachés.
+///
+/// Los que escuchan `ModelContext.didSave` para recalcular algo tuyo —lo que
+/// compartes con amigos, los widgets, los avisos, el respaldo— no tienen nada
+/// que hacer cuando lo guardado es sólo lo que llegó de Supabase. Y si
+/// reaccionaban, se armaba un bucle: dos teléfonos con la misma cuenta y
+/// datos distintos se pisaban lo compartido cada 2–4 s (uno sube, el otro lo
+/// recibe, lo guarda en la caché, eso lo despierta y vuelve a subir lo suyo),
+/// y cada vuelta hacía releer el historial a todas las pantallas, también a
+/// mitad de un deslizamiento.
+enum SocialCacheSave {
+    private static let entities: Set<String> = ["CachedFriend", "CachedFriendShare"]
+
+    static func isCacheOnly(_ note: Notification) -> Bool {
+        let ids = (note.userInfo ?? [:]).values.compactMap { $0 as? [PersistentIdentifier] }.joined()
+        // Sin detalle de qué cambió, se trata como un cambio de verdad.
+        guard !ids.isEmpty else { return false }
+        return ids.allSatisfy { entities.contains($0.entityName) }
     }
 }

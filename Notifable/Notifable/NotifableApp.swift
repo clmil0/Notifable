@@ -25,6 +25,7 @@ struct NotifableApp: App {
         // En `init` y no en el `.task` de la ventana: cuando Siri despierta la
         // app en segundo plano no se monta ninguna escena, y el guardado de un
         // intent también tiene que llegar a los widgets.
+        StoreRevision.start()
         WidgetSnapshotWriter.shared.start(container: AppModelContainer.shared)
         // También en `init`: registrar una tarea de segundo plano después de
         // que la app termine de lanzarse es un error fatal.

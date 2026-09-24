@@ -82,7 +82,7 @@ extension AppThemeColor {
 
     /// El tema guardado. Mismo valor por defecto que los `@AppStorage`.
     static var current: AppThemeColor {
-        AppThemeColor(rawValue: UserDefaults.standard.string(forKey: storageKey) ?? "") ?? .blue
+        ThemeDefaults.values.theme
     }
 
     var themeKindLabel: String { isDuotone ? "Dos colores" : "Un color" }
@@ -94,7 +94,7 @@ extension AppThemeColor {
     static let intenseTintKey = "intenseThemeTint"
 
     static var usesIntenseTint: Bool {
-        UserDefaults.standard.bool(forKey: intenseTintKey)
+        ThemeDefaults.values.intenseTint
     }
 
     // MARK: - Colores de categoría del tema (opcional)
@@ -105,7 +105,7 @@ extension AppThemeColor {
     static let themedCategoryColorsKey = "themedCategoryColors"
 
     static var usesThemedCategoryColors: Bool {
-        UserDefaults.standard.bool(forKey: themedCategoryColorsKey)
+        ThemeDefaults.values.themedCategoryColors
     }
 
     /// Rampa de `1c`: acento 1, una variante vecina, acento 2, su vecina y un
@@ -176,5 +176,45 @@ extension AppThemeColor {
             list = Array(list.prefix(recentCount))
         }
         defaults.set(list.map(\.rawValue).joined(separator: ","), forKey: recentKey)
+    }
+}
+
+// MARK: - Caché de los ajustes del tema
+
+/// El tema y sus dos interruptores, leídos de `UserDefaults` una sola vez.
+///
+/// Cada `Palette(scheme)` los pedía, y una fila de Movimientos crea varias:
+/// decenas de lecturas de `UserDefaults` por fila, justo mientras la lista se
+/// desliza y monta filas nuevas. Se vuelven a leer en cuanto cambia cualquier
+/// ajuste (`didChangeNotification` llega en el mismo proceso al escribir, sea
+/// desde `@AppStorage`, Ajustes o un respaldo restaurado), así que un cambio
+/// de tema se sigue viendo al instante.
+private enum ThemeDefaults {
+    struct Values {
+        let theme: AppThemeColor
+        let intenseTint: Bool
+        let themedCategoryColors: Bool
+    }
+
+    private static let lock = NSLock()
+    private static var cached: Values?
+    private static let observer: NSObjectProtocol = NotificationCenter.default.addObserver(
+        forName: UserDefaults.didChangeNotification, object: nil, queue: nil
+    ) { _ in
+        lock.withLock { cached = nil }
+    }
+
+    static var values: Values {
+        _ = observer
+        return lock.withLock {
+            if let cached { return cached }
+            let defaults = UserDefaults.standard
+            let values = Values(
+                theme: AppThemeColor(rawValue: defaults.string(forKey: AppThemeColor.storageKey) ?? "") ?? .blue,
+                intenseTint: defaults.bool(forKey: AppThemeColor.intenseTintKey),
+                themedCategoryColors: defaults.bool(forKey: AppThemeColor.themedCategoryColorsKey))
+            cached = values
+            return values
+        }
     }
 }

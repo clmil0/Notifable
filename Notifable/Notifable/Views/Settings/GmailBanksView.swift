@@ -66,7 +66,7 @@ struct GmailBanksView: View {
             guard phase == .active, isLinking else { return }
             Task {
                 try? await Task.sleep(for: .seconds(5))
-                if !gmailAuth.isAuthenticated { isLinking = false }
+                if !gmailAuth.isAuthenticated || gmailAuth.missingGmailScope { isLinking = false }
             }
         }
         .confirmationDialog("¿Desvincular Gmail?",
@@ -94,16 +94,24 @@ struct GmailBanksView: View {
 
     // MARK: - Cuenta
 
+    /// Conectada, pero sin la casilla de Gmail: ver `GmailAuthService.missingGmailScope`.
+    private var lacksPermission: Bool { gmailAuth.isAuthenticated && gmailAuth.missingGmailScope }
+
+    private var accountTint: Color {
+        lacksPermission ? palette.negative
+            : gmailAuth.isAuthenticated ? palette.positive : palette.tertiaryLabel
+    }
+
     @ViewBuilder
     private var accountCard: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .fill((gmailAuth.isAuthenticated ? palette.positive : palette.tertiaryLabel).opacity(0.18))
+                        .fill(accountTint.opacity(0.18))
                         .frame(width: 40, height: 40)
                     Image(systemName: "envelope.fill")
-                        .foregroundStyle(gmailAuth.isAuthenticated ? palette.positive : palette.tertiaryLabel)
+                        .foregroundStyle(accountTint)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -116,13 +124,16 @@ struct GmailBanksView: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .minimumScaleFactor(0.8)
-                    Text(gmailAuth.isAuthenticated
+                    Text(lacksPermission
+                         ? "Falta el permiso para leer tus correos. Vuelve a conectar y marca la casilla de Gmail."
+                         : gmailAuth.isAuthenticated
                          ? "● Conectado · sólo lectura"
                          : gmailAuth.accessRevoked
                             ? "Google cortó el acceso. Vuelve a vincular para seguir leyendo tus avisos."
                             : "AgruPay lee los avisos de tu banco para registrar gastos solo.")
                         .font(.footnote)
-                        .foregroundStyle(gmailAuth.isAuthenticated ? palette.positive
+                        .foregroundStyle(lacksPermission ? palette.negative
+                                         : gmailAuth.isAuthenticated ? palette.positive
                                          : gmailAuth.accessRevoked ? palette.negative : palette.secondaryLabel)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -143,13 +154,13 @@ struct GmailBanksView: View {
             }
             .padding(16)
 
-            if !gmailAuth.isAuthenticated {
+            if !gmailAuth.isAuthenticated || lacksPermission {
                 Rectangle().fill(palette.separator).frame(height: 0.5)
                 Button {
                     isLinking = true
                     gmailAuth.signIn()
                 } label: {
-                    Text(isLinking ? "Conectando…" : "Vincular Gmail")
+                    Text(isLinking ? "Conectando…" : lacksPermission ? "Volver a conectar" : "Vincular Gmail")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)

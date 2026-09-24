@@ -11,6 +11,8 @@ struct BCPParser: BankEmailParser {
     }
     
     func parse(cleanText: String) -> Expense? {
+        if let refund = parseRefund(cleanText) { return refund }
+
         // Asegurarnos que es un consumo de tarjeta de débito
         guard cleanText.contains("Consumo Tarjeta de D") || cleanText.contains("Realizaste un consumo") else {
             return nil
@@ -140,5 +142,69 @@ struct BCPParser: BankEmailParser {
         }
 
         return Income(amount: amount, currency: "PEN", source: "Yape", title: sender, date: incomeDate)
+    }
+
+    // MARK: - Devoluciones
+
+    /// «Realizamos una devolución de una operación a tu Tarjeta de Débito
+    /// BCP»: Total devuelto, Fecha y hora, Número de Tarjeta, Nombre del
+    /// Comercio y Número de operación. En la parte de texto plano cada valor
+    /// viene entre asteriscos (`*S/ 2.50*`, `*************3601*`); sin ellos
+    /// en el HTML.
+    ///
+    /// Igual que la anulación de BBVA, no es un gasto: sale como aviso
+    /// (`isReversal`) para que el usuario elija qué compra se devolvió
+    /// (`ReversalMatcher`). El comercio se escribe como el del consumo —un
+    /// «PLIN-» pasa a «YAPE - », como en `YapeParser.parseBCPPlin`— para que
+    /// la compra de ese comercio salga sugerida.
+    private func parseRefund(_ cleanText: String) -> Expense? {
+        guard cleanText.range(of: "devoluci[oó]n", options: [.regularExpression, .caseInsensitive]) != nil,
+              let money = Self.capture2("(?:Total devuelto|devuelto el monto de)[\\s*]*(S/\\.?|US\\$|\\$)\\s*([0-9][0-9.,]*)", in: cleanText),
+              let amount = Double(money.1.replacingOccurrences(of: ",", with: "")) else { return nil }
+        let currency = money.0.contains("$") ? "USD" : "PEN"
+
+        var label = Self.capture("Nombre del Comercio[\\s*]*(.*?)[\\s*]*N[uú]mero de operaci", in: cleanText)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let upper = label.uppercased()
+        if upper.hasPrefix("PLIN-") || upper.hasPrefix("PLIN ") {
+            label = "YAPE - " + label.dropFirst(5).trimmingCharacters(in: .whitespaces)
+        }
+        let card = Self.capture("N[uú]mero de Tarjeta[\\s*]*([0-9]{4})", in: cleanText)
+
+        var date = Date()
+        let datePattern = "Fecha y hora[\\s*]*([0-9]{1,2})\\s+de\\s+([a-zA-Z]+)\\s+de\\s+([0-9]{4})\\s*-\\s*([0-9]{1,2}:[0-9]{2})\\s*([AP]M)"
+        if let regex = try? NSRegularExpression(pattern: datePattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(in: cleanText, range: NSRange(location: 0, length: cleanText.utf16.count)) {
+            let parts = (1...5).compactMap { Range(match.range(at: $0), in: cleanText).map { String(cleanText[$0]) } }
+            let months = ["enero": "01", "febrero": "02", "marzo": "03", "abril": "04", "mayo": "05", "junio": "06", "julio": "07", "agosto": "08", "septiembre": "09", "setiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"]
+            if parts.count == 5, let month = months[parts[1].lowercased()] {
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.dateFormat = "d MM yyyy h:mm a"
+                date = formatter.date(from: "\(parts[0]) \(month) \(parts[2]) \(parts[3]) \(parts[4].uppercased())") ?? date
+            }
+        }
+
+        let expense = Expense(amount: amount,
+                              merchant: ReversalMatcher.merchantPrefix + (label.isEmpty ? "Devolución" : label),
+                              date: date, category: "Sin Clasificar", currency: currency,
+                              cardLastDigits: card)
+        expense.isReversal = true
+        return expense
+    }
+
+    private static func capture(_ pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)),
+              let range = Range(match.range(at: 1), in: text) else { return nil }
+        return String(text[range])
+    }
+
+    private static func capture2(_ pattern: String, in text: String) -> (String, String)? {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)),
+              let first = Range(match.range(at: 1), in: text),
+              let second = Range(match.range(at: 2), in: text) else { return nil }
+        return (String(text[first]), String(text[second]))
     }
 }

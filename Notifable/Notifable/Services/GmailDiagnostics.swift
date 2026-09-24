@@ -39,6 +39,14 @@ extension GmailSyncService {
 
     /// Un error de la API de Gmail con un mensaje que se puede enseñar tal
     /// cual en Gmail y bancos.
+    static let missingScopeKey = "missingGmailScope"
+
+    /// El 403 de `apiError` por falta de `gmail.readonly`: renovar el token
+    /// no lo arregla, así que no vale la pena reintentar.
+    static func isMissingScope(_ error: Error) -> Bool {
+        (error as NSError).userInfo[missingScopeKey] as? Bool == true
+    }
+
     static func apiError(status: Int, data: Data?) -> NSError {
         var message = ""
         var reason = ""
@@ -52,7 +60,9 @@ extension GmailSyncService {
         let text: String
         switch status {
         case 403 where lower.contains("insufficient") || lower.contains("scope"):
-            text = "Google no dio permiso para leer el correo. Desvincula Gmail y vuelve a conectarlo marcando la casilla para ver tus correos."
+            return NSError(domain: "GmailAPI", code: status,
+                           userInfo: [NSLocalizedDescriptionKey: GmailAuthService.missingScopeMessage,
+                                      missingScopeKey: true])
         case 403 where lower.contains("has not been used") || lower.contains("disabled") || lower.contains("accessnotconfigured"):
             text = "La API de Gmail no está habilitada para esta app (error del proyecto en Google)."
         case 429:
@@ -253,8 +263,20 @@ enum GmailDiagnosticReport {
         for url in sessions {
             guard let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
             logLines.append("--- \(url.lastPathComponent) ---")
-            logLines += text.split(separator: "\n").map(String.init).filter {
-                $0.contains("Gmail") || $0.contains("CUELGUE") || $0.contains("Apertura") || $0.contains("volvió tras")
+            // Las pilas del vigilante van en las líneas sangradas que siguen a
+            // «pila de main»: sin ellas un cuelgue dice cuándo, no dónde.
+            var inStack = false
+            for line in text.split(separator: "\n").map(String.init) {
+                if line.contains("pila de main") {
+                    inStack = true
+                } else if inStack, line.hasPrefix("    ") {
+                    // Sigue la pila.
+                } else {
+                    inStack = false
+                    guard line.contains("Gmail") || line.contains("CUELGUE") || line.contains("Apertura")
+                            || line.contains("volvió tras") else { continue }
+                }
+                logLines.append(line)
             }
         }
         out += logLines.suffix(1500)

@@ -84,6 +84,8 @@ struct AssistantMessage: Identifiable, Codable, Equatable {
     let role: Role
     var text: String
     var actions: [ActionChip] = []
+    /// Cuándo se dijo: decide qué se sigue viendo y qué recuerda el modelo.
+    var date = Date()
 
     struct ActionChip: Codable, Equatable, Hashable {
         let label: String
@@ -91,15 +93,84 @@ struct AssistantMessage: Identifiable, Codable, Equatable {
     }
 }
 
-/// La conversación del día con el asistente.
+/// Cuánto dura el chat a la vista y cuánto recuerda el asistente.
+///
+/// Son dos plazos distintos: lo que se ve se borra tras unas horas sin
+/// escribir (3 por defecto, se elige en la hoja), pero el asistente sigue
+/// recordando lo hablado en las últimas 24 horas, así que «¿y lo de ayer?»
+/// sigue teniendo respuesta aunque la pantalla ya esté limpia.
+enum AssistantChatMemory {
+    static let lifetimeKey = "assistantChatLifetimeHours"
+    static let defaultLifetime = 3
+    static let lifetimeOptions = [1, 2, 3, 5, 10, 15, 24]
+
+    /// Lo que el asistente recuerda hacia atrás.
+    static let memoryWindow: TimeInterval = 24 * 3600
+    /// Cuántos mensajes de esa memoria viajan al modelo. El de Apple
+    /// Intelligence tiene un contexto chico (unos 4 000 tokens, con
+    /// instrucciones, datos del mes y respuesta), así que van los últimos.
+    static let contextLimit = 10
+    /// Y cortados: una respuesta larga no puede comerse el contexto.
+    static let contextCharacters = 280
+
+    static func lifetimeHours(_ defaults: UserDefaults = .standard) -> Int {
+        let stored = defaults.integer(forKey: lifetimeKey)
+        return lifetimeOptions.contains(stored) ? stored : defaultLifetime
+    }
+
+    /// Sólo lo de las últimas 24 horas.
+    static func pruned(_ messages: [AssistantMessage], now: Date) -> [AssistantMessage] {
+        messages.filter { now.timeIntervalSince($0.date) < memoryWindow }
+    }
+
+    /// Desde cuándo se ve el chat. Si pasaron `lifetimeHours` desde el último
+    /// mensaje a la vista, la conversación se da por terminada y la pantalla
+    /// se limpia (se cuenta desde el último mensaje, no desde el primero: así
+    /// nunca se borra a mitad de una conversación).
+    static func clearedAt(_ messages: [AssistantMessage], clearedAt: Date?,
+                          lifetimeHours: Int, now: Date) -> Date? {
+        let shown = visible(messages, clearedAt: clearedAt)
+        guard let last = shown.last,
+              now.timeIntervalSince(last.date) >= TimeInterval(lifetimeHours) * 3600 else { return clearedAt }
+        return now
+    }
+
+    static func visible(_ messages: [AssistantMessage], clearedAt: Date?) -> [AssistantMessage] {
+        guard let clearedAt else { return messages }
+        return messages.filter { $0.date > clearedAt }
+    }
+
+    /// La memoria como texto para las instrucciones del modelo, con cuánto
+    /// hace de cada mensaje.
+    static func context(_ memory: [AssistantMessage], now: Date) -> String {
+        memory.suffix(contextLimit).map { message in
+            let hours = Int(now.timeIntervalSince(message.date) / 3600)
+            let when = hours < 1 ? "hace un rato" : hours == 1 ? "hace 1 h" : "hace \(hours) h"
+            let text = message.text.count > contextCharacters
+                ? String(message.text.prefix(contextCharacters)) + "…" : message.text
+            return (message.role == .user ? "Usuario" : "Asistente") + " (" + when + "): " + text
+        }
+        .joined(separator: "\n")
+    }
+}
+
+/// La conversación con el asistente.
 @MainActor
 final class AssistantChat: ObservableObject {
 
+    /// Lo que se ve: la conversación en curso.
     @Published private(set) var messages: [AssistantMessage] = []
     @Published private(set) var isThinking = false
 
+    /// Lo que recuerda: 24 horas hacia atrás, se vea o no.
+    private var memory: [AssistantMessage] = []
+    /// Desde cuándo se limpió la pantalla.
+    private var clearedAt: Date?
+
     private let defaults: UserDefaults
-    private static let storageKey = "assistantChat"
+    /// Otra clave que la del chat del día: el formato cambió (fechas por
+    /// mensaje) y el guardado viejo sólo tenía lo de un día.
+    private static let storageKey = "assistantChat.v2"
     private var inputs: AssistantInputs?
     private var categories: [String] = []
     #if canImport(FoundationModels)
@@ -108,6 +179,8 @@ final class AssistantChat: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        // El guardado de antes (sólo el día, sin fechas por mensaje).
+        defaults.removeObject(forKey: "assistantChat")
         restore()
     }
 
@@ -131,7 +204,14 @@ final class AssistantChat: ObservableObject {
     func ask(_ question: String) async {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !isThinking, let inputs else { return }
-        messages.append(AssistantMessage(role: .user, text: trimmed))
+        // La hoja pudo quedarse abierta horas: lo viejo se limpia antes de
+        // seguir, y el modelo se vuelve a armar con la memoria al día.
+        if expire() {
+            #if canImport(FoundationModels)
+            sessionBox = nil
+            #endif
+        }
+        append(AssistantMessage(role: .user, text: trimmed))
         persist()
         isThinking = true
         defer { isThinking = false; persist() }
@@ -140,39 +220,68 @@ final class AssistantChat: ObservableObject {
         if #available(iOS 26.0, *), AssistantAI.isAvailable {
             do {
                 let reply = try await respond(to: trimmed, inputs: inputs)
-                messages.append(reply)
+                append(reply)
                 return
             } catch {
                 Diagnostics.shared.log("Asistente: \(error)")
-                messages.append(AssistantMessage(role: .assistant,
-                                                 text: "No pude responder eso ahora. Prueba a preguntarlo de otra forma."))
+                append(AssistantMessage(role: .assistant,
+                                        text: "No pude responder eso ahora. Prueba a preguntarlo de otra forma."))
                 return
             }
         }
         #endif
-        messages.append(AssistantMessage(role: .assistant,
-                                         text: "Las preguntas necesitan Apple Intelligence en este iPhone."))
+        append(AssistantMessage(role: .assistant,
+                                text: "Las preguntas necesitan Apple Intelligence en este iPhone."))
     }
 
-    // MARK: Persistencia del día
+    /// Se eligió otro plazo en la hoja: puede que lo de la vista ya venza.
+    func lifetimeChanged() {
+        if expire() { persist() }
+    }
+
+    private func append(_ message: AssistantMessage) {
+        memory.append(message)
+        messages.append(message)
+    }
+
+    /// Recorta la memoria a 24 h y limpia la vista si venció. Dice si la
+    /// vista cambió.
+    @discardableResult
+    private func expire(now: Date = Date()) -> Bool {
+        memory = AssistantChatMemory.pruned(memory, now: now)
+        clearedAt = AssistantChatMemory.clearedAt(memory, clearedAt: clearedAt,
+                                                  lifetimeHours: AssistantChatMemory.lifetimeHours(defaults),
+                                                  now: now)
+        let shown = AssistantChatMemory.visible(memory, clearedAt: clearedAt)
+        guard shown != messages else { return false }
+        messages = shown
+        return true
+    }
+
+    // MARK: Persistencia
 
     private struct Stored: Codable {
-        let day: String
         let messages: [AssistantMessage]
+        let clearedAt: Date?
     }
 
     private func restore() {
-        guard let data = defaults.data(forKey: Self.storageKey),
-              let stored = try? JSONDecoder().decode(Stored.self, from: data),
-              stored.day == AssistantBrief.dayKey(Date()) else {
-            messages = []
-            return
+        if let data = defaults.data(forKey: Self.storageKey),
+           let stored = try? JSONDecoder().decode(Stored.self, from: data) {
+            memory = stored.messages
+            clearedAt = stored.clearedAt
+        } else {
+            memory = []
+            clearedAt = nil
         }
-        messages = stored.messages
+        messages = AssistantChatMemory.visible(memory, clearedAt: clearedAt)
+        let stored = (memory.count, clearedAt)
+        expire()
+        if memory.count != stored.0 || clearedAt != stored.1 { persist() }
     }
 
     private func persist() {
-        let stored = Stored(day: AssistantBrief.dayKey(Date()), messages: messages)
+        let stored = Stored(messages: memory, clearedAt: clearedAt)
         if let data = try? JSONEncoder().encode(stored) { defaults.set(data, forKey: Self.storageKey) }
     }
 
@@ -189,11 +298,9 @@ final class AssistantChat: ObservableObject {
             DebtsTool(facts: facts),
             LimitsTool(facts: facts)
         ]
-        // La conversación del día ya guardada viaja como contexto: la sesión
-        // del modelo no sobrevive a cerrar la app.
-        let earlier = messages.dropLast().suffix(6)
-            .map { ($0.role == .user ? "Usuario: " : "Asistente: ") + $0.text }
-            .joined(separator: "\n")
+        // Lo hablado en las últimas 24 horas viaja como contexto, aunque ya no
+        // se vea: la sesión del modelo no sobrevive a cerrar la app.
+        let earlier = AssistantChatMemory.context(Array(memory.dropLast()), now: inputs.now)
         let instructions = """
         Eres el asistente de AgruPay, una app peruana de gastos personales. Respondes preguntas sobre el dinero \
         del usuario en español peruano, tuteando, en una a tres frases cortas.
@@ -201,7 +308,7 @@ final class AssistantChat: ObservableObject {
         \(AssistantBrief.tidy(facts.overview))
         Usa las herramientas para cualquier cifra que no esté arriba. Nunca inventes montos, fechas ni nombres: \
         si no lo sabes, dilo. Sólo lees datos: no puedes registrar, editar ni borrar movimientos.
-        \(earlier.isEmpty ? "" : "Conversación de hoy:\n" + earlier)
+        \(earlier.isEmpty ? "" : "Lo que hablaron en las últimas 24 horas:\n" + earlier)
         """
         let session = LanguageModelSession(tools: tools, instructions: instructions)
         sessionBox = session

@@ -180,6 +180,43 @@ final class FriendsManager {
         guard self.container == nil else { return }
         self.container = container
         loadFromCache()
+        // Lo que un amigo te comparte sólo se pedía al abrir la app en frío
+        // (o con pull-to-refresh). Realtime no cubre el hueco: en segundo
+        // plano el socket se cae y lo que cambió mientras tanto no se vuelve
+        // a mandar, así que al volver seguías viendo sus 500 aunque él ya
+        // llevara 600. Cada vuelta al primer plano se pide de nuevo.
+        foregroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.auth.isReady else { return }
+                await self.refresh()
+            }
+        }
+        backgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.persistCachesIfStale() }
+        }
+    }
+
+    private var foregroundObserver: NSObjectProtocol?
+    @ObservationIgnored private var backgroundObserver: NSObjectProtocol?
+
+    /// Lo que llegó del servidor y aún no está en la caché.
+    ///
+    /// La caché sólo sirve para pintar Amigos al instante en la próxima
+    /// apertura, así que se escribe al pasar a segundo plano y no con cada
+    /// respuesta: cada guardado en SwiftData hace que todas las `@Query` de
+    /// la app vuelvan a leer el historial, y con Realtime llegaban respuestas
+    /// cada pocos segundos —también a mitad de un deslizamiento en
+    /// Movimientos—.
+    @ObservationIgnored private var friendsCacheIsStale = false
+    @ObservationIgnored private var sharesCacheIsStale = false
+
+    private func persistCachesIfStale() {
+        if friendsCacheIsStale { friendsCacheIsStale = false; persistFriendsCache() }
+        if sharesCacheIsStale { sharesCacheIsStale = false; persistSharesCache() }
     }
 
     private func loadFromCache() {
@@ -218,10 +255,13 @@ final class FriendsManager {
         var stale = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
         for friend in friends {
             if let row = stale.removeValue(forKey: friend.id) {
-                row.displayName = friend.displayName
-                row.status = friend.status
-                row.friendSince = friend.friendSince
-                row.penguinJSON = Self.encodePenguin(friend.penguin)
+                // Sólo lo que cambió: asignar el mismo valor también cuenta
+                // como cambio para SwiftData.
+                let penguin = Self.encodePenguin(friend.penguin)
+                if row.displayName != friend.displayName { row.displayName = friend.displayName }
+                if row.status != friend.status { row.status = friend.status }
+                if row.friendSince != friend.friendSince { row.friendSince = friend.friendSince }
+                if row.penguinJSON != penguin { row.penguinJSON = penguin }
             } else {
                 let row = CachedFriend(id: friend.id, displayName: friend.displayName,
                                        status: friend.status, friendSince: friend.friendSince)
@@ -230,7 +270,12 @@ final class FriendsManager {
             }
         }
         for leftover in stale.values { context.delete(leftover) }
-        try? context.save()
+        // Sin cambios no se guarda. Cada guardado hace que todas las
+        // `@Query` de la app vuelvan a leer el historial —Movimientos y el
+        // dashboard de debajo—, y esto corre en cada recarga de amigos: al
+        // volver a la app y con cada aviso de Supabase, también a mitad de un
+        // deslizamiento.
+        if context.hasChanges { try? context.save() }
     }
 
     /// Igual que `persistFriendsCache()`, para las tres listas de compartidos
@@ -248,7 +293,7 @@ final class FriendsManager {
             }
         }
         for leftover in stale.values { context.delete(leftover) }
-        try? context.save()
+        if context.hasChanges { try? context.save() }
     }
 
     func refresh() async {
@@ -325,7 +370,7 @@ final class FriendsManager {
             }
             for index in fetched.indices { fetched[index].friendSince = since[fetched[index].id] }
             friends = fetched
-            persistFriendsCache()
+            friendsCacheIsStale = true
         } catch {
             lastErrorMessage = "No se pudieron cargar tus amigos."
         }
@@ -426,7 +471,7 @@ final class FriendsManager {
         // Sólo si al menos una de las dos llamadas trajo algo de verdad: si
         // ambas fallaron (sin red, por ejemplo), no hay nada nuevo que
         // guardar y lo de la caché sigue siendo lo último confiable.
-        if touched { persistSharesCache() }
+        if touched { sharesCacheIsStale = true }
     }
 
     private func fetchShares(query: String) async -> [FriendShareRow]? {

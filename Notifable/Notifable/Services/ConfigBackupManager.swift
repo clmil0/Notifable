@@ -227,7 +227,9 @@ final class ConfigBackupManager {
         })
 
         observers.append(center.addObserver(forName: ModelContext.didSave,
-                                            object: nil, queue: .main) { [weak self] _ in
+                                            object: nil, queue: .main) { [weak self] note in
+            // La caché de amigos no va en el respaldo (`SocialCacheSave`).
+            guard !SocialCacheSave.isCacheOnly(note) else { return }
             Task { @MainActor in
                 self?.markDirty()
             }
@@ -348,6 +350,9 @@ final class ConfigBackupManager {
         debounce?.cancel()
         debounce = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
+            // Armar el respaldo lee todo en el hilo principal: nunca a mitad
+            // de un deslizamiento (entrar a Movimientos ya cambia un ajuste).
+            await ScrollActivity.idle()
             guard !Task.isCancelled else { return }
             _ = await self?.syncIfNeeded()
         }
@@ -740,8 +745,11 @@ final class ConfigBackupManager {
 
         let quick = (try? context.fetch(FetchDescriptor<QuickExpense>())) ?? []
         let recurring = (try? context.fetch(FetchDescriptor<RecurringExpense>())) ?? []
-        let expenses = (try? context.fetch(FetchDescriptor<Expense>())) ?? []
-        let incomes = (try? context.fetch(FetchDescriptor<Income>())) ?? []
+        // Sólo lo anotado a mano: es lo único que se sube de los movimientos.
+        // Leer el historial entero para descartar casi todo eran ~200 ms del
+        // hilo principal en cada respaldo (y cualquier ajuste lo dispara).
+        let expenses = (try? context.fetch(FetchDescriptor<Expense>(predicate: #Predicate { $0.emailID == nil }))) ?? []
+        let incomes = (try? context.fetch(FetchDescriptor<Income>(predicate: #Predicate { $0.emailID == nil }))) ?? []
 
         var manual: [ManualTransactionBackup] = []
 

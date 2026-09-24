@@ -464,3 +464,52 @@ extension MoneyAccountsTests {
         #expect(Money.cents(totals.spent) == 200)
     }
 }
+
+// MARK: - Devoluciones BCP (correo real del 23/09/2026)
+
+extension MoneyAccountsTests {
+
+    /// La parte de texto plano: cada valor entre asteriscos.
+    static let bcpRefundPlain = """
+        Hola *Alejandro Gabriel,*  Se ha devuelto el monto de *S/ 2.50* a tu *cuenta BCP.*  \
+        A continuación, te brindamos los *detalles de la devolución.*   *Monto*  Total devuelto *S/ 2.50*   \
+        *Datos de la operación*  Fecha y hora *23 de setiembre de 2026 - 08:11 PM* \
+        Número de Tarjeta *************3601* Nombre del Comercio *PLIN-KAROL VILCHEZ* \
+        Número de operación *059346*    *Recuerda*
+        """
+
+    /// El HTML sin etiquetas: sin asteriscos, con espacios de sobra.
+    static let bcpRefundHTML = """
+        Hola  Alejandro Gabriel,   Se ha devuelto el monto de  S/ 2.50  a tu  cuenta BCP.   \
+        A continuación, te brindamos los  detalles de la devolución.     Monto      Total devuelto    S/ 2.50     \
+        Datos de la operación      Fecha y hora     23 de setiembre de 2026 - 08:11 PM     \
+        Número de Tarjeta    ************3601     Nombre del Comercio    PLIN-KAROL VILCHEZ     \
+        Número de operación     059346
+        """
+
+    @Test("La devolución de BCP se lee como aviso, con el comercio escrito como el Plin", arguments: [bcpRefundPlain, bcpRefundHTML])
+    func devolucionBCP(text: String) throws {
+        #expect(BBVAParser().parse(cleanText: text) == nil)
+        let refund = try #require(BCPParser().parse(cleanText: text))
+        #expect(refund.isReversal)
+        #expect(!refund.countsAsSpending)
+        #expect(Money.cents(refund.amount) == 250)
+        #expect(refund.currency == "PEN")
+        #expect(refund.cardLastDigits == "3601")
+        #expect(refund.merchant == "ANULACIÓN - YAPE - KAROL VILCHEZ")
+        #expect(refund.date == Self.day(2026, 9, 23, hour: 20, minute: 11))
+    }
+
+    @Test("Con el comercio en el aviso, se sugiere la compra de ese comercio")
+    func sugiereMismoComercio() throws {
+        let refund = try #require(BCPParser().parse(cleanText: Self.bcpRefundPlain))
+        let karol = Expense(amount: 2.5, merchant: "YAPE - KAROL VILCHEZ", date: Self.day(2026, 9, 23, hour: 19),
+                            category: "Comida", cardLastDigits: "3601")
+        let other = Expense(amount: 2.5, merchant: "YAPE - OTRA PERSONA", date: Self.day(2026, 9, 23, hour: 20),
+                            category: "Comida", cardLastDigits: "3601")
+        let result = ReversalMatcher.candidates(for: ReversalMatcher.charge(refund),
+                                                among: [karol, other].map(ReversalMatcher.charge))
+        #expect(result.suggested == karol.id, "la más cercana es otra, pero el aviso nombra a Karol")
+        #expect(Set(result.ordered) == [karol.id, other.id])
+    }
+}

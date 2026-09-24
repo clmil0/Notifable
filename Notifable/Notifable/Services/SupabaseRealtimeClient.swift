@@ -226,6 +226,11 @@ final class SupabaseRealtimeClient {
             if let topic = json["topic"] as? String {
                 let table = topic.replacingOccurrences(of: "realtime:public:", with: "")
                 joinedTables.remove(table)
+                // Supabase cierra el canal cuando caduca el token con el que
+                // se unió (una hora). Nadie volvía a llamar `subscribe`, así
+                // que los cambios de `friend_shares` dejaban de llegar en
+                // silencio. Se vuelve a unir con un token vigente.
+                rejoinLater(table: table)
             }
             return
         }
@@ -259,6 +264,15 @@ final class SupabaseRealtimeClient {
         print("SupabaseRealtimeClient: \(eventType) en \(table) — \(matching.count) oyente(s).")
         for sub in matching {
             sub.handler(change)
+        }
+    }
+
+    private func rejoinLater(table: String) {
+        guard subscriptions.contains(where: { $0.table == table }) else { return }
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, self.task != nil, !self.joinedTables.contains(table) else { return }
+            await self.joinChannel(table: table)
         }
     }
 

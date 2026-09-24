@@ -35,7 +35,10 @@ final class ShareAutoSync {
         self.container = container
 
         let center = NotificationCenter.default
-        observers.append(center.addObserver(forName: ModelContext.didSave, object: nil, queue: .main) { [weak self] _ in
+        observers.append(center.addObserver(forName: ModelContext.didSave, object: nil, queue: .main) { [weak self] note in
+            // Lo recibido de Supabase no cambia lo que compartes: reaccionar
+            // a eso era el bucle entre dos teléfonos (`SocialCacheSave`).
+            guard !SocialCacheSave.isCacheOnly(note) else { return }
             Task { @MainActor in self?.scheduleSync() }
         })
         // Al volver a la app (y al cambiar de día o de mes): puede haber
@@ -57,6 +60,7 @@ final class ShareAutoSync {
         pending?.cancel()
         pending = Task { [weak self] in
             try? await Task.sleep(for: Self.debounce)
+            await ScrollActivity.idle()   // suma el mes en el hilo principal
             guard !Task.isCancelled else { return }
             await self?.syncNow()
         }
