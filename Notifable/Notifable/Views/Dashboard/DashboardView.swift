@@ -33,10 +33,12 @@ struct DashboardView: View {
     @Query private var unclassified: [Expense]
     /// Lo marcado por cobrar: poco, y lo que dice la tarjeta de Amigos.
     @Query private var debtExpenses: [Expense]
-    /// Todos los movimientos, de cualquier mes: para el globo de movimientos
-    /// nuevos de «Historial».
-    @Query private var allExpenses: [Expense]
-    @Query private var allIncomes: [Income]
+    /// Las claves de todos los movimientos, para el globo de nuevos de
+    /// «Historial». Antes eran dos `@Query` del historial entero: se
+    /// cargaban al dibujar la cuadrícula —unos 190 ms en el hilo principal,
+    /// justo en la entrada del gráfico—. Ahora salen de la lectura que ya
+    /// hace `loadCatalog`.
+    @State private var movementKeys: Set<String> = []
 
     @StateObject private var rates = ExchangeRateService.shared
     @StateObject private var accountBook = AccountBook.shared
@@ -95,8 +97,6 @@ struct DashboardView: View {
             $0.category == unclassifiedName && !$0.isTransfer && !$0.isVoided && !$0.isReversal
         })
         _debtExpenses = Query(filter: #Predicate<Expense> { $0.isDebt && !$0.isTransfer })
-        _allExpenses = Query(filter: #Predicate<Expense> { !$0.isTransfer })
-        _allIncomes = Query(filter: #Predicate<Income> { !$0.isTransfer })
     }
 
     static func month(offset: Int) -> Period {
@@ -141,6 +141,9 @@ struct DashboardView: View {
         let all = (try? modelContext.fetch(FetchDescriptor<Expense>())) ?? []
         let allIncomes = (try? modelContext.fetch(FetchDescriptor<Income>())) ?? []
         catalog = AccountCatalog(expenses: all, incomes: allIncomes)
+        let keys = NewMovements.keys(expenses: all, incomes: allIncomes)
+        newMovements.baselineIfNeeded(keys)
+        if keys != movementKeys { movementKeys = keys }
         loadMonthExtras(all)
         if let key = filter.selection, !accounts.contains(where: { $0.key == key }) {
             filter.selection = nil
@@ -202,9 +205,6 @@ struct DashboardView: View {
             } action: { _, offset in
                 progress.update(offset)
             }
-            .onScrollPhaseChange { _, phase in
-                if progress.isScrolling != phase.isScrolling { progress.isScrolling = phase.isScrolling }
-            }
 
             header
         }
@@ -214,16 +214,10 @@ struct DashboardView: View {
             // seguida, así que releer el historial —y armar el resumen del
             // asistente— va después: hecho en medio, trababa la animación.
             let firstLoad = catalog == nil
-            if firstLoad {
-                loadCatalog()
-                newMovements.baselineIfNeeded(NewMovements.keys(expenses: allExpenses, incomes: allIncomes))
-            }
+            if firstLoad { loadCatalog() }
             try? await Task.sleep(for: .milliseconds(1500))
             guard !Task.isCancelled else { return }
-            if !firstLoad {
-                loadCatalog()
-                newMovements.baselineIfNeeded(NewMovements.keys(expenses: allExpenses, incomes: allIncomes))
-            }
+            if !firstLoad { loadCatalog() }
             refreshBrief()
         }
         .onChange(of: self.expenses.count) { _, _ in
@@ -630,8 +624,7 @@ struct DashboardView: View {
             SpendBarChart(columns: chart.columns,
                           selected: Binding(get: { selectedColumn ?? chart.defaultSelection },
                                             set: { selectedColumn = $0 }),
-                          isReady: catalog != nil,
-                          scroll: progress)
+                          isReady: catalog != nil)
         }
         .padding(.horizontal, 2)
     }
@@ -1029,7 +1022,7 @@ struct DashboardView: View {
             + incomes.filter { !$0.isTransfer && $0.date >= range.start && $0.date < range.end }.count
         let hasPending = !unclassified.isEmpty
 
-        let newCount = newMovements.unseen(in: NewMovements.keys(expenses: allExpenses, incomes: allIncomes)).count
+        let newCount = newMovements.unseen(in: movementKeys).count
         let historial = tile(title: "Historial", badge: newCount, action: { onOpen(.movements) }) {
             bigNumber("\(movementCount)", caption: movementCount == 1 ? "movimiento este mes" : "movimientos este mes")
         }

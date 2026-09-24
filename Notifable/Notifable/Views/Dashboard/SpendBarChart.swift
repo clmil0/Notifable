@@ -2,10 +2,8 @@ import SwiftUI
 
 /// El gráfico del dashboard (`2d` de «Resumen Gráficas»): una barra por
 /// periodo en degradado del color del gasto, con una línea clara en la
-/// superficie. Al entrar cada barra se llena con un rebote corto; en la
-/// elegida suben burbujas que, al llegar arriba, revientan en un anillo. Un
-/// anillo sólo aparece cuando una burbuja llega: al elegir una barra no hay
-/// nada arriba hasta que la primera termina de subir.
+/// superficie. Al entrar cada barra se llena con un rebote corto. Las
+/// burbujas de la barra elegida se quitaron: eran lo que trababa el scroll.
 ///
 /// «Semana» son los últimos siete días, uno por barra, terminando hoy. «Mes»
 /// son las últimas seis semanas contando la actual, una por barra: treinta
@@ -33,8 +31,6 @@ struct SpendBarChart: View {
     /// animación la mueve el hilo principal fotograma a fotograma, y si
     /// arranca mientras se lee la base, se traba.
     var isReady: Bool = true
-    /// Para detener las burbujas mientras se desliza la pantalla.
-    var scroll: ScrollProgress?
 
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -43,15 +39,9 @@ struct SpendBarChart: View {
     /// Las barras ya llenas; vuelve a `false` para repetir la entrada cuando
     /// cambian los periodos (Semana ↔ Mes, otro mes).
     @State private var filled = false
-    /// Cuándo empezó la última entrada: las burbujas esperan a que la barra
-    /// se asiente.
-    @State private var entrance = Date.distantPast
-    /// Cuándo se eligió la barra actual: las burbujas cuentan desde aquí.
-    @State private var selectedAt = Date.distantPast
 
     private static let barArea: CGFloat = 112
     private static let labelRoom: CGFloat = 22
-    private static let settle: TimeInterval = 1.1
     private static let stagger: TimeInterval = 0.07
 
     private var maximum: Double { columns.map(\.total).max() ?? 0 }
@@ -67,14 +57,12 @@ struct SpendBarChart: View {
             }
         }
         .frame(height: Self.barArea + Self.labelRoom + 18, alignment: .bottom)
-        .onChange(of: selected) { _, _ in selectedAt = Date() }
         .task(id: periodsKey) {
             guard isReady else { filled = false; return }
             guard !reduceMotion else { filled = true; return }
             var reset = Transaction()
             reset.disablesAnimations = true
             withTransaction(reset) { filled = false }
-            entrance = Date()
             try? await Task.sleep(for: .milliseconds(16))
             filled = true
         }
@@ -100,17 +88,6 @@ struct SpendBarChart: View {
                                             .delay(Double(index) * Self.stagger) : nil,
                                value: filled)
                     .clipShape(OpenTopClip())
-                    .overlay(alignment: .bottom) {
-                        if filled && isSelected && hasSpend && barHeight >= 10 && !reduceMotion {
-                            BubbleBurst(seed: column.id,
-                                        barHeight: barHeight,
-                                        ring: palette.expense.mixed(with: .white, amount: 0.3, scheme: scheme),
-                                        start: max(selectedAt, entrance + Self.settle + Double(index) * Self.stagger),
-                                        scroll: scroll)
-                                .frame(height: barHeight + BubbleBurst.headroom)
-                                .allowsHitTesting(false)
-                        }
-                    }
             }
             .overlay(alignment: .top) {
                 if isSelected {
@@ -171,93 +148,6 @@ struct SpendBarChart: View {
     private func height(_ value: Double) -> CGFloat {
         guard maximum > 0 else { return 4 }
         return max(4, Self.barArea * CGFloat(value / maximum))
-    }
-}
-
-/// Las burbujas de la barra elegida: suben desde el fondo y, al tocar la
-/// superficie, revientan en un anillo que se abre. El tiempo cuenta desde que
-/// la barra fue elegida (o desde que terminó de asentarse), así que nada se
-/// dibuja arriba antes de que una burbuja llegue.
-private struct BubbleBurst: View {
-    /// Lugar sobre la barra para que el anillo se abra fuera de ella.
-    static let headroom: CGFloat = 14
-
-    let seed: Int
-    let barHeight: CGFloat
-    let ring: Color
-    let start: Date
-    let scroll: ScrollProgress?
-
-    private static let count = 4
-    /// Parte del ciclo en que la burbuja sube; el resto es el anillo.
-    private static let riseShare = 0.86
-
-    var body: some View {
-        // A 60 fps como mucho —las burbujas no ganan nada a 120— y en pausa
-        // mientras se desliza la pantalla.
-        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: scroll?.isScrolling ?? false)) { timeline in
-            Canvas { context, size in
-                draw(in: &context, size: size, elapsed: timeline.date.timeIntervalSince(start))
-            }
-        }
-    }
-
-    private func draw(in context: inout GraphicsContext, size: CGSize, elapsed: TimeInterval) {
-        guard elapsed > 0 else { return }
-        let top = Self.headroom
-        let barRect = CGRect(x: 0, y: top, width: size.width, height: barHeight)
-
-        for n in 0..<Self.count {
-            // En barras bajas las burbujas son más chicas y suben más rápido.
-            let diameter = min(4 + Self.random(seed, n) * 3, max(3, barHeight * 0.35))
-            let x = size.width * (0.12 + Self.random(seed, n + 9) * 0.64) + diameter / 2
-            let duration = (1.8 + Self.random(seed, n + 3) * 1.8) * max(0.5, (barHeight / 112).squareRoot())
-            // Salidas escalonadas: la primera parte en cuanto se elige la
-            // barra, así siempre se ven burbujas desde el primer momento.
-            let offset = (Double(n) + Self.random(seed, n + 5) * 0.5) / Double(Self.count) * duration
-            let local = elapsed - offset
-            guard local >= 0 else { continue }   // esta burbuja aún no sale
-            let phase = local.truncatingRemainder(dividingBy: duration) / duration
-
-            if phase < Self.riseShare {
-                // Sube con aceleración, desde el fondo de la barra hasta que su centro toca la superficie.
-                let q = phase / Self.riseShare
-                let eased = q * q
-                let y = barRect.maxY - diameter / 2 - (barHeight - diameter / 2) * eased
-                let wobble = sin(q * .pi) * (Self.random(seed, n + 7) - 0.5) * 5
-                let opacity = 0.85 * min(1, q / 0.14)
-                let rect = CGRect(x: x + wobble - diameter / 2, y: y - diameter / 2,
-                                  width: diameter, height: diameter)
-
-                context.drawLayer { layer in
-                    layer.clip(to: Path(roundedRect: barRect, cornerRadius: 6, style: .continuous))
-                    layer.opacity = opacity
-                    let circle = Path(ellipseIn: rect)
-                    layer.fill(circle, with: .radialGradient(
-                        Gradient(stops: [.init(color: .white.opacity(0.95), location: 0),
-                                         .init(color: .white.opacity(0.95), location: 0.16),
-                                         .init(color: .white.opacity(0.28), location: 0.38),
-                                         .init(color: .white.opacity(0.08), location: 0.72)]),
-                        center: CGPoint(x: rect.minX + rect.width * 0.34, y: rect.minY + rect.height * 0.30),
-                        startRadius: 0, endRadius: diameter * 0.75))
-                    layer.stroke(circle, with: .color(.white.opacity(0.6)), lineWidth: 0.75)
-                }
-            } else {
-                // Revienta: un anillo que se abre y se apaga sobre la superficie.
-                let q = (phase - Self.riseShare) / (1 - Self.riseShare)
-                let scale = 0.4 + 1.4 * q
-                let side = (diameter + 6) * scale
-                let opacity = 0.9 * (q < 0.2 ? q / 0.2 : (1 - q) / 0.8)
-                let rect = CGRect(x: x - side / 2, y: top - side / 2, width: side, height: side)
-                context.stroke(Path(ellipseIn: rect), with: .color(ring.opacity(opacity)), lineWidth: 1)
-            }
-        }
-    }
-
-    /// Pseudoaleatorio fijo por barra y burbuja, como en el diseño.
-    private static func random(_ i: Int, _ n: Int) -> Double {
-        let x = sin(Double(n) * 127.1 + Double(i) * 311.7) * 43758.5453
-        return x - floor(x)
     }
 }
 

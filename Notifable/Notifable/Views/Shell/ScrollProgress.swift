@@ -14,10 +14,6 @@ final class ScrollProgress {
     /// debe encender el blur del header).
     var offset: CGFloat = 0
 
-    /// Se está deslizando: las burbujas del gráfico se detienen mientras
-    /// tanto, para dejarle el fotograma entero al scroll.
-    var isScrolling: Bool = false
-
     /// Más allá de esto el header ya está en su estado final: seguir
     /// publicando el desplazamiento sólo invalidaba vistas en cada fotograma.
     private static let publishLimit: CGFloat = 64
@@ -29,6 +25,5 @@ final class ScrollProgress {
 
     func reset() {
         offset = 0
-        isScrolling = false
     }
 }
