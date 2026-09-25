@@ -165,12 +165,15 @@ struct ShellSegment<Item: Hashable>: View {
     }
 
     /// Sobre el gris, el texto. Sobre un acento, oscuro si el acento es claro
-    /// (pasteles, naranja) y blanco si es oscuro (azul, carbón, morado).
+    /// (pasteles, naranja) y blanco si es oscuro (azul, carbón, morado). En
+    /// tema claro, blanco salvo en un acento casi blanco: ahí el negro sobre
+    /// naranja se leía como texto sin estilo.
     private var selectedText: Color {
         guard let tint else { return palette.label }
         let (r, g, b) = tint.rgb(scheme)
         let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
-        return luminance > 0.55 ? Palette(.dark).background : .white
+        let threshold = scheme == .dark ? 0.55 : 0.8
+        return luminance > threshold ? Palette(.dark).background : .white
     }
 }
 

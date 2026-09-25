@@ -135,7 +135,11 @@ struct AccountCarousel: View {
             .clipShape(shape)
             .overlay(shape.stroke(palette.hairline, lineWidth: 0.5))
             .overlay {
-                if selected { shape.strokeBorder(palette.label, lineWidth: 1.5) }
+                // En claro, el negro de `label` se leía como un borde de
+                // error: ahí la selección va en el acento.
+                if selected {
+                    shape.strokeBorder(scheme == .dark ? palette.label : accent.color, lineWidth: 1.5)
+                }
             }
             .contentShape(shape)
         }

@@ -58,6 +58,18 @@ final class Expense {
     /// Compra anulada por el banco: se ve tachada y no suma en ningún total.
     var isVoided: Bool = false
 
+    /// El pago se dividió en partes (`ExpenseSplit`): deja de sumar y queda
+    /// como referencia; cuentan sus partes, cada una en su categoría. Se
+    /// deduce de que existan partes que lo apunten (`ExpenseSplit.reconcile`),
+    /// así que sobrevive a releer el correo sin anotarlo en `ExpenseEditStore`.
+    var isSplit: Bool = false
+    /// Parte de un pago dividido: la llave (`TransactionKey`) de ese pago. Las
+    /// partes se crean a mano —sin correo—, así que se respaldan enteras y
+    /// vuelven a encontrar su pago aunque éste se rearme con otro `UUID`.
+    var splitOf: String?
+    /// Orden de la parte dentro de su pago («Parte 1», «Parte 2»…).
+    var splitIndex: Int = 0
+
     /// Soles por 1 USD el día del movimiento.
     ///
     /// Sin esto, `ExchangeRateService.usdToPenRate` —un valor vivo— se aplicaba a
@@ -165,6 +177,10 @@ extension Expense {
             }
         }
         let wasDebt = isDebt
+        // Sin su pago, las partes quedarían sumando solas.
+        if isSplit {
+            for part in ExpenseSplit.parts(of: self, in: modelContext) { modelContext.delete(part) }
+        }
         modelContext.delete(self)
         try? modelContext.save()
         if wasDebt { Self.refreshDebtNotification(in: modelContext) }

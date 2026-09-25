@@ -30,6 +30,9 @@ struct ExpenseDetailsView: View {
     @State private var showingDeleteConfirmation = false
     @State private var showingTagPicker = false
     @State private var showingRecurrence = false
+    @State private var splitEditorParent: Expense?
+    @State private var showingUndoSplit = false
+    @State private var focusedPart: Expense?
     @State private var editingRule: RecurringExpense?
     @State private var recurrence = RecurrenceDraft()
     @Query private var recurringRules: [RecurringExpense]
@@ -65,6 +68,7 @@ struct ExpenseDetailsView: View {
                     header
                     if expense.isVoided { voidedBanner }
                     foreignPaymentsWarning
+                    if let split = splitContext { splitCard(split) }
                     properties
 
                     if showsPayments {
@@ -72,7 +76,18 @@ struct ExpenseDetailsView: View {
                             .transition(.opacity)
                     }
 
-                    deleteButton
+                    if splitContext == nil, ExpenseSplit.canSplit(expense) {
+                        splitEntryRow
+                    }
+
+                    if splitContext != nil {
+                        undoSplitButton
+                    }
+                    // Una parte no se borra suelta: las demás dejarían de
+                    // cuadrar con el pago.
+                    if expense.splitOf == nil {
+                        deleteButton
+                    }
 
                     Spacer(minLength: 24)
                 }
@@ -145,6 +160,14 @@ struct ExpenseDetailsView: View {
             .sheet(isPresented: $showingReminder) {
                 ReminderComposerSheet(initialDebt: expense)
             }
+            .sheet(item: $splitEditorParent) { SplitExpenseSheet(parent: $0) }
+            .sheet(item: $focusedPart) { ExpenseDetailsView(expense: $0) }
+            .alert("¿Deshacer la división?", isPresented: $showingUndoSplit) {
+                Button("Cancelar", role: .cancel) {}
+                Button("Deshacer", role: .destructive) { undoSplit() }
+            } message: {
+                Text("Se borran sus partes y el pago vuelve a contar entero en su categoría.")
+            }
             .alert("¿Eliminar movimiento?", isPresented: $showingDeleteConfirmation) {
                 Button("Cancelar", role: .cancel) {}
                 Button("Eliminar", role: .destructive) { delete() }
@@ -168,9 +191,7 @@ struct ExpenseDetailsView: View {
             // cuatro categorías fijas, así que una categoría creada por el
             // usuario salía con una bolsa verde aquí y con su ícono real en la
             // lista de la que venías.
-            MovementIcon(icon: MovementStyle.icon(for: expense),
-                         color: MovementStyle.color(for: expense, accent: themeColor, scheme: colorScheme),
-                         size: 56)
+            headerIcon
                 .padding(.bottom, 4)
 
             Text("–" + Money.format(expense.amount, currency: expense.currency))
@@ -190,6 +211,32 @@ struct ExpenseDetailsView: View {
                 .foregroundStyle(palette.secondaryLabel)
         }
         .padding(.horizontal, 16)
+    }
+
+    /// Una parte lleva el ícono de su categoría con el logo del canal pegado
+    /// (`2d`): es un gasto propio, pero salió de ese pago.
+    @ViewBuilder
+    private var headerIcon: some View {
+        if expense.splitOf != nil {
+            ZStack(alignment: .bottomTrailing) {
+                MovementIcon(icon: CategoryStyle.icon(for: expense.category),
+                             color: CategoryStyle.color(for: expense.category, accent: themeColor),
+                             size: 56)
+                if let logo = SplitStyle.channelLogo(for: expense) {
+                    Image(logo)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 22, height: 22)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(palette.background, lineWidth: 2.5))
+                        .offset(x: 5, y: 5)
+                }
+            }
+        } else {
+            MovementIcon(icon: MovementStyle.icon(for: expense),
+                         color: MovementStyle.color(for: expense, accent: themeColor, scheme: colorScheme),
+                         size: 56)
+        }
     }
 
     /// «Hoy, 17 set · 14:20 · BCP».
@@ -253,25 +300,29 @@ struct ExpenseDetailsView: View {
 
     private var properties: some View {
         VStack(spacing: 0) {
-            Button { showingCategoryPicker = true } label: {
-                propertyRow(title: "Categoría", icon: "square.grid.2x2") {
-                    HStack(spacing: 6) {
-                        Text(expense.category)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(accent.onSurface(colorScheme))
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(palette.secondaryLabel)
+            // Un pago dividido no tiene categoría ni etiquetas propias: las
+            // tienen sus partes. Queda lo que describe el pago.
+            if !expense.isSplit {
+                Button { showingCategoryPicker = true } label: {
+                    propertyRow(title: "Categoría", icon: "square.grid.2x2") {
+                        HStack(spacing: 6) {
+                            Text(expense.category)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(accent.onSurface(colorScheme))
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(palette.secondaryLabel)
+                        }
                     }
                 }
+                .buttonStyle(.plain)
+
+                divider
+
+                tagsRow
+
+                divider
             }
-            .buttonStyle(.plain)
-
-            divider
-
-            tagsRow
-
-            divider
 
             Button { showingEditor = true } label: {
                 propertyRow(title: "Descripción", icon: "text.alignleft") {
@@ -294,11 +345,11 @@ struct ExpenseDetailsView: View {
                     .foregroundStyle(palette.secondaryLabel)
             }
 
-            divider
-
             // La moneda sólo cuando no es soles: en soles es lo esperado y la
             // fila no dice nada.
             if expense.currency != "PEN" {
+                divider
+
                 propertyRow(title: "Moneda", icon: "dollarsign.circle") {
                     Text("Dólares (USD)")
                         .foregroundStyle(palette.secondaryLabel)
@@ -313,42 +364,49 @@ struct ExpenseDetailsView: View {
                             .foregroundStyle(palette.secondaryLabel)
                     }
                 }
-
-                divider
             }
 
-            Button(action: openRecurrence) {
-                propertyRow(title: "Repetir", icon: "arrow.triangle.2.circlepath") {
-                    HStack(spacing: 6) {
-                        Text(recurrenceLabel)
-                            .foregroundStyle(existingRule == nil ? palette.secondaryLabel
-                                                                 : accent.onSurface(colorScheme))
-                            .lineLimit(1)
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(palette.secondaryLabel)
+            // Repetir y «Por cobrar» son de un gasto: un pago dividido ya no
+            // lo es, lo son sus partes. Y una parte no se repite sola: la regla
+            // iría por el comercio, que es el del pago entero.
+            if !expense.isSplit && expense.splitOf == nil {
+                divider
+
+                Button(action: openRecurrence) {
+                    propertyRow(title: "Repetir", icon: "arrow.triangle.2.circlepath") {
+                        HStack(spacing: 6) {
+                            Text(recurrenceLabel)
+                                .foregroundStyle(existingRule == nil ? palette.secondaryLabel
+                                                                     : accent.onSurface(colorScheme))
+                                .lineLimit(1)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(palette.secondaryLabel)
+                        }
                     }
                 }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
 
-            divider
+            if !expense.isSplit {
+                divider
 
-            // «Por cobrar» baja de la fila de botones a una fila más: sigue a
-            // un toque, pero ya no compite en tamaño con los datos.
-            Toggle(isOn: Binding(get: { expense.isDebt }, set: { _ in toggleDebt() })) {
-                HStack(spacing: 12) {
-                    Image(systemName: "exclamationmark.circle")
-                        .font(.system(size: 15))
-                        .foregroundStyle(palette.secondaryLabel)
-                        .frame(width: 20)
-                    Text("Por cobrar")
-                        .foregroundStyle(palette.label)
+                // «Por cobrar» baja de la fila de botones a una fila más: sigue a
+                // un toque, pero ya no compite en tamaño con los datos.
+                Toggle(isOn: Binding(get: { expense.isDebt }, set: { _ in toggleDebt() })) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.circle")
+                            .font(.system(size: 15))
+                            .foregroundStyle(palette.secondaryLabel)
+                            .frame(width: 20)
+                        Text("Por cobrar")
+                            .foregroundStyle(palette.label)
+                    }
                 }
+                .tint(palette.warning)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
             }
-            .tint(palette.warning)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
         }
         .background(palette.surface)
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -357,6 +415,183 @@ struct ExpenseDetailsView: View {
                 .stroke(palette.hairline, lineWidth: 0.5)
         )
         .padding(.horizontal, 16)
+    }
+
+    // MARK: - División
+
+    /// El pago y sus partes, cuando este movimiento es uno u otro.
+    private struct SplitContext {
+        let parent: Expense?
+        let parts: [Expense]
+    }
+
+    private var splitContext: SplitContext? {
+        if expense.isSplit {
+            let parts = ExpenseSplit.parts(of: expense, among: allExpenses)
+            return parts.isEmpty ? nil : SplitContext(parent: expense, parts: parts)
+        }
+        guard let key = expense.splitOf else { return nil }
+        let siblings = allExpenses.filter { $0.splitOf == key }
+            .sorted { $0.splitIndex < $1.splitIndex }
+        return SplitContext(parent: ExpenseSplit.parent(of: expense, among: allExpenses), parts: siblings)
+    }
+
+    /// `2a`: la entrada, debajo de los datos y antes de borrar.
+    private var splitEntryRow: some View {
+        Button { splitEditorParent = expense } label: {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(themeColor.opacity(0.12))
+                    .frame(width: 32, height: 32)
+                    .overlay(
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(themeColor)
+                    )
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Dividir gasto")
+                        .foregroundStyle(palette.label)
+                    Text("Sepáralo en lo que realmente fue")
+                        .font(.system(size: 13))
+                        .foregroundStyle(palette.secondaryLabel)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .surfaceCard(radius: 22, padding: 0)
+        .padding(.horizontal, 16)
+    }
+
+    /// `2d`: de qué pago sale, la barra con esta parte encendida y la lista de
+    /// hermanas. En el pago dividido, la misma tarjeta sin «ESTA».
+    private func splitCard(_ split: SplitContext) -> some View {
+        let isPart = expense.splitOf != nil
+        let myIndex = split.parts.firstIndex { $0.id == expense.id }
+        let total = split.parent?.amount ?? Money.sum(split.parts) { $0.amount }
+        let currency = split.parent?.currency ?? expense.currency
+
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.triangle.branch")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(themeColor)
+                Text(splitTitle(split, index: myIndex))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(palette.label)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text("de " + Money.format(total, currency: currency))
+                    .font(.system(size: 13))
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+
+            SplitBar(segments: split.parts.map {
+                ($0.amount,
+                 CategoryStyle.color(for: $0.category, accent: themeColor),
+                 !isPart || $0.id == expense.id ? 1 : 0.35)
+            }, total: total, height: 8)
+
+            VStack(spacing: 0) {
+                ForEach(Array(split.parts.enumerated()), id: \.element.id) { index, part in
+                    let isMe = part.id == expense.id
+                    Button {
+                        // Desde el pago se puede abrir cada parte; desde una
+                        // parte, sus hermanas se ven aquí mismo.
+                        if !isPart { focusedPart = part }
+                    } label: {
+                        HStack(spacing: 10) {
+                            SplitCategoryIcon(category: part.category,
+                                              color: CategoryStyle.color(for: part.category, accent: themeColor),
+                                              size: 24)
+                            Text(part.category)
+                                .font(.system(size: 14, weight: isMe ? .semibold : .regular))
+                                .foregroundStyle(palette.label)
+                                .lineLimit(1)
+                            if isMe {
+                                Text("ESTA")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(accent.onSurface(colorScheme))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(themeColor.opacity(0.12),
+                                                in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            }
+                            Spacer(minLength: 8)
+                            Text(Money.format(part.amount, currency: part.currency))
+                                .font(.system(size: 14, weight: .semibold))
+                                .monospacedDigit()
+                                .foregroundStyle(palette.label)
+                        }
+                        .padding(.vertical, 7)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .overlay(alignment: .top) {
+                        if index > 0 {
+                            Rectangle().fill(palette.separator).frame(height: 0.5)
+                        }
+                    }
+                }
+            }
+
+            if let parent = split.parent {
+                Button { splitEditorParent = parent } label: {
+                    Label("Editar división", systemImage: "slider.horizontal.3")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(accent.onSurface(colorScheme))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
+                        .background(themeColor.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .surfaceCard(radius: 22)
+        .padding(.horizontal, 16)
+    }
+
+    /// «Parte 1 de 2 de un Yape» en una parte; «Dividido en 2» en el pago.
+    private func splitTitle(_ split: SplitContext, index: Int?) -> String {
+        guard expense.splitOf != nil else { return "Dividido en \(split.parts.count)" }
+        let position = index.map { "Parte \($0 + 1) de \(split.parts.count)" } ?? "Parte"
+        // «de un Yape»; con tarjeta, «de un pago»: «de un •••• 8156» no se lee.
+        let channel = SplitStyle.channelName(for: expense).map { " de un " + $0 } ?? " de un pago"
+        return position + channel
+    }
+
+    private var undoSplitButton: some View {
+        Button { showingUndoSplit = true } label: {
+            Label("Deshacer división", systemImage: "arrow.uturn.backward")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(palette.negative)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func undoSplit() {
+        guard let split = splitContext else { return }
+        let isPart = expense.splitOf != nil
+        if let parent = split.parent {
+            ExpenseSplit.undo(parent, in: modelContext)
+        } else {
+            // El pago todavía no se releyó del correo: se borran las partes
+            // igual, y al volver llegará sin dividir.
+            for part in split.parts { modelContext.delete(part) }
+            try? modelContext.save()
+        }
+        // Esta ficha era de una parte que ya no existe.
+        if isPart { dismiss() }
     }
 
     // MARK: - Repetir
@@ -413,6 +648,7 @@ struct ExpenseDetailsView: View {
     }
 
     private var origin: String {
+        if expense.splitOf != nil { return "División de un pago" }
         guard expense.emailID != nil else { return "Manual" }
         if let card = expense.cardLastDigits { return "Correo · •••• " + card }
         return "Correo"
@@ -662,15 +898,27 @@ struct EditExpenseSheet: View {
     @State private var date = Date()
     @State private var notesText = ""
 
+    private var isInSplit: Bool { expense.isSplit || expense.splitOf != nil }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("Monto") {
+                Section {
                     HStack {
                         Text(Money.symbol(for: expense.currency))
                             .foregroundStyle(.secondary)
                         TextField("0.00", text: $amountText)
                             .keyboardType(.decimalPad)
+                            .disabled(isInSplit)
+                            .foregroundStyle(isInSplit ? .secondary : .primary)
+                    }
+                } header: {
+                    Text("Monto")
+                } footer: {
+                    // Las partes suman el pago al céntimo: cambiar un monto
+                    // suelto rompería la cuenta.
+                    if isInSplit {
+                        Text("Está dividido. Cambia los montos desde «Editar división».")
                     }
                 }
                 Section("Comercio") {
@@ -720,9 +968,10 @@ struct EditExpenseSheet: View {
         let originalMerchant = expense.merchant
         let originalDate = expense.date
         let originalNotes = expense.notes
+        let originalKey = TransactionKey.key(for: expense)
 
         let cleaned = amountText.replacingOccurrences(of: ",", with: ".")
-        if let value = Double(cleaned), value > 0 {
+        if !isInSplit, let value = Double(cleaned), value > 0 {
             // Céntimos enteros, igual que en el init del modelo.
             expense.amount = Money.normalized(value)
         }
@@ -740,6 +989,9 @@ struct EditExpenseSheet: View {
                                 // necesita un valor no-nulo para registrarse.
                                 notes: expense.notes != originalNotes ? (expense.notes ?? "") : nil)
         try? modelContext.save()
+        if expense.isSplit {
+            ExpenseSplit.rekey(from: originalKey, to: TransactionKey.key(for: expense), in: modelContext)
+        }
         dismiss()
     }
 }

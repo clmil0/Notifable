@@ -33,6 +33,10 @@ struct MovementsView: View {
     @State private var selectedExpense: Expense?
     @State private var selectedIncome: Income?
     @State private var expenseToCategorize: Expense?
+    @State private var splitting: Expense?
+    /// Pagos divididos que el usuario plegó. Abiertos por defecto: la división
+    /// es lo que se quiere ver.
+    @State private var collapsedSplits: Set<UUID> = []
     @State private var showsAccounts = false
     /// Los movimientos del correo que no habías visto: se resaltan dos
     /// segundos al entrar y quedan como vistos.
@@ -70,6 +74,10 @@ struct MovementsView: View {
     ///   era volver a ordenar el historial entero en cada pasada del cuerpo.
     ///
     /// Los traslados entre tus cuentas no están: no son gasto ni ingreso.
+    ///
+    /// Las partes de un pago dividido tampoco: se dibujan bajo su pago
+    /// (`SplitGroupRows`). Sólo si el pago está en la lista —si aún no se
+    /// releyó del correo, la parte se ve suelta en vez de desaparecer—.
     private func getSource() -> [TransactionItem] {
         switch kind {
         case .ingresos:
@@ -79,7 +87,12 @@ struct MovementsView: View {
                 (e.isDebt && !e.isTransfer && Money.cents(Accounting.outstanding(of: e)) > 0) ? .expense(e) : nil
             }
         case .gastos:
-            return expenses.compactMap { $0.isTransfer ? nil : .expense($0) }
+            let grouped = Set(expenses.lazy.filter(\.isSplit).flatMap(TransactionKey.lookupKeys))
+            return expenses.compactMap { e in
+                if e.isTransfer { return nil }
+                if let key = e.splitOf, grouped.contains(key) { return nil }
+                return .expense(e)
+            }
         }
     }
 
@@ -125,6 +138,7 @@ struct MovementsView: View {
         let items = self.filterItems(source, catalog: catalog)
         let visible = Array(items.prefix(visibleCount))
         let buckets = groups(from: visible)
+        let splitParts = ExpenseSplit.partsByParent(expenses)
 
         TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 0) {
@@ -177,7 +191,7 @@ struct MovementsView: View {
                     // todas las filas de golpe se notaba al deslizar.
                     LazyVStack(spacing: 20) {
                         ForEach(buckets) { bucket in
-                            dayBlock(bucket)
+                            dayBlock(bucket, splitParts: splitParts)
                         }
                     }
                     .padding(.bottom, 20)
@@ -216,6 +230,7 @@ struct MovementsView: View {
         }
         .sheet(item: $selectedExpense) { ExpenseDetailsView(expense: $0) }
         .sheet(item: $selectedIncome) { IncomeDetailsView(income: $0) }
+        .sheet(item: $splitting) { SplitExpenseSheet(parent: $0) }
         .sheet(item: $expenseToCategorize) { expense in
             AssignCategorySheet(context: .expense(expense), history: expenses) { newCategory, createRule in
                 expense.category = newCategory
@@ -296,7 +311,7 @@ struct MovementsView: View {
 
     // MARK: - Lista
 
-    private func dayBlock(_ bucket: DayBucket) -> some View {
+    private func dayBlock(_ bucket: DayBucket, splitParts: [String: [Expense]]) -> some View {
         VStack(spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(MovementDay.shortLabel(for: bucket.day))
@@ -305,7 +320,7 @@ struct MovementsView: View {
 
                 Spacer()
 
-                Text(dayTotal(bucket))
+                Text(dayTotal(bucket, splitParts: splitParts))
                     .font(.system(size: 13.5, weight: .semibold))
                     .monospacedDigit()
                     .foregroundStyle(palette.secondaryLabel)
@@ -317,6 +332,15 @@ struct MovementsView: View {
                     let isNew = NewMovements.key(item).map(highlighted.contains) == true
                     Group {
                         switch item {
+                        case .expense(let expense) where expense.isSplit
+                            && !ExpenseSplit.parts(of: expense, in: splitParts).isEmpty:
+                            SplitGroupRows(parent: expense,
+                                           parts: ExpenseSplit.parts(of: expense, in: splitParts),
+                                           isExpanded: !collapsedSplits.contains(expense.id),
+                                           onToggle: { toggleSplit(expense) },
+                                           onOpenPart: { selectedExpense = $0 },
+                                           onOpenParent: { selectedExpense = expense },
+                                           onEditSplit: { splitting = expense })
                         case .expense(let expense):
                             MovementRow(expense: expense,
                                         showsTime: true,
@@ -334,7 +358,17 @@ struct MovementsView: View {
         }
     }
 
-    private func dayTotal(_ bucket: DayBucket) -> String {
+    private func toggleSplit(_ parent: Expense) {
+        withAnimation(.snappy(duration: 0.25)) {
+            if collapsedSplits.contains(parent.id) {
+                collapsedSplits.remove(parent.id)
+            } else {
+                collapsedSplits.insert(parent.id)
+            }
+        }
+    }
+
+    private func dayTotal(_ bucket: DayBucket, splitParts: [String: [Expense]]) -> String {
         if kind == .porCobrar {
             let total = Money.sum(bucket.items.compactMap { item -> Double? in
                 guard case .expense(let e) = item else { return nil }
@@ -349,10 +383,11 @@ struct MovementsView: View {
             })
             return "+" + Money.format(total)
         }
-        let total = Money.sum(bucket.items.compactMap { item -> Double? in
-            guard case .expense(let e) = item else { return nil }
-            return Accounting.netCostInPEN(e, fallbackRate: rate)
-        })
+        // Un pago dividido cuesta cero; lo que suma son sus partes.
+        let total = Money.sum(bucket.items.flatMap { item -> [Expense] in
+            guard case .expense(let e) = item else { return [] }
+            return e.isSplit ? ExpenseSplit.parts(of: e, in: splitParts) : [e]
+        }) { Accounting.netCostInPEN($0, fallbackRate: rate) }
         return "–" + Money.format(total)
     }
 

@@ -84,12 +84,14 @@ struct AssignCategoryContext: Equatable, Identifiable {
     }
 }
 
-/// `6a` — Asignar categoría, con el saldo del límite a la vista.
+/// `1a` — Asignar categoría: una sola columna, elegir y confirmar con el botón.
 ///
-/// Las tres piezas que cambian la decisión están en la misma pantalla: la
-/// sugerencia del motor como acción de un toque, el saldo del límite **dentro**
-/// de cada celda —asignar es el único momento en que ese dato cambia algo— y la
-/// regla opcional para que el comercio no vuelva a preguntar.
+/// Sin tarjeta de sugerencia y sin buscador. Las categorías van por uso, de
+/// más a menos; la sugerida se queda **en su lugar** dentro de la lista,
+/// resaltada con el acento y el rayo, y llega ya marcada. Cada fila lleva el
+/// saldo de su límite —asignar es el único momento en que ese dato cambia
+/// algo— y «Nueva categoría» cierra la lista. Al pie, la regla opcional para
+/// que el comercio no vuelva a preguntar.
 struct AssignCategorySheet: View {
 
     let context: AssignCategoryContext
@@ -111,14 +113,11 @@ struct AssignCategorySheet: View {
     @StateObject private var rates = ExchangeRateService.shared
 
     @State private var selected: String?
-    @State private var search = ""
     @State private var ruleEnabled = false
     @State private var creating: String?
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
-
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
 
     var body: some View {
         NavigationStack {
@@ -126,11 +125,7 @@ struct AssignCategorySheet: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         header
-                        if let hint = suggestion, hint.confidence >= 0.45 {
-                            suggestionRow(hint)
-                        }
-                        searchField
-                        gridSection
+                        listSection
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 8)
@@ -151,7 +146,6 @@ struct AssignCategorySheet: View {
                                      isNew: true,
                                      history: history) { finalName in
                     selected = finalName
-                    search = ""
                 }
             }
             .appAppearance()
@@ -166,9 +160,12 @@ struct AssignCategorySheet: View {
 
     private var snapshots: [ExpenseSnapshot] { history.map(\.accountingSnapshot) }
 
+    /// La sugerencia del motor, sólo si es lo bastante segura para marcarla.
     private var suggestion: CategorySuggestion? {
-        guard let merchant = context.merchant else { return nil }
-        return SuggestionEngine.suggest(for: merchant, rules: MerchantRules.all())
+        guard let merchant = context.merchant,
+              let hint = SuggestionEngine.suggest(for: merchant, rules: MerchantRules.all()),
+              hint.confidence >= 0.45 else { return nil }
+        return hint
     }
 
     /// Movimientos pasados del mismo comercio: lo que la regla reclasificaría.
@@ -177,20 +174,11 @@ struct AssignCategorySheet: View {
         return history.reduce(0) { $0 + ($1.merchant == merchant ? 1 : 0) }
     }
 
-    /// Orden estable: primero las seis más usadas, luego el resto alfabéticas.
-    /// **No** se ordena por saldo: la posición tiene que ser la misma entre
+    /// Por uso, de más a menos (empates alfabéticos). **No** se ordena por
+    /// saldo ni sube la sugerida: la posición tiene que ser la misma entre
     /// aperturas o la memoria muscular no se forma.
     private var orderedCategories: [String] {
-        let all = CategoryStyle.selectable(history: history)
-        let frequent = SuggestionEngine.frequentCategories(history: history, excluding: nil, limit: 6)
-        let rest = all.filter { !frequent.contains($0) }.sorted()
-        return frequent + rest
-    }
-
-    private var visibleCategories: [String] {
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return orderedCategories }
-        return orderedCategories.filter { $0.localizedCaseInsensitiveContains(query) }
+        CategoryStyle.selectable(history: history)
     }
 
     private func status(for category: String) -> CategoryLimitStatus {
@@ -202,7 +190,8 @@ struct AssignCategorySheet: View {
     }
 
     private func prepare() {
-        selected = context.current
+        // Sin categoría, la sugerida llega marcada: aceptarla es un toque.
+        selected = context.current ?? suggestion?.category
         ruleEnabled = false
     }
 
@@ -258,148 +247,81 @@ struct AssignCategorySheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    // MARK: - Sugerencia
+    // MARK: - Lista
 
-    /// La misma fila que la Bandeja (`2d`): si aquí se viera distinta, el
-    /// usuario tendría que aprender dos veces qué significa el rayo.
-    /// La sugerencia como acción de un toque (`4g`). En el acento y no en
-    /// verde: el verde de la app significa «dinero que entra», y aquí no entra
-    /// nada — es una propuesta.
-    private func suggestionRow(_ suggestion: CategorySuggestion) -> some View {
-        HStack(spacing: 10) {
-            Image(systemName: "bolt.fill")
-                .font(.footnote.weight(.bold))
-                .foregroundStyle(accent.color)
-
-            VStack(alignment: .leading, spacing: 1) {
-                Text(suggestion.category + " · sugerida")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(palette.label)
-                Text(suggestion.reason)
-                    .font(.caption)
-                    .foregroundStyle(palette.secondaryLabel)
-                    .lineLimit(2)
-            }
-
-            Spacer(minLength: 0)
-
-            Button { confirm(suggestion.category) } label: {
-                Text("Aplicar")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(accent.color)
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-        }
-        .padding(12)
-        .background(accent.color.opacity(scheme == .dark ? 0.16 : 0.09))
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(accent.color.opacity(0.35), lineWidth: 0.5)
-        )
-    }
-
-    // MARK: - Búsqueda
-
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(palette.secondaryLabel)
-            TextField("Buscar o crear categoría", text: $search)
-                .disableAutocorrection(true)
-                .foregroundStyle(palette.label)
-            if !search.isEmpty {
-                Button {
-                    search = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(palette.secondaryLabel)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 9)
-        .background(palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
-    }
-
-    // MARK: - Rejilla
-
-    private var gridSection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Text(gridTitle)
+    private var listSection: some View {
+        let suggested = suggestion
+        let categories = orderedCategories
+        return VStack(alignment: .leading, spacing: 9) {
+            Text(listTitle)
                 .font(.caption.weight(.medium))
                 .foregroundStyle(palette.secondaryLabel)
                 .padding(.horizontal, 4)
 
-            LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(visibleCategories, id: \.self) { category in
+            VStack(spacing: 0) {
+                ForEach(Array(categories.enumerated()), id: \.element) { index, category in
+                    if index > 0 { rowSeparator }
                     Button { select(category) } label: {
-                        CategoryLimitCell(category: category,
-                                          status: status(for: category),
-                                          color: color(of: category),
-                                          isSelected: selected == category)
+                        CategoryLimitRow(category: category,
+                                         status: status(for: category),
+                                         color: color(of: category),
+                                         isSelected: selected == category,
+                                         suggestionReason: category == suggested?.category ? suggested?.reason : nil,
+                                         accent: accent.color)
                     }
                     .buttonStyle(.plain)
                 }
 
-                newCategoryCell
+                rowSeparator
+                newCategoryRow
             }
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(palette.hairline, lineWidth: 0.5)
+            )
         }
     }
 
-    private var gridTitle: String {
-        "TODAS · SALDO DEL LÍMITE DE " + monthName.uppercased()
+    private var listTitle: String {
+        "MÁS USADAS PRIMERO · LÍMITE DE " + monthName.uppercased()
     }
 
     private var monthName: String {
         Period.spanishMonthName(for: referenceDate)
     }
 
-    private var newCategoryCell: some View {
-        Button { creating = pendingName } label: {
-            VStack(alignment: .leading, spacing: 7) {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(palette.track)
-                    .frame(width: 26, height: 26)
+    private var rowSeparator: some View {
+        Rectangle()
+            .fill(palette.separator)
+            .frame(height: 0.5)
+    }
+
+    private var newCategoryRow: some View {
+        Button { creating = "" } label: {
+            HStack(spacing: 12) {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(palette.secondaryLabel.opacity(0.5), lineWidth: 0.5)
+                    .frame(width: 34, height: 34)
                     .overlay(
                         Image(systemName: "plus")
-                            .font(.caption.weight(.bold))
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(palette.label)
                     )
-                Text(newCellTitle)
-                    .font(.footnote.weight(.bold))
+                Text("Nueva categoría")
+                    .font(.system(size: 15.5, weight: .semibold))
                     .foregroundStyle(palette.label)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.leading)
-                Text("con límite")
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(palette.secondaryLabel)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(palette.surface)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .strokeBorder(palette.secondaryLabel.opacity(0.5),
-                                  style: StrokeStyle(lineWidth: 0.5, dash: [4, 3]))
-            )
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    private var pendingName: String {
-        search.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var newCellTitle: String {
-        pendingName.isEmpty ? "Nueva" : "Crear «\(pendingName)»"
     }
 
     private func color(of category: String) -> Color {
@@ -515,74 +437,116 @@ struct AssignCategorySheet: View {
     }
 }
 
-// MARK: - Celda
+// MARK: - Fila
 
-/// Una categoría con el saldo de su límite. Fuera del cuerpo del sheet: el
-/// comprobador de tipos de Swift no termina una expresión con la rejilla y la
-/// celda juntas.
-struct CategoryLimitCell: View {
+/// Una categoría con el saldo de su límite (`1a`): ícono, nombre, saldo con
+/// una barra corta y el círculo de selección. La sugerida lleva el rayo, una
+/// línea con el porqué y el fondo con el filo del acento. Fuera del cuerpo del
+/// sheet: el comprobador de tipos de Swift no termina una expresión con la
+/// lista y la fila juntas.
+struct CategoryLimitRow: View {
 
     let category: String
     let status: CategoryLimitStatus
     let color: Color
     let isSelected: Bool
+    /// El porqué de la sugerencia; `nil` si esta fila no es la sugerida.
+    var suggestionReason: String?
+    var accent: Color
 
     @Environment(\.colorScheme) private var scheme
     private var palette: Palette { Palette(scheme) }
 
-    private var level: CategoryLimitStatus.Level { status.level }
-    private var levelColor: Color { level.color(palette) }
+    private var isSuggested: Bool { suggestionReason != nil }
+    private var levelColor: Color { status.level.color(palette) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(color.opacity(0.22))
-                .frame(width: 26, height: 26)
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(color.opacity(scheme == .dark ? 0.22 : 0.18))
+                .frame(width: 34, height: 34)
                 .overlay(
                     Image(systemName: CategoryStyle.icon(for: category))
-                        .font(.caption)
+                        .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(color)
                 )
 
-            Text(category)
-                .font(.footnote.weight(.bold))
-                .foregroundStyle(palette.label)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(category)
+                        .font(.system(size: 15.5, weight: .semibold))
+                        .foregroundStyle(palette.label)
+                        .lineLimit(1)
+                    if isSuggested {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(accent)
+                    }
+                }
 
-            Text(status.shortLabel)
-                .font(.caption2.weight(.bold))
-                .foregroundStyle(levelColor)
-                .lineLimit(1)
+                if let suggestionReason {
+                    Text("Sugerida · " + suggestionReason)
+                        .font(.system(size: 12))
+                        .foregroundStyle(accent)
+                        .lineLimit(1)
+                }
 
-            bar
+                HStack(spacing: 8) {
+                    Text(status.shortLabel)
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(levelColor)
+                        .lineLimit(1)
+                        .fixedSize()
+                    bar
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            radio
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isSelected ? color.opacity(0.16) : palette.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(isSelected ? levelColor : palette.hairline,
-                        lineWidth: isSelected ? 1.5 : 0.5)
-        )
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(isSuggested ? accent.opacity(scheme == .dark ? 0.14 : 0.08) : .clear)
+        .overlay(alignment: .leading) {
+            if isSuggested {
+                Rectangle().fill(accent).frame(width: 3)
+            }
+        }
+        .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(category + ", " + status.shortLabel)
+        .accessibilityLabel(category + ", " + status.shortLabel + (isSuggested ? ", sugerida" : ""))
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
+    /// Sin límite la barra no se dibuja, pero conserva su sitio: así el
+    /// texto de todas las filas arranca a la misma altura.
     private var bar: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(palette.track.opacity(status.hasLimit ? 1 : 0.6))
-                if status.hasLimit {
-                    Capsule()
-                        .fill(levelColor)
-                        .frame(width: max(2, geo.size.width * CGFloat(status.fraction)))
-                }
+                Capsule().fill(palette.track)
+                Capsule()
+                    .fill(levelColor)
+                    .frame(width: max(2, geo.size.width * CGFloat(status.fraction)))
             }
         }
+        .frame(maxWidth: 90)
         .frame(height: 4)
+        .opacity(status.hasLimit ? 1 : 0)
+    }
+
+    private var radio: some View {
+        ZStack {
+            Circle()
+                .strokeBorder(isSelected ? color : palette.secondaryLabel.opacity(0.45), lineWidth: 1.5)
+            if isSelected {
+                Circle().fill(color)
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: 24, height: 24)
+        .animation(.easeInOut(duration: 0.15), value: isSelected)
     }
 }

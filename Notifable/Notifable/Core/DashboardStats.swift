@@ -34,7 +34,7 @@ enum DashboardStat: String, CaseIterable, Identifiable {
         case .perDay:        return "Tu gasto promedio diario del mes."
         case .biggest:       return "El gasto más grande del mes."
         case .topDay:        return "El día del mes en que más gastaste."
-        case .noSpendStreak: return "Días seguidos sin gastar, hasta hoy."
+        case .noSpendStreak: return "Días del mes sin gastar, hasta hoy."
         case .limitsOver:    return "Categorías que pasaron su límite. Sólo con límites."
         }
     }

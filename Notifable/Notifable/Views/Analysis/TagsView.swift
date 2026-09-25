@@ -326,7 +326,7 @@ struct TagDetailView: View {
 
     private var items: [Expense] {
         let range = month.interval
-        return expenses.filter { $0.hasTag(key) && $0.date >= range.start && $0.date < range.end }
+        return expenses.filter { $0.hasTag(key) && !$0.isSplit && $0.date >= range.start && $0.date < range.end }
     }
 
     private var total: Double {

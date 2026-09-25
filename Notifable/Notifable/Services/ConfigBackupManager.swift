@@ -764,7 +764,8 @@ final class ConfigBackupManager {
                     debtSettled: e.debtSettled ? true : nil,
                     tags: e.tags.isEmpty ? nil : e.tags,
                     cardLastDigits: e.cardLastDigits, source: e.sourceBank, fxRate: e.fxRateAtCapture,
-                    debtMarkKey: nil, isFinalDebtPayment: false, createdAt: e.date))
+                    debtMarkKey: nil, isFinalDebtPayment: false, createdAt: e.date,
+                    splitOf: e.splitOf, splitIndex: e.splitOf == nil ? nil : e.splitIndex))
             }
             // Los gastos que vienen del correo no se suben: lo que viaja de
             // ellos son las ediciones que el usuario hizo, y eso lo lleva
@@ -971,6 +972,8 @@ final class ConfigBackupManager {
             // pasa por `use` igual: un respaldo de otro teléfono puede traer
             // una etiqueta que aquí todavía no existía.
             e.tags = (t.tags ?? []).compactMap { TagCatalog.shared.use($0) }
+            e.splitOf = t.splitOf
+            e.splitIndex = t.splitIndex ?? 0
             modelContext.insert(e)
             byKey[TransactionKey.key(for: e)] = e
         }
@@ -1008,6 +1011,7 @@ final class ConfigBackupManager {
         ExpenseEditStore.merge(payload.expenseEdits ?? [])
         ExpenseEditStore.apply(in: modelContext)
         IncomeLinkStore.apply(in: modelContext)
+        ExpenseSplit.reconcile(in: modelContext)
     }
 
     /// La llama `GmailSyncService` al terminar cada lectura, que es cuando los
@@ -1017,6 +1021,9 @@ final class ConfigBackupManager {
         ExpenseEditStore.captureFxRates(in: modelContext)
         ExpenseEditStore.apply(in: modelContext)
         IncomeLinkStore.apply(in: modelContext)
+        // Después de `apply`: una edición puede haber cambiado la llave de
+        // un pago, y las partes lo buscan por ella.
+        ExpenseSplit.reconcile(in: modelContext)
     }
 
     // MARK: - Decisiones que viajan en el blob de preferencias
@@ -1250,6 +1257,10 @@ struct ManualTransactionBackup: Codable {
     var debtMarkKey: String?
     var isFinalDebtPayment: Bool
     var createdAt: Date
+    /// Gasto: parte de un pago dividido, con la llave de ese pago
+    /// (`ExpenseSplit`). Opcional: los respaldos anteriores no lo traen.
+    var splitOf: String? = nil
+    var splitIndex: Int? = nil
 }
 
 /// Lo que se sube. Es también lo que se resume en la huella.

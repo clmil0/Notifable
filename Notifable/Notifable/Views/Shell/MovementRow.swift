@@ -215,10 +215,14 @@ struct MovementRow: View {
 
             // Se confirma aparte: el menú se abre con una pulsación larga y
             // un toque de más no debería bastar para perder un movimiento.
-            Button(role: .destructive) {
-                confirmsDelete = true
-            } label: {
-                Label("Eliminar", systemImage: "trash")
+            // Una parte de un pago dividido no se borra suelta —las demás
+            // dejarían de cuadrar—: se deshace la división desde su ficha.
+            if expense.splitOf == nil {
+                Button(role: .destructive) {
+                    confirmsDelete = true
+                } label: {
+                    Label("Eliminar", systemImage: "trash")
+                }
             }
         }
         .confirmationDialog("¿Eliminar movimiento?", isPresented: $confirmsDelete, titleVisibility: .visible) {

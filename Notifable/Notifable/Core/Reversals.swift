@@ -3,9 +3,9 @@ import SwiftData
 
 extension Expense {
     /// Suma como gasto: no es un traslado, ni un aviso de anulación, ni una
-    /// compra que el banco anuló. Lo que Pendientes y las listas «a
-    /// clasificar» deben mirar.
-    var countsAsSpending: Bool { !isTransfer && !isReversal && !isVoided }
+    /// compra que el banco anuló, ni un pago dividido (cuentan sus partes).
+    /// Lo que Pendientes y las listas «a clasificar» deben mirar.
+    var countsAsSpending: Bool { !isTransfer && !isReversal && !isVoided && !isSplit }
 }
 
 /// Qué compra anuló el banco.

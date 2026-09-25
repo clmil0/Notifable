@@ -42,7 +42,8 @@ struct CategoryDetailView: View {
     private func movements(in period: Period) -> [Expense] {
         let range = period.interval
         return expenses.filter {
-            $0.category == category && $0.date >= range.start && $0.date < range.end
+            // Un pago dividido no es de ninguna categoría: lo son sus partes.
+            $0.category == category && !$0.isSplit && $0.date >= range.start && $0.date < range.end
         }
     }
 

@@ -342,7 +342,9 @@ struct AccountCatalog {
     init(expenses: [Expense], incomes: [Income]) {
         var touches: [AccountTouch] = []
         touches.reserveCapacity(expenses.count + incomes.count)
-        for e in expenses {
+        // Las partes de un pago dividido repiten su origen: contarlas haría
+        // pasar un solo pago por tres.
+        for e in expenses where e.splitOf == nil {
             touches.append(AccountTouch(origin: e.originKey,
                                         payee: e.payee.map { ($0.name, $0.via) },
                                         date: e.date,

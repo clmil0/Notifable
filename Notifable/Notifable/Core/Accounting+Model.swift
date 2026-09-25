@@ -30,7 +30,9 @@ extension Expense {
             paymentsInOwnCurrency: paymentsInOwnCurrency,
             hasForeignPayments: hasForeignPayments,
             isTransfer: isTransfer,
-            isVoided: isVoided || isReversal
+            // Un pago dividido cuenta cero, como una anulación: lo que suma
+            // son sus partes, que son gastos propios.
+            isVoided: isVoided || isReversal || isSplit
         )
     }
 

@@ -94,7 +94,7 @@ struct DashboardView: View {
 
         let unclassifiedName = Accounting.unclassified
         _unclassified = Query(filter: #Predicate<Expense> {
-            $0.category == unclassifiedName && !$0.isTransfer && !$0.isVoided && !$0.isReversal
+            $0.category == unclassifiedName && !$0.isTransfer && !$0.isVoided && !$0.isReversal && !$0.isSplit
         })
     }
 
@@ -815,7 +815,7 @@ struct DashboardView: View {
             detail: "La diferencia entre tus ingresos y tus gastos de " + monthName.lowercased() + ".",
             tiles: [StatFigure(label: "Ingresos", value: Money.formatCompact(totals.income), color: palette.income),
                     StatFigure(label: "Gastos", value: Money.formatCompact(totals.spent))],
-            strip: sign + Money.formatCompact(abs(balance)).replacingOccurrences(of: "S/ ", with: ""),
+            strip: sign + Money.formatCompact(abs(balance)),
             caption: "Ingresos " + Money.formatCompact(totals.income),
             visual: .chart(StatChart(
                 series: [.init(values: incomeCumulative, role: .income, name: "Ingresos", step: true),
@@ -931,11 +931,12 @@ struct DashboardView: View {
             visual: dailyChart(s, defaultIndex: index))
     }
 
-    /// Días seguidos sin gastar hasta hoy; en un mes pasado, la más larga del
-    /// mes. Hace falta algún movimiento: sin datos, todo el mes sería racha.
+    /// Días del mes sin gastar: hasta hoy en el mes en curso, el mes entero en
+    /// uno pasado. Las rachas quedan como detalle. Hace falta algún
+    /// movimiento: sin datos, todo el mes sería «sin gastar».
     private func streakStat(_ s: MonthSeries) -> StatDetail? {
         guard !self.expenses.isEmpty else { return nil }
-        let free = s.daily.map { Money.cents($0) <= 0 }
+        let free = s.daily.prefix(s.elapsed).map { Money.cents($0) <= 0 }
 
         var current = 0
         for isFree in free.reversed() {
@@ -948,29 +949,22 @@ struct DashboardView: View {
             best = max(best, run)
         }
         let freeCount = free.filter { $0 }.count
-        let shown = isCurrentMonth ? current : best
         let days: (Int) -> String = { $0 == 1 ? "1 día" : "\($0) días" }
 
-        let detail: String
-        if !isCurrentMonth {
-            detail = "Tu racha más larga sin gastar en " + monthName.lowercased() + "."
-        } else if current == 0 {
-            detail = "Hoy ya gastaste: la racha vuelve a empezar mañana."
-        } else {
-            detail = "Días seguidos sin registrar un gasto, contando hoy."
-        }
+        let detail = isCurrentMonth
+            ? "Días de " + monthName.lowercased() + " sin registrar un gasto, contando hoy."
+            : "Días de " + monthName.lowercased() + " sin registrar un gasto."
 
         return StatDetail(
             kind: .noSpendStreak,
-            amount: days(shown),
-            amountColor: shown > 0 ? palette.income : nil,
+            amount: days(freeCount),
+            amountColor: freeCount > 0 ? palette.income : nil,
             detail: detail,
-            tiles: [StatFigure(label: isCurrentMonth ? "Mejor del mes" : "Días sin gastar",
-                             value: isCurrentMonth ? days(best) : "\(freeCount) de \(s.days.count)"),
-                    StatFigure(label: isCurrentMonth ? "Días sin gastar" : "Con gasto",
-                             value: isCurrentMonth ? "\(freeCount) de \(s.elapsed)" : "\(s.days.count - freeCount)")],
-            strip: days(shown),
-            caption: isCurrentMonth ? "Mejor: " + days(best) : "\(freeCount) días sin gastar",
+            tiles: [StatFigure(label: isCurrentMonth ? "Racha actual" : "Con gasto",
+                             value: isCurrentMonth ? days(current) : "\(free.count - freeCount)"),
+                    StatFigure(label: "Racha más larga", value: days(best))],
+            strip: days(freeCount),
+            caption: "\(freeCount) de \(free.count) días",
             visual: .days(s.days.indices.map { k in
                                 k >= s.elapsed ? .future : free[k] ? .free : .spent
                             },
@@ -1034,7 +1028,7 @@ struct DashboardView: View {
 
     private func grid(totals: PeriodTotals, expenses: [Expense], incomes: [Income]) -> some View {
         let range = month.interval
-        let movementCount = expenses.filter { !$0.isTransfer && $0.date >= range.start && $0.date < range.end }.count
+        let movementCount = expenses.filter { !$0.isTransfer && !$0.isSplit && $0.date >= range.start && $0.date < range.end }.count
             + incomes.filter { !$0.isTransfer && $0.date >= range.start && $0.date < range.end }.count
         let hasPending = !unclassified.isEmpty
 
