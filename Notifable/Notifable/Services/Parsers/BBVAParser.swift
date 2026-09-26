@@ -39,8 +39,7 @@ struct BBVAParser: BankEmailParser {
             currency = (curStr == "$" || curStr == "USD") ? "USD" : "PEN"
         }
         if let amtRange = Range(match.range(at: 2), in: cleanText) {
-            let amtStr = String(cleanText[amtRange]).replacingOccurrences(of: ",", with: ".")
-            amount = Double(amtStr) ?? 0
+            amount = Money.parse(String(cleanText[amtRange])) ?? 0
         }
         if let merRange = Range(match.range(at: 3), in: cleanText) {
             let extracted = String(cleanText[merRange]).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -173,8 +172,7 @@ struct BBVAParser: BankEmailParser {
         if let amountRegex = try? NSRegularExpression(pattern: amountPattern, options: []),
            let amtMatch = amountRegex.firstMatch(in: cleanText, options: [], range: NSRange(location: 0, length: cleanText.utf16.count)) {
             if let range = Range(amtMatch.range(at: 1), in: cleanText) {
-                let amountStr = String(cleanText[range]).replacingOccurrences(of: ",", with: ".")
-                amount = Double(amountStr) ?? 0
+                amount = Money.parse(String(cleanText[range])) ?? 0
             }
         }
         
@@ -242,7 +240,7 @@ struct BBVAParser: BankEmailParser {
             currency = (curStr == "$" || curStr == "USD") ? "USD" : "PEN"
             
             let amtRange = Range(match.range(at: 2), in: cleanText)!
-            amount = Double(String(cleanText[amtRange]).replacingOccurrences(of: ",", with: ".")) ?? 0
+            amount = Money.parse(String(cleanText[amtRange])) ?? 0
         } else {
             return nil
         }

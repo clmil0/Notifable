@@ -28,8 +28,7 @@ struct AppleParser: BankEmailParser {
             currency = (curStr == "$" || curStr == "USD") ? "USD" : "PEN"
             
             let amtRange = Range(match.range(at: 2), in: cleanText)!
-            let amtStr = String(cleanText[amtRange]).replacingOccurrences(of: ",", with: ".")
-            amount = Double(amtStr) ?? 0
+            amount = Money.parse(String(cleanText[amtRange])) ?? 0
         } else {
             return nil
         }

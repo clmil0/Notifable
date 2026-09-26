@@ -93,8 +93,9 @@ struct YapeParser: BankEmailParser {
               let amountRange = Range(amountMatch.range(at: 1), in: cleanText) else {
             return nil
         }
-        let amountStr = String(cleanText[amountRange]).replacingOccurrences(of: ",", with: ".")
-        let amount = Double(amountStr) ?? 0
+        // "1,250.00": la coma es de miles. Cambiarla por punto daba "1.250.00",
+        // que no es un número, y el gasto se guardaba en cero.
+        let amount = Money.parse(String(cleanText[amountRange])) ?? 0
         
         // Merchant
         var merchant = "Desconocido"

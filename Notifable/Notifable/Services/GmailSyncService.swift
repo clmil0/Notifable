@@ -194,7 +194,7 @@ class GmailSyncService: ObservableObject {
             }
         }
         
-        guard let token = GmailAuthService.shared.getAccessToken() else {
+        guard let token = Self.qaToken ?? GmailAuthService.shared.getAccessToken() else {
             Diagnostics.shared.log("Sync Gmail: ✗ no hay token de acceso guardado (refresh token: \(GmailAuthService.shared.hasRefreshToken ? "sí" : "no"))")
             DispatchQueue.main.async {
                 self.isSyncing = false
@@ -207,7 +207,7 @@ class GmailSyncService: ObservableObject {
         // Sin `gmail.readonly` cada lectura es un 403 seguro, y renovar no lo
         // arregla: se cortaba igual tras dos llamadas y una renovación, en
         // cada apertura y cada cuarto de hora en segundo plano.
-        if GmailAuthService.lacksGmailScope {
+        if Self.qaToken == nil, GmailAuthService.lacksGmailScope {
             Diagnostics.shared.log("Sync Gmail: omitida, Google no dio permiso para leer el correo (hay que volver a vincular)")
             DispatchQueue.main.async {
                 self.isSyncing = false
@@ -270,6 +270,13 @@ class GmailSyncService: ObservableObject {
     }
     
     private func fetchMessageList(token: String, startDate: Date? = nil, endDate: Date? = nil, completion: @escaping (Result<[[String: Any]], Error>) -> Void) {
+        #if DEBUG
+        if QAMode.isOn {
+            let list = QAMode.messageList(startDate: startDate, endDate: endDate, lastSync: lastSyncDate)
+            DispatchQueue.global().async { completion(.success(list)) }
+            return
+        }
+        #endif
         // Buscar correos dinámicamente según los bancos soportados
         let allEmails = parsers.flatMap { $0.senderEmails }
         var query = allEmails.isEmpty ? "" : allEmails.map { "from:\($0)" }.joined(separator: " OR ")
@@ -678,11 +685,19 @@ class GmailSyncService: ObservableObject {
                 let seconds = Int(Date().timeIntervalSince(runStart))
                 Diagnostics.shared.log("Sync Gmail: fin en \(seconds) s · revisados \(newMessages.count) · nuevos \(newExpensesFound) · ya importados \(alreadyImportedCount) · no reconocidos \(unrecognized) · descargas fallidas \(failedFetches)")
                 if !quiet, !messages.isEmpty {
-                    var parts = ["\(newMessages.count) correos revisados", "\(newExpensesFound) nuevos"]
-                    if alreadyImportedCount > 0 { parts.append("\(alreadyImportedCount) ya estaban") }
-                    if unrecognized > 0 { parts.append("\(unrecognized) sin reconocer") }
-                    if failedFetches > 0 { parts.append("\(failedFetches) no se pudieron descargar") }
-                    if newMessages.isEmpty { parts = ["Los \(messages.count) correos de ese periodo ya se habían leído"] }
+                    func count(_ n: Int, _ one: String, _ many: String) -> String { "\(n) " + (n == 1 ? one : many) }
+                    var parts = [count(newMessages.count, "correo revisado", "correos revisados"),
+                                 count(newExpensesFound, "nuevo", "nuevos")]
+                    if alreadyImportedCount > 0 { parts.append(count(alreadyImportedCount, "ya estaba", "ya estaban")) }
+                    if unrecognized > 0 { parts.append(count(unrecognized, "sin reconocer", "sin reconocer")) }
+                    if failedFetches > 0 { parts.append(count(failedFetches, "no se pudo descargar", "no se pudieron descargar")) }
+                    if newMessages.isEmpty {
+                        parts = [messages.count == 1 ? "El correo de ese periodo ya se había leído"
+                                                     : "Los \(messages.count) correos de ese periodo ya se habían leído"]
+                    }
+                    // Lo borrado a propósito no se vuelve a importar: que se
+                    // note, o parecería que la lectura se los saltó por error.
+                    if skippedDeleted > 0 { parts.append(count(skippedDeleted, "borrado por ti", "borrados por ti")) }
                     self?.lastRunSummary = parts.joined(separator: " · ")
                 }
                 self?.finishRun()
@@ -714,7 +729,7 @@ class GmailSyncService: ObservableObject {
     }
 
     func recoverExpenses(ids: [String]) {
-        guard let token = GmailAuthService.shared.getAccessToken() else { return }
+        guard let token = Self.qaToken ?? GmailAuthService.shared.getAccessToken() else { return }
         
         DispatchQueue.main.async {
             self.isSyncing = true
@@ -785,7 +800,7 @@ class GmailSyncService: ObservableObject {
             queue.sync {
                 UserDefaults.standard.set(processedIDs, forKey: "processedEmailIDs")
                 // Limpiamos la papelera
-                UserDefaults.standard.removeObject(forKey: "pendingRecoveryIDs")
+                DeletedEmails.clear()
             }
             self?.tidyUpAfterReading()
             DispatchQueue.main.async {
@@ -795,6 +810,15 @@ class GmailSyncService: ObservableObject {
         }
     }
     
+    /// El token de mentira del modo QA (`QAMode`); `nil` fuera de DEBUG.
+    static var qaToken: String? {
+        #if DEBUG
+        return QAMode.isOn ? QAMode.fakeToken : nil
+        #else
+        return nil
+        #endif
+    }
+
     func resetSyncState() {
         UserDefaults.standard.removeObject(forKey: "processedEmailIDs")
         UserDefaults.standard.removeObject(forKey: "lastSyncDate")
@@ -962,6 +986,13 @@ class GmailSyncService: ObservableObject {
     /// en milisegundos). Esa fecha es el respaldo cuando el parser no logra
     /// leer la del movimiento: ver `parseEmailBody`.
     private func fetchMessageDetails(id: String, token: String, completion: @escaping (String?, Date?) -> Void) {
+        #if DEBUG
+        if QAMode.isOn {
+            let mail = QAMode.email(id: id)
+            completion(mail?.body, mail?.receivedAt)
+            return
+        }
+        #endif
         guard let url = URL(string: "\(baseURL)/messages/\(id)?format=full") else {
             completion(nil, nil)
             return
@@ -1074,6 +1105,13 @@ class GmailSyncService: ObservableObject {
 
         for parser in parsers {
             if let expense = parser.parse(cleanText: cleanText) {
+                // Un monto en cero es un monto que no se pudo leer (un formato
+                // nuevo del banco, un separador inesperado): guardarlo pasaría
+                // por bueno un gasto falso. Mejor «no reconocido» en Diagnóstico.
+                guard Money.cents(expense.amount) > 0 else {
+                    Diagnostics.shared.log("Sync Gmail: \(parser.bankName) reconoció el correo pero no su monto; se descarta")
+                    continue
+                }
                 let fixed = Self.correctedDate(expense.date, receivedAt: receivedAt)
                 if fixed != expense.date {
                     Diagnostics.shared.log("Sync Gmail: \(parser.bankName) sin fecha legible, se usa la del correo")
@@ -1090,6 +1128,10 @@ class GmailSyncService: ObservableObject {
         // parseIncome cuando ningún parser lo reconoció como gasto.
         for parser in parsers {
             if let income = parser.parseIncome(cleanText: cleanText) {
+                guard Money.cents(income.amount) > 0 else {
+                    Diagnostics.shared.log("Sync Gmail: \(parser.bankName) reconoció el ingreso pero no su monto; se descarta")
+                    continue
+                }
                 income.date = Self.correctedDate(income.date, receivedAt: receivedAt)
                 return (nil, income, parser.bankName)
             }
@@ -1306,7 +1348,7 @@ extension GmailSyncService {
             DispatchQueue.main.async { self.backfillAccountData(token: token) }
             return
         }
-        guard !Self.isBackfilling, let context = modelContext else { return }
+        guard !Self.isBackfilling, Self.qaToken == nil, let context = modelContext else { return }
 
         let tried = Set(UserDefaults.standard.stringArray(forKey: Self.backfillTriedKey) ?? [])
         let descriptor = FetchDescriptor<Expense>(predicate: #Predicate { $0.emailID != nil && $0.sourceBank == nil })

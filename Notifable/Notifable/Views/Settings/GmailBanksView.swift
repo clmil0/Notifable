@@ -35,7 +35,7 @@ struct GmailBanksView: View {
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
     private var palette: Palette { Palette(scheme) }
 
-    private static let standardPeriods = [1, 3, 12]
+    private static let standardPeriods = [1, 3, 6, 12]
 
     var body: some View {
         ScrollView {
@@ -79,16 +79,15 @@ struct GmailBanksView: View {
         }
         .alert("Recuperación de Gastos", isPresented: $showRecoveryAlert) {
             Button("Sí, recuperar") {
-                let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
-                gmailSync.recoverExpenses(ids: recoveryIDs)
+                gmailSync.recoverExpenses(ids: DeletedEmails.all())
             }
-            Button("No (Descartar)") {
-                UserDefaults.standard.removeObject(forKey: "pendingRecoveryIDs")
+            Button("No, seguir sin ellos") {
+                DeletedEmails.decline()
                 startSync()
             }
             Button("Cancelar", role: .cancel) {}
         } message: {
-            Text("Has borrado elementos anteriores. ¿Quieres recuperarlos antes de continuar con la lectura?")
+            Text("Borraste movimientos que venían del correo. Si no los recuperas, seguirán borrados aunque leas su periodo.")
         }
     }
 
@@ -288,8 +287,7 @@ struct GmailBanksView: View {
 
             Button {
                 gmailSync.modelContext = modelContext
-                let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
-                if !recoveryIDs.isEmpty {
+                if !DeletedEmails.undecided().isEmpty {
                     showRecoveryAlert = true
                 } else {
                     startSync()
@@ -314,7 +312,9 @@ struct GmailBanksView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(isActive ? .white : palette.label)
                 .lineLimit(1)
-                .padding(.horizontal, 12)
+                .minimumScaleFactor(0.8)
+                .padding(.horizontal, 6)
+                .frame(maxWidth: .infinity)
                 .frame(height: 32)
                 .background(isActive ? accent.color : palette.neutralSurface)
                 .clipShape(Capsule())
@@ -337,9 +337,9 @@ struct GmailBanksView: View {
         gmailSync.syncEmails(force: true, startDate: rangeStartDate, endDate: Date())
     }
 
-    /// Abreviado para los chips: cinco opciones tienen que caber en una fila.
-    /// "3 meses" y "Personalizado" desbordaban y la fila se veía rota. El botón
-    /// de abajo sí dice el periodo completo, que es donde importa.
+    /// Cinco opciones en una fila: los chips se reparten el ancho a partes
+    /// iguales y encogen la letra antes que desbordar. El botón de abajo dice
+    /// el periodo completo, que es donde importa.
     private func periodChipLabel(_ months: Int) -> String {
         periodLabel(months)
     }

@@ -25,6 +25,10 @@ struct NotifableApp: App {
         // En `init` y no en el `.task` de la ventana: cuando Siri despierta la
         // app en segundo plano no se monta ninguna escena, y el guardado de un
         // intent también tiene que llegar a los widgets.
+        #if DEBUG
+        // Datos falsos para probar en el simulador (`-qaFakeData`).
+        MainActor.assumeIsolated { QAMode.prepare(container: AppModelContainer.shared) }
+        #endif
         StoreRevision.start()
         WidgetSnapshotWriter.shared.start(container: AppModelContainer.shared)
         // También en `init`: registrar una tarea de segundo plano después de
@@ -56,6 +60,12 @@ struct NotifableApp: App {
                 .appAppearance()
                 .task {
                     AvatarCatalog.prewarm()
+                    // En modo QA nada sale del teléfono: sin respaldo en la
+                    // nube, Amigos ni recordatorios.
+                    guard GmailSyncService.qaToken == nil else {
+                        GmailSyncService.shared.modelContext = sharedModelContainer.mainContext
+                        return
+                    }
                     Diagnostics.shared.log("Configurando respaldo y amigos")
                     // A partir de aquí la sincronización se dispara sola con
                     // cada guardado; ninguna vista tiene que avisarle de nada.
@@ -130,7 +140,7 @@ struct NotifableApp: App {
                 BackgroundSync.schedule()
             }
 
-            if newPhase == .active {
+            if newPhase == .active, GmailSyncService.qaToken == nil {
                 if GmailAuthService.shared.isAuthenticated {
                     GmailSyncService.shared.modelContext = sharedModelContainer.mainContext
                     GmailSyncService.shared.syncEmails()

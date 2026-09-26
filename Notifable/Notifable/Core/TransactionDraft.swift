@@ -338,8 +338,15 @@ extension Money {
             } else {
                 s = s.replacingOccurrences(of: ",", with: "")
             }
-        case (.some, .none):
-            s = s.replacingOccurrences(of: ",", with: ".")
+        case (.some(let c), .none):
+            // Coma de miles ("1,250", "1,250,000") o decimal ("45,50"): una
+            // coma seguida de exactamente tres cifras, o varias comas, son miles.
+            let decimals = s.distance(from: c, to: s.endIndex) - 1
+            if s.filter({ $0 == "," }).count > 1 || decimals == 3 {
+                s = s.replacingOccurrences(of: ",", with: "")
+            } else {
+                s = s.replacingOccurrences(of: ",", with: ".")
+            }
         case (.none, .some(let d)):
             // Punto usado como separador de miles: "1.200" sin decimales.
             let decimals = s.distance(from: d, to: s.endIndex) - 1

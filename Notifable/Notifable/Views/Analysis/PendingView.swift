@@ -34,6 +34,7 @@ struct PendingView: View {
     @State private var visibleCount = pageSize
     @State private var assigning: AssignTarget?
     @State private var showsBulk = false
+    @State private var confirmingDelete = false
 
     enum Scope: Hashable { case month, all }
 
@@ -99,14 +100,17 @@ struct PendingView: View {
 
     /// Porcentaje de comercios ya clasificados en el alcance visible. Es la
     /// cifra que hace que valga la pena vaciar la bandeja.
-    private func progressFraction(groupCount: Int) -> Double {
+    ///
+    /// Cuenta comercios, no grupos: un grupo es comercio × mes, y en «Todo el
+    /// historial» restar grupos de comercios daba porcentajes negativos.
+    private func progressFraction(pendingMerchants: Int) -> Double {
         let range = month.interval
         let scopeExpenses = scope == .month
             ? expenses.filter { $0.date >= range.start && $0.date < range.end }
             : expenses
         let merchants = Set(scopeExpenses.map(\.merchant))
         guard !merchants.isEmpty else { return 1 }
-        return Double(merchants.count - groupCount) / Double(merchants.count)
+        return min(max(Double(merchants.count - pendingMerchants) / Double(merchants.count), 0), 1)
     }
 
     private func suggestion(for group: Group) -> CategorySuggestion? {
@@ -118,13 +122,15 @@ struct PendingView: View {
         let visible = Array(groups.prefix(visibleCount))
         let total = Money.sum(groups) { $0.total }
         let movementCount = groups.reduce(0) { $0 + $1.expenses.count }
+        let merchantCount = Set(groups.map(\.merchant)).count
         let hasAnyPending = expenses.contains { $0.category == Accounting.unclassified && $0.countsAsSpending }
 
         TrackableScrollView(scrollToTopTrigger: $scrollToTopTrigger) {
             VStack(spacing: 0) {
                 ShellTitle(title: "Pendientes",
                            subtitle: groups.isEmpty ? nil
-                               : "\(movementCount) movimientos en \(groups.count) comercios · "
+                               : (movementCount == 1 ? "1 movimiento" : "\(movementCount) movimientos")
+                                 + (merchantCount == 1 ? " en 1 comercio · " : " en \(merchantCount) comercios · ")
                                  + Money.format(total))
 
                 if !hasAnyPending {
@@ -153,7 +159,7 @@ struct PendingView: View {
                                         title: "Este mes está al día",
                                         message: "Lo que falta clasificar es de meses anteriores. Míralo en «Todo el historial».")
                     } else {
-                        progressCard(groupCount: groups.count)
+                        progressCard(pendingMerchants: merchantCount)
                             .padding(.bottom, 12)
 
                         bulkButton
@@ -209,13 +215,24 @@ struct PendingView: View {
             // periodo bajo el dedo (se ve «Este mes está al día»).
             if chosenScope == nil { chosenScope = initialScope }
         }
+        .alert(deleteTitle, isPresented: $confirmingDelete) {
+            if deletable.isEmpty {
+                Button("Entendido", role: .cancel) {}
+            } else {
+                Button("Cancelar", role: .cancel) {}
+                Button("Eliminar", role: .destructive) { deleteSelected() }
+            }
+        } message: {
+            Text(deleteMessage)
+        }
         .sheet(isPresented: $showsBulk) {
             BulkClassifyView(onlyThisMonth: scope == .month)
         }
         .sheet(item: $assigning) { target in
-            AssignCategorySheet(context: target.context, history: expenses) { category, flag in
-                apply(category, to: target.ids, flag: flag)
-            }
+            AssignCategorySheet(context: target.context, history: expenses,
+                                onAssignRules: { category, rules in
+                apply(category, to: target.ids, rules: rules)
+            })
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
             .presentationCornerRadius(28)
@@ -224,8 +241,8 @@ struct PendingView: View {
 
     // MARK: - Progreso
 
-    private func progressCard(groupCount: Int) -> some View {
-        let fraction = progressFraction(groupCount: groupCount)
+    private func progressCard(pendingMerchants: Int) -> some View {
+        let fraction = progressFraction(pendingMerchants: pendingMerchants)
 
         return ShellCard {
             VStack(alignment: .leading, spacing: 9) {
@@ -297,23 +314,76 @@ struct PendingView: View {
         .padding(.horizontal, 6)
     }
 
+    /// Eliminar a la izquierda, pequeño y aparte; asignar sigue siendo la
+    /// acción principal. Lo que se elige en Pendientes a veces no es un gasto
+    /// que clasificar sino uno que sobra (un duplicado, una prueba).
     private var assignBar: some View {
-        Button {
-            assigning = AssignTarget(ids: selected, groups: groups)
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: "tag")
-                    .font(.system(size: 15, weight: .semibold))
-                Text("Asignar categoría a \(selected.count)")
-                    .font(.system(size: 15, weight: .semibold))
+        HStack(spacing: 10) {
+            Button { confirmingDelete = true } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(palette.negative)
+                    .frame(width: 48, height: 48)
+                    .background(palette.surface, in: Circle())
+                    .overlay(Circle().stroke(palette.hairline, lineWidth: 0.5))
+                    .shadow(color: Color.black.opacity(0.12), radius: 10, y: 5)
             }
-            .foregroundStyle(Color.white)
-            .padding(.horizontal, 22)
-            .frame(height: 48)
-            .background(accent.color, in: Capsule())
-            .shadow(color: accent.color.opacity(0.3), radius: 10, y: 5)
+            .buttonStyle(.plain)
+            .accessibilityLabel(selected.count == 1 ? "Eliminar el movimiento elegido"
+                                                    : "Eliminar los \(selected.count) movimientos elegidos")
+
+            Button {
+                assigning = AssignTarget(ids: selected, groups: groups,
+                                         earlier: Self.earlierPending(than: selected, in: expenses).count)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "tag")
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("Asignar categoría a \(selected.count)")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundStyle(Color.white)
+                .padding(.horizontal, 22)
+                .frame(height: 48)
+                .background(accent.color, in: Capsule())
+                .shadow(color: accent.color.opacity(0.3), radius: 10, y: 5)
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+    }
+
+    private var deletable: [Expense] {
+        // Una parte de una división no se borra suelta: se deshace la división.
+        expenses.filter { selected.contains($0.id) && $0.splitOf == nil }
+    }
+
+    private var deleteTitle: String {
+        let count = deletable.count
+        if count == 0 {
+            return selected.count == 1 ? "Esta parte no se borra sola" : "Estas partes no se borran solas"
+        }
+        return count == 1 ? "¿Eliminar 1 movimiento?" : "¿Eliminar \(count) movimientos?"
+    }
+
+    private var deleteMessage: String {
+        let skipped = selected.count - deletable.count
+        if deletable.isEmpty {
+            return "Es parte de un pago dividido. Para quitarla, abre el pago y usa «Deshacer división»."
+        }
+        var text = "Se borrarán de tus cuentas. Los que vinieron de un correo se pueden recuperar desde «Leer un rango pasado»."
+        if skipped > 0 {
+            text += skipped == 1 ? " Una parte de una división se queda: se quita deshaciendo la división."
+                                 : " \(skipped) partes de divisiones se quedan: se quitan deshaciendo la división."
+        }
+        return text
+    }
+
+    private func deleteSelected() {
+        let targets = deletable
+        withAnimation(.easeInOut(duration: 0.25)) {
+            for expense in targets { expense.deleteRecordingRecovery(in: modelContext) }
+            selected.removeAll()
+        }
     }
 
     // MARK: - Grupo
@@ -498,7 +568,9 @@ struct PendingView: View {
             Spacer(minLength: 6)
 
             Button {
-                apply(hint.category, to: pickedIDs(in: group), flag: false)
+                // Aceptar la sugerencia clasifica sólo lo elegido; la regla
+                // para lo que llegue se pide en la hoja («Otra»).
+                apply(hint.category, to: pickedIDs(in: group), rules: AssignCategoryRules())
             } label: {
                 Text("Sí")
                     .font(.system(size: 13, weight: .bold))
@@ -510,7 +582,9 @@ struct PendingView: View {
             .buttonStyle(.plain)
 
             Button {
-                assigning = AssignTarget(ids: pickedIDs(in: group), groups: groups)
+                let ids = pickedIDs(in: group)
+                assigning = AssignTarget(ids: ids, groups: groups,
+                                         earlier: Self.earlierPending(than: ids, in: expenses).count)
             } label: {
                 Text("Otra")
                     .font(.system(size: 13, weight: .semibold))
@@ -532,32 +606,42 @@ struct PendingView: View {
         Set(group.expenses.map(\.id)).intersection(selected)
     }
 
-    /// Un comercio elegido entero deja su regla, y `flag` («Asignar también
-    /// los anteriores», apagado por defecto) arrastra además su historial
-    /// fuera del alcance visible. Si sólo se eligieron algunos de sus
-    /// movimientos, se clasifican esos y nada más; ahí `flag` es «No volver a
-    /// preguntar» y decide si queda la regla.
-    private func apply(_ category: String, to ids: Set<UUID>, flag: Bool) {
-        for group in groups {
-            let picked = group.expenses.filter { ids.contains($0.id) }
-            guard !picked.isEmpty else { continue }
-            let whole = picked.count == group.expenses.count
+    /// Lo elegido se clasifica siempre; lo demás, sólo si se pidió en la hoja
+    /// (los dos interruptores llegan apagados): `rules.past` arrastra lo
+    /// pendiente más antiguo de esos comercios, aunque esté fuera del alcance
+    /// visible, y `rules.future` deja la regla para lo que llegue.
+    private func apply(_ category: String, to ids: Set<UUID>, rules: AssignCategoryRules) {
+        let picked = expenses.filter { ids.contains($0.id) }
+        let earlier = rules.past ? Self.earlierPending(than: ids, in: expenses) : []
 
-            if whole || flag { MerchantRules.set(category, for: group.merchant) }
-
-            let targets = whole && flag
-                ? expenses.filter { $0.merchant == group.merchant && $0.category == Accounting.unclassified }
-                : picked
-
-            for expense in targets {
-                expense.category = category
-                ExpenseEditStore.record(expense, category: category)
-            }
+        if rules.future {
+            for merchant in Set(picked.map(\.merchant)) { MerchantRules.set(category, for: merchant) }
+        }
+        for expense in picked + earlier {
+            expense.category = category
+            ExpenseEditStore.record(expense, category: category)
         }
         try? modelContext.save()
 
         withAnimation(.easeInOut(duration: 0.25)) {
             selected.subtract(ids)
+        }
+    }
+
+    /// «Los anteriores»: lo pendiente de los mismos comercios, más antiguo
+    /// que el movimiento más viejo elegido de cada uno. Por fecha y no «todo
+    /// lo demás»: lo que se dejó sin marcar en el mismo mes se dejó a propósito.
+    static func earlierPending(than ids: Set<UUID>, in expenses: [Expense]) -> [Expense] {
+        var oldest: [String: Date] = [:]
+        for expense in expenses where ids.contains(expense.id) {
+            oldest[expense.merchant] = min(oldest[expense.merchant] ?? expense.date, expense.date)
+        }
+        guard !oldest.isEmpty else { return [] }
+        return expenses.filter { expense in
+            guard !ids.contains(expense.id),
+                  expense.category == Accounting.unclassified, expense.countsAsSpending,
+                  let limit = oldest[expense.merchant] else { return false }
+            return expense.date < limit
         }
     }
 
@@ -596,10 +680,11 @@ struct PendingView: View {
     }
 
     /// Lo que la hoja de asignar necesita saber: los movimientos elegidos,
-    /// de uno o varios comercios.
+    /// de uno o varios comercios, y cuántos anteriores quedan pendientes.
     struct AssignTarget: Identifiable {
         let ids: Set<UUID>
         let groups: [Group]
+        let earlier: Int
         let id = UUID()
 
         var context: AssignCategoryContext {
@@ -609,27 +694,27 @@ struct PendingView: View {
             }
             let movements = touched.reduce(0) { $0 + $1.1.count }
             let total = Money.sum(touched.flatMap(\.1)) { Accounting.netCostInPEN($0, fallbackRate: ExchangeRateService.shared.usdToPenRate) }
+            var merchants: [String] = []
+            for (group, _) in touched where !merchants.contains(group.merchant) { merchants.append(group.merchant) }
+            let scope = AssignCategoryContext.RuleScope.pending(merchants: merchants, selected: movements, earlier: earlier)
+            let count = movements == 1 ? "1 movimiento" : "\(movements) movimientos"
 
-            if touched.count == 1, case let (group, picked)? = touched.first {
-                if picked.count == group.expenses.count {
-                    return .merchant(group.merchant, movements: movements, total: total)
-                }
-                // Parte de un comercio: sin historial que arrastrar; el
-                // interruptor ofrece la regla para lo que llegue.
+            if merchants.count == 1, let merchant = merchants.first {
+                let all = touched.reduce(0) { $0 + $1.0.expenses.count }
                 return AssignCategoryContext(
-                    merchant: group.merchant,
-                    title: Accounting.displayName(group.merchant),
-                    subtitle: "\(movements) de \(group.expenses.count) movimientos · " + Money.format(total),
+                    merchant: merchant,
+                    title: Accounting.displayName(merchant),
+                    subtitle: (movements == all ? count : "\(movements) de \(all) movimientos") + " · " + Money.format(total),
                     amount: nil,
-                    ruleScope: .forward
+                    ruleScope: scope
                 )
             }
             return AssignCategoryContext(
                 merchant: nil,
-                title: touched.count == 1 ? "1 comercio" : "\(touched.count) comercios",
-                subtitle: "\(movements) movimientos · " + Money.format(total),
+                title: "\(merchants.count) comercios",
+                subtitle: count + " · " + Money.format(total),
                 amount: total,
-                ruleScope: .past
+                ruleScope: scope
             )
         }
     }

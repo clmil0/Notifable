@@ -69,8 +69,7 @@ struct RangeSyncView: View {
                 Section {
                     Button {
                         gmailSync.modelContext = modelContext
-                        let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
-                        if !recoveryIDs.isEmpty {
+                        if !DeletedEmails.undecided().isEmpty {
                             showRecoveryAlert = true
                         } else {
                             gmailSync.syncEmails(force: true, startDate: startDate, endDate: endDate)
@@ -82,20 +81,24 @@ struct RangeSyncView: View {
                 }
             }
         }
+        .onAppear {
+            // El resumen es de la última lectura, que pudo ser hace rato y con
+            // otros datos («3 ya estaban» después de borrar esos 3 confunde).
+            if !gmailSync.isSyncing { gmailSync.lastRunSummary = nil }
+        }
         .navigationTitle("Leer un rango pasado")
         .navigationBarTitleDisplayMode(.inline)
         .alert("Recuperación de Gastos", isPresented: $showRecoveryAlert) {
             Button("Sí, recuperar") {
-                let recoveryIDs = UserDefaults.standard.stringArray(forKey: "pendingRecoveryIDs") ?? []
-                gmailSync.recoverExpenses(ids: recoveryIDs)
+                gmailSync.recoverExpenses(ids: DeletedEmails.all())
             }
-            Button("No (Descartar)") {
-                UserDefaults.standard.removeObject(forKey: "pendingRecoveryIDs")
+            Button("No, seguir sin ellos") {
+                DeletedEmails.decline()
                 gmailSync.syncEmails(force: true, startDate: startDate, endDate: endDate)
             }
             Button("Cancelar", role: .cancel) {}
         } message: {
-            Text("Has borrado elementos anteriores. ¿Quieres recuperarlos antes de continuar con la lectura?")
+            Text("Borraste movimientos que venían del correo. Si no los recuperas, seguirán borrados aunque leas su periodo.")
         }
     }
 }

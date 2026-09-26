@@ -424,7 +424,7 @@ struct DeleteDataView: View {
         defaults.removeObject(forKey: BudgetStore.tracksIncomeKey)
         defaults.removeObject(forKey: "processedEmailIDs")
         defaults.removeObject(forKey: "lastSyncDate")
-        defaults.removeObject(forKey: "pendingRecoveryIDs")
+        DeletedEmails.clear(defaults)
         for bank in BankSource.all {
             defaults.removeObject(forKey: bank.storageKey)
         }
