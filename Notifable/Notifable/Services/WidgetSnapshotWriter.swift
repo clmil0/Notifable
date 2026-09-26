@@ -227,12 +227,24 @@ final class WidgetSnapshotWriter {
             categoryNames: categoryNames,
             theme: WidgetSnapshot.Theme(accentHex: accent.color.hex(.light),
                                         accentDarkHex: accent.color.hex(.dark),
-                                        incomeHex: accent.incomeColor(.light).hex(.light)),
+                                        incomeHex: accent.incomeColor(.light).hex(.light),
+                                        appearance: widgetAppearance(defaults)),
             style: { styles[$0] ?? fallback },
             penguin: defaults.string(forKey: SocialProfileStore.Keys.penguin)
                 .flatMap { $0.data(using: .utf8) }
                 .flatMap { try? JSONDecoder().decode(PenguinLook.self, from: $0) }
         )
+    }
+
+    /// Los widgets siguen el tema de la app: forzado si se eligió claro u
+    /// oscuro, el del teléfono en «Automático». Sin clave, oscuro: lo mismo
+    /// que pinta `AppAppearanceModifier`.
+    private static func widgetAppearance(_ defaults: UserDefaults) -> String? {
+        switch AppAppearance(rawValue: defaults.string(forKey: AppAppearance.storageKey) ?? AppAppearance.dark.rawValue) {
+        case .light: return "light"
+        case .dark: return "dark"
+        case .system, nil: return nil
+        }
     }
 
     /// El próximo recurrente en los siete días siguientes que aún no se resolvió.

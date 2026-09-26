@@ -47,6 +47,9 @@ struct WidgetSnapshot: Codable, Equatable {
         var accentHex: String
         var accentDarkHex: String
         var incomeHex: String
+        /// El aspecto elegido en la app: "light", "dark" o `nil` para seguir
+        /// al del teléfono (y para los resúmenes escritos antes de existir).
+        var appearance: String? = nil
     }
 
     struct MonthSummary: Codable, Equatable {

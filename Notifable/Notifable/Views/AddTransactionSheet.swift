@@ -34,6 +34,12 @@ struct AddTransactionSheet: View {
     @State private var showDetail = false
     @State private var showQuickEditor = false
     @State private var activeQuickID: UUID?
+    /// El atajo en uso, abierto desde Detalle. Aparte de `showQuickEditor`:
+    /// ése se presenta desde la hoja principal, que con Detalle encima no
+    /// puede presentar nada.
+    @State private var editingActiveQuick: QuickExpense?
+    /// Cómo estaba el atajo al abrirlo, para llevar al gasto sólo lo que cambió.
+    @State private var quickBeforeEdit: QuickValues?
     @State private var saveAsQuick = false
     /// Gasto creado por doble toque, mientras el toast de deshacer sigue vivo.
     @State private var undoTarget: Expense?
@@ -489,6 +495,15 @@ struct AddTransactionSheet: View {
                     }
                 }
 
+                if draft.type == .gasto, let quick = activeQuick {
+                    Section {
+                        activeQuickRow(quick)
+                            .listRowInsets(EdgeInsets())
+                    } footer: {
+                        Text("Monto, moneda y categoría del atajo. Lo que cambies vale para este gasto y los próximos.")
+                    }
+                }
+
                 if draft.type == .gasto {
                     Section {
                         repeatRow
@@ -513,6 +528,9 @@ struct AddTransactionSheet: View {
                                 merchant: draft.merchant,
                                 amount: draft.amount,
                                 currency: draft.currency)
+            }
+            .sheet(item: $editingActiveQuick, onDismiss: carryQuickEdits) { quick in
+                QuickExpenseEditor(quick: quick)
             }
         }
         .tint(accentText)
@@ -955,6 +973,81 @@ struct AddTransactionSheet: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    // MARK: - Atajo en uso
+
+    struct QuickValues: Equatable {
+        var merchant: String
+        var category: String
+        var amount: Double
+        var currency: String
+
+        init(_ quick: QuickExpense) {
+            merchant = quick.merchant
+            category = quick.category
+            amount = quick.amount
+            currency = quick.currency
+        }
+    }
+
+    private var activeQuick: QuickExpense? {
+        activeQuickID.flatMap { id in quickExpenses.first { $0.id == id } }
+    }
+
+    /// El atajo que rellenó el gasto. Antes el lápiz de Detalle sólo dejaba
+    /// cambiar título y descripción, y los montos del atajo había que ir a
+    /// buscarlos a Configuración.
+    private func activeQuickRow(_ quick: QuickExpense) -> some View {
+        Button {
+            quickBeforeEdit = QuickValues(quick)
+            editingActiveQuick = quick
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "bolt.fill")
+                    .font(.system(size: 17))
+                    .foregroundStyle(palette.secondaryLabel)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Editar atajo «" + quick.label + "»")
+                        .foregroundStyle(palette.label)
+                        .lineLimit(1)
+                    Text(Money.format(quick.amount, currency: quick.currency) + " · " + quick.category)
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryLabel)
+                        .lineLimit(1)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(palette.secondaryLabel)
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Lo que cambió en el atajo pasa al gasto; lo demás se queda como el
+    /// usuario lo haya dejado (un título retocado no se pisa). Si lo borró,
+    /// el gasto deja de contar como hecho con él.
+    private func carryQuickEdits() {
+        defer { quickBeforeEdit = nil }
+        guard let quick = activeQuick else {
+            activeQuickID = nil
+            return
+        }
+        guard let before = quickBeforeEdit else { return }
+        let after = QuickValues(quick)
+        withAnimation(.easeInOut(duration: 0.2)) {
+            if after.amount != before.amount { draft.amountText = String(format: "%.2f", after.amount) }
+            if after.currency != before.currency { draft.currency = after.currency }
+            if after.merchant != before.merchant { draft.merchant = after.merchant }
+            if after.category != before.category { draft.category = after.category }
+        }
     }
 
     /// Sólo aparece cuando hay algo que guardar y no existe ya el mismo atajo.

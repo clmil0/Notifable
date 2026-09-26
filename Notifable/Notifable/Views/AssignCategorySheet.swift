@@ -33,6 +33,11 @@ struct AssignCategoryContext: Equatable, Identifiable {
         /// "Asignar también los anteriores": apagado por defecto; reclasificar
         /// el historial es algo que se pide, no que se descubre después.
         case past
+        /// Desde Pendientes: los dos a la vez y los dos apagados — «también
+        /// los anteriores» (lo pendiente de esos comercios, más antiguo que lo
+        /// elegido) y «también los que lleguen» (la regla). Vale para uno o
+        /// varios comercios.
+        case pending(merchants: [String], selected: Int, earlier: Int)
     }
 
     static func expense(_ expense: Expense) -> AssignCategoryContext {
@@ -84,6 +89,14 @@ struct AssignCategoryContext: Equatable, Identifiable {
     }
 }
 
+/// Lo que el usuario pidió además de clasificar lo elegido.
+struct AssignCategoryRules: Equatable {
+    /// Reclasificar también los anteriores del comercio.
+    var past = false
+    /// Crear la regla: lo que llegue irá directo a la categoría.
+    var future = false
+}
+
 /// `1a` — Asignar categoría: una sola columna, elegir y confirmar con el botón.
 ///
 /// Sin tarjeta de sugerencia y sin buscador. Las categorías van por uso, de
@@ -96,11 +109,24 @@ struct AssignCategorySheet: View {
 
     let context: AssignCategoryContext
     let history: [Expense]
+    private let onAssign: (String, AssignCategoryRules) -> Void
+
     /// Se llama con la categoría elegida y el estado del interruptor, cuyo
     /// significado depende de `context.ruleScope`: en `.forward`, crear la
     /// regla sólo para lo que llegue; en `.past`, reclasificar también el
     /// historial del comercio.
-    var onAssign: (String, Bool) -> Void
+    init(context: AssignCategoryContext, history: [Expense], onAssign: @escaping (String, Bool) -> Void) {
+        self.context = context
+        self.history = history
+        self.onAssign = { category, rules in onAssign(category, rules.past || rules.future) }
+    }
+
+    /// Para `.pending`: los dos interruptores por separado.
+    init(context: AssignCategoryContext, history: [Expense], onAssignRules: @escaping (String, AssignCategoryRules) -> Void) {
+        self.context = context
+        self.history = history
+        self.onAssign = onAssignRules
+    }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var scheme
@@ -114,6 +140,8 @@ struct AssignCategorySheet: View {
 
     @State private var selected: String?
     @State private var ruleEnabled = false
+    /// Sólo en `.pending`: los dos interruptores del pie.
+    @State private var rules = AssignCategoryRules()
     @State private var creating: String?
 
     private var accent: AppThemeColor { AppThemeColor(rawValue: appAccentColor) ?? .purple }
@@ -193,6 +221,7 @@ struct AssignCategorySheet: View {
         // Sin categoría, la sugerida llega marcada: aceptarla es un toque.
         selected = context.current ?? suggestion?.category
         ruleEnabled = false
+        rules = AssignCategoryRules()
     }
 
     // MARK: - Cabecera
@@ -332,7 +361,9 @@ struct AssignCategorySheet: View {
 
     private var footer: some View {
         VStack(spacing: 11) {
-            if showsRuleToggle {
+            if case let .pending(merchants, count, earlier) = context.ruleScope {
+                pendingRules(merchants: merchants, selected: count, earlier: earlier)
+            } else if showsRuleToggle {
                 ruleToggle
             }
             primaryButton
@@ -356,6 +387,7 @@ struct AssignCategorySheet: View {
         switch context.ruleScope {
         case .forward: return true
         case .past: return pastCount > 0
+        case .pending: return false
         }
     }
 
@@ -376,7 +408,7 @@ struct AssignCategorySheet: View {
     private var ruleTitle: String {
         switch context.ruleScope {
         case .forward: return "No volver a preguntar por " + context.title
-        case .past: return "Asignar también los anteriores"
+        case .past, .pending: return "Asignar también los anteriores"
         }
     }
 
@@ -384,11 +416,102 @@ struct AssignCategorySheet: View {
         switch context.ruleScope {
         case .forward:
             return "Los próximos movimientos irán a esta categoría"
-        case .past:
+        case .past, .pending:
             return pastCount == 1
                 ? "Reclasifica el movimiento de " + context.title
                 : "Reclasifica los \(pastCount) movimientos de " + context.title
         }
+    }
+
+    // MARK: - Pie de Pendientes
+
+    /// Una línea de tiempo en pequeño: «antes» ← lo elegido → «después».
+    /// Cada lado es un interruptor apagado, con su propio ícono y una frase
+    /// que dice qué movimientos toca; debajo, en una línea, el resultado de
+    /// la combinación, para no tener que deducirlo de los dos interruptores.
+    private func pendingRules(merchants: [String], selected count: Int, earlier: Int) -> some View {
+        let target = selected ?? "la categoría"
+        let who = merchants.count == 1 ? Accounting.displayName(merchants[0])
+                                       : "estos \(merchants.count) comercios"
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("APLICAR TAMBIÉN A")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(palette.secondaryLabel)
+                .padding(.horizontal, 4)
+
+            VStack(spacing: 0) {
+                pendingRuleRow(icon: "clock.arrow.circlepath",
+                               title: "Los anteriores",
+                               detail: earlier == 0
+                                   ? "No hay más de " + who + " sin categoría"
+                                   : (earlier == 1 ? "1 movimiento anterior" : "\(earlier) movimientos anteriores")
+                                       + " de " + who + " sin categoría",
+                               isOn: $rules.past,
+                               enabled: earlier > 0)
+                rowSeparator.padding(.leading, 52)
+                pendingRuleRow(icon: "arrow.forward.circle",
+                               title: "Los que lleguen",
+                               detail: "Lo próximo de " + who + " irá directo a " + target,
+                               isOn: $rules.future,
+                               enabled: true)
+            }
+            .background(palette.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(palette.hairline, lineWidth: 0.5)
+            )
+
+            Text(pendingSummary(selected: count, earlier: earlier, who: who))
+                .font(.caption)
+                .foregroundStyle(palette.secondaryLabel)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .multilineTextAlignment(.center)
+                .padding(.top, 2)
+                .contentTransition(.opacity)
+                .animation(.easeInOut(duration: 0.15), value: rules)
+        }
+    }
+
+    private func pendingRuleRow(icon: String, title: String, detail: String,
+                                isOn: Binding<Bool>, enabled: Bool) -> some View {
+        Toggle(isOn: isOn) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(isOn.wrappedValue ? palette.positive : palette.secondaryLabel)
+                    .frame(width: 28, height: 28)
+                    .background((isOn.wrappedValue ? palette.positive : palette.secondaryLabel).opacity(0.12),
+                                in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(palette.label)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(palette.secondaryLabel)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .tint(palette.positive)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.55)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    /// El resultado en una frase: con los dos apagados, sólo lo elegido.
+    private func pendingSummary(selected count: Int, earlier: Int, who: String) -> String {
+        let past = rules.past && earlier > 0
+        let chosen = count == 1 ? "el movimiento elegido"
+                   : past ? "los \(count) elegidos" : "los \(count) movimientos elegidos"
+        var text = (past || rules.future ? "Se clasifica" : "Solo se clasifica")
+            + (count == 1 ? " " : "n ") + chosen
+        if past { text += " y \(earlier) anterior" + (earlier == 1 ? "" : "es") }
+        if rules.future { text += ", y lo próximo de " + who + " ya vendrá clasificado" }
+        return text + "."
     }
 
     private var primaryButton: some View {
@@ -432,7 +555,15 @@ struct AssignCategorySheet: View {
     /// límite: avisar antes convertiría el límite en un obstáculo. El aviso va
     /// después, en el toast que compone quien llama.
     private func confirm(_ category: String) {
-        onAssign(category, ruleEnabled && context.merchant != nil)
+        if case .pending = context.ruleScope {
+            onAssign(category, rules)
+        } else {
+            let on = ruleEnabled && context.merchant != nil
+            switch context.ruleScope {
+            case .forward: onAssign(category, AssignCategoryRules(future: on))
+            case .past, .pending: onAssign(category, AssignCategoryRules(past: on))
+            }
+        }
         dismiss()
     }
 }

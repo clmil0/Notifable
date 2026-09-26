@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import WidgetKit
 
 // MARK: - Timeline
@@ -150,24 +151,42 @@ extension Color {
     }
 }
 
-/// La paleta crema de `Widgets AgruPay.dc.html`. Siempre la clara, también con
-/// el teléfono en modo oscuro: el widget se ve igual en los dos.
+extension UIColor {
+    convenience init(hex: String) {
+        let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        let value = UInt64(clean, radix: 16) ?? 0x808080
+        self.init(red: CGFloat((value >> 16) & 0xFF) / 255,
+                  green: CGFloat((value >> 8) & 0xFF) / 255,
+                  blue: CGFloat(value & 0xFF) / 255,
+                  alpha: 1)
+    }
+}
+
+/// La paleta crema de `Widgets AgruPay.dc.html` y su versión oscura: un café
+/// casi negro con la tinta crema, para que el widget no sea una placa clara en
+/// una pantalla de inicio oscura. Cuál se pinta lo decide el esquema que fija
+/// `widgetBackground` — el tema de la app, o el del teléfono en «Automático».
 enum WidgetPalette {
-    static let background = Color(hex: "FDF8F0")
-    static let ink = Color(hex: "2B2621")
+    static let background = adaptive("FDF8F0", dark: "1E1A16")
+    static let ink = adaptive("2B2621", dark: "F4ECDF")
     /// Las etiquetas en versalitas ("HOY TE QUEDAN").
-    static let label = Color(hex: "7A5F2C")
-    static let secondary = Color(hex: "6B6056")
-    static let track = Color(hex: "EADFCB")
-    static let idleBar = Color(hex: "E4D9C6")
-    static let amber = Color(hex: "C88A2E")
-    static let tile = Color(hex: "F4EADA")
-    static let curve = Color(hex: "F7EFE2")
-    static let incomeTile = Color(hex: "DCE8DD")
-    static let income = Color(hex: "2F6640")
-    static let over = Color(hex: "C2452D")
+    static let label = adaptive("7A5F2C", dark: "CFAE6C")
+    static let secondary = adaptive("6B6056", dark: "B2A596")
+    static let track = adaptive("EADFCB", dark: "3A322A")
+    static let idleBar = adaptive("E4D9C6", dark: "40372E")
+    static let amber = adaptive("C88A2E", dark: "E3A549")
+    static let tile = adaptive("F4EADA", dark: "2A241F")
+    static let curve = adaptive("F7EFE2", dark: "26211C")
+    static let incomeTile = adaptive("DCE8DD", dark: "1F3326")
+    static let income = adaptive("2F6640", dark: "7CC592")
+    static let over = adaptive("C2452D", dark: "EA6A4F")
     /// El pingüino dorado de StandBy.
     static let standByGold = Color(hex: "E8B25C")
+
+    private static func adaptive(_ light: String, dark: String) -> Color {
+        let light = UIColor(hex: light), dark = UIColor(hex: dark)
+        return Color(UIColor { $0.userInterfaceStyle == .dark ? dark : light })
+    }
 }
 
 extension WidgetDerived.Status {
@@ -246,6 +265,7 @@ struct CornerPenguin {
 
 private struct WidgetCanvas: View {
     let corner: CornerPenguin?
+    let scheme: ColorScheme
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -257,6 +277,32 @@ private struct WidgetCanvas: View {
                     .offset(x: corner.size * 0.17, y: corner.size * 0.21)
             }
         }
+        // También aquí: el fondo del contenedor no siempre hereda el entorno
+        // del contenido.
+        .environment(\.colorScheme, scheme)
+    }
+}
+
+/// El esquema del widget: el que eligió la app, o el del teléfono.
+private struct WidgetScheme: ViewModifier {
+    let corner: CornerPenguin?
+    @Environment(\.colorScheme) private var system
+
+    private var scheme: ColorScheme {
+        // El tema viaja en el resumen: cambiarlo en la app reescribe el JSON
+        // y eso es lo que recarga los widgets.
+        switch WidgetSnapshotStore.load()?.theme.appearance {
+        case "light": return .light
+        case "dark": return .dark
+        default: return system
+        }
+    }
+
+    func body(content: Content) -> some View {
+        let scheme = self.scheme
+        content
+            .containerBackground(for: .widget) { WidgetCanvas(corner: corner, scheme: scheme) }
+            .environment(\.colorScheme, scheme)
     }
 }
 
@@ -394,13 +440,13 @@ struct EmptySnapshotView: View {
 }
 
 extension View {
-    /// Fondo crema del diseño. En los modos teñido y transparente, y en
-    /// StandBy, el sistema lo quita — y con él al pingüino de la esquina.
+    /// Fondo del diseño, crema o café oscuro según el tema. En los modos
+    /// teñido y transparente, y en StandBy, el sistema lo quita — y con él al
+    /// pingüino de la esquina.
     ///
-    /// Fija el esquema claro: la paleta ya no cambia, pero así tampoco lo hacen
-    /// las piezas del sistema (gráficos, `ProgressView`, colores semánticos).
+    /// Fija el esquema, no sólo la paleta: así las piezas del sistema
+    /// (gráficos, `ProgressView`, colores semánticos) van con el mismo tono.
     func widgetBackground(_ corner: CornerPenguin? = nil) -> some View {
-        containerBackground(for: .widget) { WidgetCanvas(corner: corner) }
-            .environment(\.colorScheme, .light)
+        modifier(WidgetScheme(corner: corner))
     }
 }
